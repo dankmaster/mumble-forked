@@ -13919,6 +13919,7 @@ void MainWindow::cancelPersistentChatPreviewNetworkRequests(const QString &previ
 
 	for (const QString &invalidatedPreviewKey : std::as_const(invalidatedPreviewKeys)) {
 		m_persistentChatPreviews.remove(invalidatedPreviewKey);
+		m_deferredModernShellPreviewUpdateKeys.remove(invalidatedPreviewKey);
 		m_pendingPersistentChatInstagramMetadataRequests.remove(invalidatedPreviewKey);
 		m_pendingPersistentChatTikTokMetadataRequests.remove(invalidatedPreviewKey);
 		m_pendingPersistentChatFacebookMetadataRequests.remove(invalidatedPreviewKey);
@@ -13933,6 +13934,7 @@ void MainWindow::removePersistentChatPreview(const QString &previewKey) {
 	}
 	cancelPersistentChatPreviewNetworkRequests(previewKey);
 	m_persistentChatPreviews.remove(previewKey);
+	m_deferredModernShellPreviewUpdateKeys.remove(previewKey);
 	m_pendingPersistentChatInstagramMetadataRequests.remove(previewKey);
 	m_pendingPersistentChatTikTokMetadataRequests.remove(previewKey);
 	m_pendingPersistentChatFacebookMetadataRequests.remove(previewKey);
@@ -25397,6 +25399,137 @@ void MainWindow::evictModernShellMessageDtoCacheForMessage(const MumbleProto::Ch
 	}
 }
 
+mumble::modernshell::PreviewPublicationInput MainWindow::modernShellPreviewPublicationInput(
+	const PersistentChatPreview &preview) const {
+	using mumble::modernshell::ModernShellPreviewPublicationPolicy;
+	using mumble::modernshell::PreviewArtworkCandidate;
+	using mumble::modernshell::PreviewSelectedMediaFingerprint;
+
+	mumble::modernshell::PreviewPublicationInput input;
+	input.corePending = !preview.metadataFinished || !preview.thumbnailFinished
+		|| !preview.thumbnailRequestSource.isEmpty();
+	if (preview.siteSnapshotRequested && !preview.siteSnapshotFinished) {
+		++input.fanoutPendingUnits;
+	}
+	input.fanoutPendingUnits += ModernShellPreviewPublicationPolicy::remotePendingUnits(
+		preview.remoteMediaRequested, preview.remoteMediaPipelineStarted, preview.remoteMediaFinished);
+	if (preview.mediaImageProviderRequested && !preview.mediaImageProviderFinished) {
+		++input.fanoutPendingUnits;
+	}
+	for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
+		if (item.imageProviderRequested && !item.imageProviderFinished) {
+			++input.fanoutPendingUnits;
+		}
+	}
+	for (auto managedIt = preview.metadataImages.cbegin(); managedIt != preview.metadataImages.cend();
+		 ++managedIt) {
+		if (managedIt->requested && !managedIt->finished) {
+			++input.fanoutPendingUnits;
+		}
+	}
+
+	const int selectedMediaIndex = ModernShellPreviewPublicationPolicy::firstLogicalSlot(
+		static_cast< int >(preview.mediaItems.size()), [&preview](const int index) {
+			return !preview.mediaItems[static_cast< std::size_t >(index)].url.trimmed().isEmpty();
+		});
+	const auto setSelected = [&](const PreviewSelectedMediaFingerprint &fingerprint,
+								 const QString &managedSource, const bool managedAnimated) {
+		input.selectedFingerprint = fingerprint;
+		input.selectedManagedRenderSource = managedSource;
+		input.selectedManagedAnimated = managedAnimated;
+		if (input.corePending || preview.failed || !m_qmlShellHost || !m_qmlShellHost->imagePipeline()
+			|| !ModernShellPreviewPublicationPolicy::isManagedRenderSource(managedSource, managedAnimated)) {
+			return;
+		}
+		// containsSource is both the authoritative membership check and an LRU
+		// touch. Keep it adjacent to the policy input so a remote URL can never be
+		// mistaken for a render-ready managed source.
+		input.selectedManagedRenderSourceVerified =
+			m_qmlShellHost->imagePipeline()->containsSource(managedSource);
+	};
+	const auto isImageMedia = [](const QString &kindValue, const QString &mimeValue) {
+		const QString kind = kindValue.trimmed().toLower();
+		return kind == QLatin1String("image") || kind == QLatin1String("gif")
+			|| mimeValue.trimmed().toLower().startsWith(QLatin1String("image/"));
+	};
+	constexpr int TopLevelMediaLogicalSlot = 0x3ffffffe;
+	constexpr int TopLevelThumbnailLogicalSlot = 0x3fffffff;
+	if (selectedMediaIndex >= 0) {
+		const PersistentChatPreviewMediaItem &selected =
+			preview.mediaItems[static_cast< std::size_t >(selectedMediaIndex)];
+		if (isImageMedia(selected.kind, selected.mime)) {
+			setSelected(PreviewSelectedMediaFingerprint { selectedMediaIndex,
+							selected.imageProviderSourceIdentity, selected.imageProviderRequestToken,
+							selectedMediaIndex, selected.imageProviderSourceIdentity,
+							selected.imageProviderRequestToken },
+						selected.imageProviderUrl,
+						selected.imageProviderAnimated);
+			return input;
+		}
+
+		const auto artworkCandidate = [&](const QString &field, const QString &rawSource) {
+			PreviewArtworkCandidate candidate;
+			const QString source = rawSource.trimmed();
+			if (source.isEmpty()) return candidate;
+			candidate.logicalSlot = selectedMediaIndex;
+			candidate.sourceIdentity = source;
+			const auto managedIt =
+				preview.metadataImages.constFind(persistentChatMediaItemImageKey(selectedMediaIndex, field));
+			if (managedIt != preview.metadataImages.cend() && managedIt->source == source) {
+				candidate.requestToken = managedIt->requestToken;
+				candidate.managedRenderSource = managedIt->providerUrl;
+				candidate.terminalFailure = managedIt->finished && managedIt->providerUrl.isEmpty();
+			}
+			return candidate;
+		};
+		const PreviewArtworkCandidate poster =
+			artworkCandidate(QStringLiteral("poster"), selected.poster);
+		const PreviewArtworkCandidate thumbnail =
+			artworkCandidate(QStringLiteral("thumbnail"), selected.thumbnail);
+		PreviewArtworkCandidate topThumbnail;
+		if (!preview.thumbnailProviderSourceIdentity.isEmpty()) {
+			topThumbnail.logicalSlot = TopLevelThumbnailLogicalSlot;
+			topThumbnail.sourceIdentity = preview.thumbnailProviderSourceIdentity;
+			topThumbnail.requestToken = preview.thumbnailProviderRequestToken;
+			topThumbnail.managedRenderSource = preview.thumbnailProviderUrl;
+		}
+		const auto selection = ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+			poster, thumbnail, topThumbnail);
+		if (selection.fingerprint.logicalSlot >= 0) {
+			// The highest-priority raw artwork owns the hydration epoch even after
+			// a terminal provider miss. The render generation independently follows
+			// the DTO/QML-visible ready order. A
+			// pending poster therefore cannot hide a ready thumbnail or retained
+			// top-level thumbnail, and its later completion does not rearm a second
+			// selected publication.
+			setSelected(selection.fingerprint, selection.managedRenderSource, false);
+			return input;
+		}
+	}
+
+	// Reserved slots mirror RichPreviewCard's fallback synthesis after the
+	// normalized media collection is empty: top-level image media first, then
+	// the retained preview thumbnail for video/audio or thumbnail-only cards.
+	if (selectedMediaIndex < 0 && isImageMedia(preview.mediaKind, preview.mediaMime)
+		&& !preview.mediaImageProviderSource.isEmpty()) {
+		setSelected(PreviewSelectedMediaFingerprint { TopLevelMediaLogicalSlot,
+						preview.mediaImageProviderSource, preview.mediaImageProviderRequestToken,
+						TopLevelMediaLogicalSlot, preview.mediaImageProviderSource,
+						preview.mediaImageProviderRequestToken },
+					preview.mediaImageProviderUrl,
+					preview.mediaImageProviderAnimated);
+		return input;
+	}
+	if (!preview.thumbnailProviderSourceIdentity.isEmpty()) {
+		setSelected(PreviewSelectedMediaFingerprint { TopLevelThumbnailLogicalSlot,
+						preview.thumbnailProviderSourceIdentity, preview.thumbnailProviderRequestToken,
+						TopLevelThumbnailLogicalSlot, preview.thumbnailProviderSourceIdentity,
+						preview.thumbnailProviderRequestToken },
+					preview.thumbnailProviderUrl, false);
+	}
+	return input;
+}
+
 void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey) {
 	if (previewKey.isEmpty()) {
 		return;
@@ -25405,31 +25538,34 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 	// thumbnail, poster, gallery images, paired audio). Publishing every
 	// intermediate state makes QML repeatedly rebuild the same variable-height
 	// rich card and can monopolize the GUI thread during cold channel entry.
-	// Start the bounded image-provider work here, then expose one stable DTO once
-	// the currently known pipeline has quiesced. Every completion path calls this
-	// function again, so the final stage always schedules the visible update.
+	// Start the bounded image-provider work here, expose at most one render-ready
+	// selected-media stage during the hydration epoch, then publish one final DTO
+	// when the currently known pipeline has quiesced. Every completion path calls
+	// this function again so the final stage is never inferred from timing alone.
 	ensurePersistentChatPreviewImageProviders(previewKey);
-	const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
-	if (previewIt != m_persistentChatPreviews.cend()) {
-		const PersistentChatPreview &preview = previewIt.value();
-		bool pipelinePending = !preview.metadataFinished || !preview.thumbnailFinished
-			|| (preview.siteSnapshotRequested && !preview.siteSnapshotFinished)
-			|| (preview.remoteMediaRequested && !preview.remoteMediaFinished)
-			|| !preview.thumbnailRequestSource.isEmpty()
-			|| (preview.mediaImageProviderRequested && !preview.mediaImageProviderFinished);
-		for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
-			pipelinePending = pipelinePending
-				|| (item.imageProviderRequested && !item.imageProviderFinished);
-		}
-		for (auto managedIt = preview.metadataImages.cbegin();
-			 managedIt != preview.metadataImages.cend(); ++managedIt) {
-			pipelinePending = pipelinePending || (managedIt->requested && !managedIt->finished);
-		}
-		if (pipelinePending) {
-			mumble::chatperf::recordValue("qml.chat.preview_update.pipeline_coalesced", 1);
-			return;
-		}
+	auto previewIt = m_persistentChatPreviews.find(previewKey);
+	if (previewIt == m_persistentChatPreviews.end()) return;
+	PersistentChatPreview &preview = previewIt.value();
+	const mumble::modernshell::PreviewPublicationInput input = modernShellPreviewPublicationInput(preview);
+	const quint64 previousGeneration = preview.modernShellPublicationPolicy.generation();
+	const mumble::modernshell::PreviewPublicationDecision decision =
+		preview.modernShellPublicationPolicy.decide(input);
+	if (preview.modernShellPublicationPolicy.generation() != previousGeneration) {
+		preview.modernShellPublicationTicket.clear();
 	}
+	if (decision == mumble::modernshell::PreviewPublicationDecision::Hold) {
+		mumble::chatperf::recordValue("qml.chat.preview_update.pipeline_coalesced", 1);
+		return;
+	}
+	preview.modernShellPublicationTicket = mumble::modernshell::PreviewPublicationTicket {
+		decision,
+		preview.modernShellPublicationPolicy.generation(),
+		preview.modernShellPublicationPolicy.selectedFingerprint(),
+		decision == mumble::modernshell::PreviewPublicationDecision::PublishSelected
+			? input.selectedManagedRenderSource : QString(),
+		decision == mumble::modernshell::PreviewPublicationDecision::PublishSelected
+			&& input.selectedManagedAnimated
+	};
 	m_deferredModernShellPreviewUpdateKeys.insert(previewKey);
 	if (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy()) {
 		mumble::chatperf::recordValue("qml.chat.preview_update.deferred_source", 1);
@@ -25439,7 +25575,8 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 	scheduleDeferredModernShellPreviewUpdateDrain();
 }
 
-void MainWindow::applyModernShellPreviewUpdateForKey(const QString &previewKey) {
+bool MainWindow::applyModernShellPreviewUpdateForKey(const QString &previewKey) {
+	bool applied = false;
 	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
 		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
 		if (!messagePreviewKey || *messagePreviewKey != previewKey) {
@@ -25448,6 +25585,7 @@ void MainWindow::applyModernShellPreviewUpdateForKey(const QString &previewKey) 
 
 		evictModernShellMessageDtoCacheForMessage(message);
 		publishQmlChatMessage(message);
+		applied = true;
 	}
 	for (const ModernDirectMessageConversation &conversation : std::as_const(m_modernDirectMessageConversations)) {
 		for (const ModernDirectMessageEntry &entry : conversation.messages) {
@@ -25456,8 +25594,10 @@ void MainWindow::applyModernShellPreviewUpdateForKey(const QString &previewKey) 
 			if (!messagePreviewKey || *messagePreviewKey != previewKey) continue;
 			evictModernShellMessageDtoCacheForMessage(*entry.persistentMessage);
 			publishQmlDirectMessageEntryUpdate(conversation.peerSession, entry);
+			applied = true;
 		}
 	}
+	return applied;
 }
 
 void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
@@ -25492,7 +25632,41 @@ void MainWindow::drainDeferredModernShellPreviewUpdates() {
 	const QString previewKey = *it;
 	m_deferredModernShellPreviewUpdateKeys.erase(it);
 	mumble::chatperf::recordValue("qml.chat.preview_update.deferred_source.drain", 1);
-	applyModernShellPreviewUpdateForKey(previewKey);
+	ensurePersistentChatPreviewImageProviders(previewKey);
+	auto previewIt = m_persistentChatPreviews.find(previewKey);
+	if (previewIt != m_persistentChatPreviews.end()) {
+		PersistentChatPreview &preview = previewIt.value();
+		const mumble::modernshell::PreviewPublicationTicket ticket = preview.modernShellPublicationTicket;
+		const mumble::modernshell::PreviewPublicationInput input = modernShellPreviewPublicationInput(preview);
+		const bool actionStillReady = ticket.isReadyFor(input);
+		if (ticket.isValid()
+			&& preview.modernShellPublicationPolicy.canApplyScheduled(
+				ticket.decision, ticket.generation, ticket.selectedFingerprint)
+			&& actionStillReady) {
+			const bool applied = applyModernShellPreviewUpdateForKey(previewKey);
+			previewIt = m_persistentChatPreviews.find(previewKey);
+			if (previewIt != m_persistentChatPreviews.end()
+				&& previewIt->modernShellPublicationTicket.generation == ticket.generation
+				&& previewIt->modernShellPublicationTicket.decision == ticket.decision
+				&& previewIt->modernShellPublicationTicket.selectedFingerprint == ticket.selectedFingerprint) {
+				if (applied) {
+					previewIt->modernShellPublicationPolicy.markScheduledApplied(
+						ticket.decision, ticket.generation, ticket.selectedFingerprint);
+				} else {
+					previewIt->modernShellPublicationPolicy.cancelScheduled(
+						ticket.decision, ticket.generation, ticket.selectedFingerprint);
+				}
+				previewIt->modernShellPublicationTicket.clear();
+			}
+		} else if (ticket.isValid()) {
+			preview.modernShellPublicationPolicy.cancelScheduled(
+				ticket.decision, ticket.generation, ticket.selectedFingerprint);
+			preview.modernShellPublicationTicket.clear();
+			publishModernShellPreviewUpdateForKey(previewKey);
+		} else {
+			preview.modernShellPublicationTicket.clear();
+		}
+	}
 	scheduleDeferredModernShellPreviewUpdateDrain();
 }
 
@@ -33619,6 +33793,56 @@ void MainWindow::applyPersistentChatListingMediaItems(PersistentChatPreview &pre
 	}
 }
 
+quint64 MainWindow::nextPersistentChatPreviewImageRequestToken() {
+	++m_persistentChatPreviewImageRequestToken;
+	if (m_persistentChatPreviewImageRequestToken == 0) {
+		++m_persistentChatPreviewImageRequestToken;
+	}
+	return m_persistentChatPreviewImageRequestToken;
+}
+
+bool MainWindow::persistentChatPreviewImageRequestMatches(const QString &previewKey, const int mediaItemIndex,
+											const QString &sourceIdentity, const quint64 requestToken) const {
+	const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
+	if (previewIt == m_persistentChatPreviews.cend()) return false;
+	if (mediaItemIndex < 0) {
+		return mumble::modernshell::ModernShellPreviewPublicationPolicy::completionMatches(
+			previewIt->mediaImageProviderSource, previewIt->mediaImageProviderRequestToken,
+			sourceIdentity, requestToken);
+	}
+	const std::size_t index = static_cast< std::size_t >(mediaItemIndex);
+	if (index >= previewIt->mediaItems.size()) return false;
+	const PersistentChatPreviewMediaItem &item = previewIt->mediaItems[index];
+	return mumble::modernshell::ModernShellPreviewPublicationPolicy::completionMatches(
+		item.imageProviderSourceIdentity, item.imageProviderRequestToken, sourceIdentity, requestToken);
+}
+
+bool MainWindow::persistentChatPreviewMetadataImageRequestMatches(
+	const QString &previewKey, const QString &metadataKey, const QString &sourceIdentity,
+	const quint64 requestToken) const {
+	const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
+	if (previewIt == m_persistentChatPreviews.cend()) return false;
+	const auto managedIt = previewIt->metadataImages.constFind(metadataKey);
+	if (managedIt == previewIt->metadataImages.cend()
+		|| !mumble::modernshell::ModernShellPreviewPublicationPolicy::completionMatches(
+			managedIt->source, managedIt->requestToken, sourceIdentity, requestToken)) {
+		return false;
+	}
+	if (!isPersistentChatMediaItemImageKey(metadataKey)) {
+		return previewIt->metadata.value(metadataKey).toString().trimmed() == sourceIdentity;
+	}
+	for (int index = 0; index < static_cast< int >(previewIt->mediaItems.size()); ++index) {
+		const PersistentChatPreviewMediaItem &item = previewIt->mediaItems[static_cast< std::size_t >(index)];
+		if (metadataKey == persistentChatMediaItemImageKey(index, QStringLiteral("poster"))) {
+			return item.poster.trimmed() == sourceIdentity;
+		}
+		if (metadataKey == persistentChatMediaItemImageKey(index, QStringLiteral("thumbnail"))) {
+			return item.thumbnail.trimmed() == sourceIdentity;
+		}
+	}
+	return false;
+}
+
 void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previewKey) {
 	auto previewIt = m_persistentChatPreviews.find(previewKey);
 	if (previewIt == m_persistentChatPreviews.end() || !m_qmlShellHost || !m_qmlShellHost->imagePipeline()) {
@@ -33628,10 +33852,27 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 	PersistentChatPreview &preview = previewIt.value();
 	const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost->imagePipeline();
 	if (!preview.thumbnailImage.isNull()) {
+		const qint64 imageCacheKey = preview.thumbnailImage.cacheKey();
+		if (preview.thumbnailProviderImageCacheKey != imageCacheKey
+			|| preview.thumbnailProviderSourceIdentity.isEmpty()) {
+			preview.thumbnailProviderImageCacheKey = imageCacheKey;
+			preview.thumbnailProviderSourceIdentity =
+				previewKey + QStringLiteral(":thumbnail:") + QString::number(imageCacheKey);
+			preview.thumbnailProviderRequestToken = nextPersistentChatPreviewImageRequestToken();
+			preview.thumbnailProviderUrl.clear();
+		}
+		if (!preview.thumbnailProviderUrl.isEmpty()
+			&& !pipeline->containsSource(preview.thumbnailProviderUrl)) {
+			preview.thumbnailProviderUrl.clear();
+			preview.thumbnailProviderRequestToken = nextPersistentChatPreviewImageRequestToken();
+		}
 		preview.thumbnailProviderUrl =
 			pipeline->registerImage(preview.thumbnailImage, previewKey + QStringLiteral(":thumbnail"));
 	} else {
 		preview.thumbnailProviderUrl.clear();
+		preview.thumbnailProviderSourceIdentity.clear();
+		preview.thumbnailProviderImageCacheKey = 0;
+		preview.thumbnailProviderRequestToken = 0;
 	}
 
 	const auto isPipelineUrl = [](const QString &source) {
@@ -33663,11 +33904,15 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 		if (managed.source != source) {
 			managed.source = source;
 			managed.providerUrl.clear();
+			managed.requestToken = nextPersistentChatPreviewImageRequestToken();
 			managed.requested = false;
 			managed.finished  = false;
+		} else if (managed.requestToken == 0) {
+			managed.requestToken = nextPersistentChatPreviewImageRequestToken();
 		}
 		if (!managed.providerUrl.isEmpty() && !pipeline->containsSource(managed.providerUrl)) {
 			managed.providerUrl.clear();
+			managed.requestToken = nextPersistentChatPreviewImageRequestToken();
 			managed.requested = false;
 			managed.finished  = false;
 		}
@@ -33702,7 +33947,7 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 			&& isSafePreviewTarget(requestUrl)) {
 			managed.requested = true;
 			requestPersistentChatPreviewMetadataImageProvider(
-				previewKey, metadataKey, source, requestUrl);
+				previewKey, metadataKey, source, managed.requestToken, requestUrl);
 		} else {
 			managed.finished = true;
 		}
@@ -33713,6 +33958,8 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 		if (preview.mediaImageProviderSource != source) {
 			preview.mediaImageProviderSource = source;
 			preview.mediaImageProviderUrl.clear();
+			preview.mediaImageProviderRequestToken =
+				source.isEmpty() ? 0 : nextPersistentChatPreviewImageRequestToken();
 			preview.mediaImageProviderRequested = false;
 			preview.mediaImageProviderFinished  = false;
 			preview.mediaImageProviderAnimated  = false;
@@ -33720,24 +33967,27 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 		if (!preview.mediaImageProviderUrl.isEmpty()
 			&& !pipeline->containsSource(preview.mediaImageProviderUrl)) {
 			preview.mediaImageProviderUrl.clear();
+			preview.mediaImageProviderRequestToken = nextPersistentChatPreviewImageRequestToken();
 			preview.mediaImageProviderRequested = false;
 			preview.mediaImageProviderFinished  = false;
 			preview.mediaImageProviderAnimated  = false;
 		}
-		if (isPipelineUrl(source)) {
+		if (isPipelineUrl(source) && pipeline->containsSource(source)) {
 			preview.mediaImageProviderUrl       = source;
 			preview.mediaImageProviderFinished  = true;
 			preview.mediaImageProviderRequested = false;
 			preview.mediaImageProviderAnimated  = false;
 		} else if (source.startsWith(QLatin1String("data:"), Qt::CaseInsensitive)
-				   && !preview.mediaImageProviderFinished) {
+				   && !preview.mediaImageProviderRequested && !preview.mediaImageProviderFinished) {
 			preview.mediaImageProviderRequested = true;
-			registerPersistentChatPreviewDataImageProvider(previewKey, -1, source, preview.mediaMime);
+			registerPersistentChatPreviewDataImageProvider(
+				previewKey, -1, source, preview.mediaImageProviderRequestToken, preview.mediaMime);
 		} else if (!preview.mediaImageProviderRequested && !preview.mediaImageProviderFinished) {
 			const QUrl mediaUrl(source);
 			if (mediaUrl.scheme() == QLatin1String("https") && isSafePreviewTarget(mediaUrl)) {
 				preview.mediaImageProviderRequested = true;
-				requestPersistentChatPreviewImageProvider(previewKey, -1, source, mediaUrl, preview.mediaMime);
+				requestPersistentChatPreviewImageProvider(
+					previewKey, -1, source, preview.mediaImageProviderRequestToken, mediaUrl, preview.mediaMime);
 			} else {
 				preview.mediaImageProviderFinished = true;
 			}
@@ -33745,6 +33995,7 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 	} else {
 		preview.mediaImageProviderUrl.clear();
 		preview.mediaImageProviderSource.clear();
+		preview.mediaImageProviderRequestToken = 0;
 		preview.mediaImageProviderRequested = false;
 		preview.mediaImageProviderFinished  = false;
 		preview.mediaImageProviderAnimated  = false;
@@ -33761,11 +34012,15 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 		if (managed.source != source) {
 			managed.source = source;
 			managed.providerUrl.clear();
+			managed.requestToken = nextPersistentChatPreviewImageRequestToken();
 			managed.requested = false;
 			managed.finished = false;
+		} else if (managed.requestToken == 0) {
+			managed.requestToken = nextPersistentChatPreviewImageRequestToken();
 		}
 		if (!managed.providerUrl.isEmpty() && !pipeline->containsSource(managed.providerUrl)) {
 			managed.providerUrl.clear();
+			managed.requestToken = nextPersistentChatPreviewImageRequestToken();
 			managed.requested = false;
 			managed.finished = false;
 		}
@@ -33780,7 +34035,8 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 		if (source.size() <= 16384 && requestUrl.scheme().toLower() == QLatin1String("https")
 			&& isSafePreviewTarget(requestUrl)) {
 			managed.requested = true;
-			requestPersistentChatPreviewMetadataImageProvider(previewKey, key, source, requestUrl);
+			requestPersistentChatPreviewMetadataImageProvider(
+				previewKey, key, source, managed.requestToken, requestUrl);
 		} else {
 			managed.finished = true;
 		}
@@ -33790,29 +34046,47 @@ void MainWindow::ensurePersistentChatPreviewImageProviders(const QString &previe
 		ensureMediaArtwork(index, QStringLiteral("thumbnail"), item.thumbnail);
 		ensureMediaArtwork(index, QStringLiteral("poster"), item.poster);
 		if (!isImageMedia(item.kind, item.mime)) {
+			item.imageProviderSourceIdentity.clear();
+			item.imageProviderUrl.clear();
+			item.imageProviderRequestToken = 0;
+			item.imageProviderRequested = false;
+			item.imageProviderFinished = false;
+			item.imageProviderAnimated = false;
 			continue;
 		}
 		const QString source = item.url.trimmed();
+		if (item.imageProviderSourceIdentity != source) {
+			item.imageProviderSourceIdentity = source;
+			item.imageProviderUrl.clear();
+			item.imageProviderRequestToken =
+				source.isEmpty() ? 0 : nextPersistentChatPreviewImageRequestToken();
+			item.imageProviderRequested = false;
+			item.imageProviderFinished = false;
+			item.imageProviderAnimated = false;
+		}
 		if (!item.imageProviderUrl.isEmpty() && !pipeline->containsSource(item.imageProviderUrl)) {
 			item.imageProviderUrl.clear();
+			item.imageProviderRequestToken = nextPersistentChatPreviewImageRequestToken();
 			item.imageProviderRequested = false;
 			item.imageProviderFinished  = false;
 			item.imageProviderAnimated  = false;
 		}
-		if (isPipelineUrl(source)) {
+		if (isPipelineUrl(source) && pipeline->containsSource(source)) {
 			item.imageProviderUrl       = source;
 			item.imageProviderFinished  = true;
 			item.imageProviderRequested = false;
 			item.imageProviderAnimated  = false;
 		} else if (source.startsWith(QLatin1String("data:"), Qt::CaseInsensitive)
-				   && !item.imageProviderFinished) {
+				   && !item.imageProviderRequested && !item.imageProviderFinished) {
 			item.imageProviderRequested = true;
-			registerPersistentChatPreviewDataImageProvider(previewKey, index, source, item.mime);
+			registerPersistentChatPreviewDataImageProvider(
+				previewKey, index, source, item.imageProviderRequestToken, item.mime);
 		} else if (!item.imageProviderRequested && !item.imageProviderFinished) {
 			const QUrl itemUrl(source);
 			if (itemUrl.scheme() == QLatin1String("https") && isSafePreviewTarget(itemUrl)) {
 				item.imageProviderRequested = true;
-				requestPersistentChatPreviewImageProvider(previewKey, index, source, itemUrl, item.mime);
+				requestPersistentChatPreviewImageProvider(
+					previewKey, index, source, item.imageProviderRequestToken, itemUrl, item.mime);
 			} else {
 				item.imageProviderFinished = true;
 			}
@@ -34066,61 +34340,74 @@ void MainWindow::cancelPersistentChatVideoPosters(const QString &previewKey) {
 }
 
 void MainWindow::completePersistentChatPreviewImageProvider(const QString &previewKey, const int mediaItemIndex,
-														const QString &sourceIdentity, const QString &providerUrl,
-														const bool animated) {
+												const QString &sourceIdentity, const quint64 requestToken,
+												const QString &providerUrl, const bool animated) {
+	if (!persistentChatPreviewImageRequestMatches(previewKey, mediaItemIndex, sourceIdentity, requestToken)) {
+		return;
+	}
+	QString verifiedProviderUrl = providerUrl;
+	if (!verifiedProviderUrl.isEmpty()
+		&& (!m_qmlShellHost || !m_qmlShellHost->imagePipeline()
+			|| !m_qmlShellHost->imagePipeline()->containsSource(verifiedProviderUrl))) {
+		verifiedProviderUrl.clear();
+	}
 	auto previewIt = m_persistentChatPreviews.find(previewKey);
 	if (previewIt == m_persistentChatPreviews.end()) return;
 	if (mediaItemIndex < 0) {
-		if (previewIt->mediaDataUrl.trimmed() != sourceIdentity) return;
-		previewIt->mediaImageProviderUrl       = providerUrl;
+		previewIt->mediaImageProviderUrl       = verifiedProviderUrl;
 		previewIt->mediaImageProviderRequested = false;
 		previewIt->mediaImageProviderFinished  = true;
-		previewIt->mediaImageProviderAnimated  = animated && !providerUrl.isEmpty();
+		previewIt->mediaImageProviderAnimated  = animated && !verifiedProviderUrl.isEmpty();
 	} else {
 		const std::size_t index = static_cast< std::size_t >(mediaItemIndex);
-		if (index >= previewIt->mediaItems.size() || previewIt->mediaItems[index].url.trimmed() != sourceIdentity) {
-			return;
-		}
 		PersistentChatPreviewMediaItem &item = previewIt->mediaItems[index];
-		item.imageProviderUrl       = providerUrl;
+		item.imageProviderUrl       = verifiedProviderUrl;
 		item.imageProviderRequested = false;
 		item.imageProviderFinished  = true;
-		item.imageProviderAnimated  = animated && !providerUrl.isEmpty();
+		item.imageProviderAnimated  = animated && !verifiedProviderUrl.isEmpty();
 	}
 	publishPersistentChatPreviewUpdate(previewKey);
 }
 
 void MainWindow::registerPersistentChatPreviewDataImageProvider(const QString &previewKey, const int mediaItemIndex,
-														 const QString &sourceIdentity, const QString &mime) {
+													 const QString &sourceIdentity, const quint64 requestToken,
+													 const QString &mime) {
+	if (!persistentChatPreviewImageRequestMatches(previewKey, mediaItemIndex, sourceIdentity, requestToken)) {
+		return;
+	}
 	if (!m_qmlShellHost || !m_qmlShellHost->imagePipeline()) {
-		completePersistentChatPreviewImageProvider(previewKey, mediaItemIndex, sourceIdentity, QString(), false);
+		completePersistentChatPreviewImageProvider(
+			previewKey, mediaItemIndex, sourceIdentity, requestToken, QString(), false);
 		return;
 	}
 	const bool animated = mime.trimmed().compare(QLatin1String("image/gif"), Qt::CaseInsensitive) == 0
 		|| sourceIdentity.startsWith(QLatin1String("data:image/gif;"), Qt::CaseInsensitive);
 	const QString stableKey = mediaItemIndex < 0
-		? previewKey + QStringLiteral(":media")
-		: previewKey + QStringLiteral(":item:%1").arg(mediaItemIndex);
+		? previewKey + QStringLiteral(":media:%1").arg(requestToken)
+		: previewKey + QStringLiteral(":item:%1:%2").arg(mediaItemIndex).arg(requestToken);
 	const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost->imagePipeline();
-	const auto completed = [this, previewKey, mediaItemIndex, sourceIdentity, animated](
+	const auto completed = [this, previewKey, mediaItemIndex, sourceIdentity, requestToken, animated](
 						   const quint64, const QString &providerUrl) {
-		completePersistentChatPreviewImageProvider(previewKey, mediaItemIndex, sourceIdentity, providerUrl, animated);
+		completePersistentChatPreviewImageProvider(
+			previewKey, mediaItemIndex, sourceIdentity, requestToken, providerUrl, animated);
 	};
 	const quint64 requestId = animated
 		? pipeline->registerAnimatedDataUrlAsync(sourceIdentity, stableKey, this, completed)
 		: pipeline->registerDataUrlAsync(sourceIdentity, stableKey, this, completed);
 	if (requestId == 0) {
-		completePersistentChatPreviewImageProvider(previewKey, mediaItemIndex, sourceIdentity, QString(), false);
+		completePersistentChatPreviewImageProvider(
+			previewKey, mediaItemIndex, sourceIdentity, requestToken, QString(), false);
 	}
 }
 
 void MainWindow::requestPersistentChatPreviewImageProvider(const QString &previewKey, const int mediaItemIndex,
-										const QString &sourceIdentity, const QUrl &requestUrl,
+										const QString &sourceIdentity, const quint64 requestToken,
+										const QUrl &requestUrl,
 										const QString &suggestedMime, const int redirectCount) {
-	const auto complete = [this, previewKey, mediaItemIndex, sourceIdentity](const QString &providerUrl,
-																									 const bool animated) {
+	const auto complete = [this, previewKey, mediaItemIndex, sourceIdentity, requestToken](const QString &providerUrl,
+																		 const bool animated) {
 		completePersistentChatPreviewImageProvider(
-			previewKey, mediaItemIndex, sourceIdentity, providerUrl, animated);
+			previewKey, mediaItemIndex, sourceIdentity, requestToken, providerUrl, animated);
 	};
 
 	if (previewKey.isEmpty() || sourceIdentity.isEmpty() || redirectCount > 3 || !Global::get().nam
@@ -34129,14 +34416,7 @@ void MainWindow::requestPersistentChatPreviewImageProvider(const QString &previe
 		return;
 	}
 
-	const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
-	const bool sourceStillCurrent = previewIt != m_persistentChatPreviews.cend()
-		&& (mediaItemIndex < 0
-				? previewIt->mediaDataUrl.trimmed() == sourceIdentity
-				: static_cast< std::size_t >(mediaItemIndex) < previewIt->mediaItems.size()
-					  && previewIt->mediaItems[static_cast< std::size_t >(mediaItemIndex)].url.trimmed()
-							 == sourceIdentity);
-	if (!sourceStillCurrent) return;
+	if (!persistentChatPreviewImageRequestMatches(previewKey, mediaItemIndex, sourceIdentity, requestToken)) return;
 
 	QNetworkRequest request(requestUrl);
 	preparePreviewImageRequest(request);
@@ -34149,7 +34429,8 @@ void MainWindow::requestPersistentChatPreviewImageProvider(const QString &previe
 	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_IMAGE_BYTES);
 	connect(reply, &QNetworkReply::finished, this,
-			[this, reply, previewKey, mediaItemIndex, sourceIdentity, suggestedMime, redirectCount, complete]() {
+			[this, reply, previewKey, mediaItemIndex, sourceIdentity, requestToken, suggestedMime,
+			 redirectCount, complete]() {
 						const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
 						const QUrl sourceUrl          = reply->request().url();
 						const QString contentType = reply->header(QNetworkRequest::ContentTypeHeader)
@@ -34160,13 +34441,18 @@ void MainWindow::requestPersistentChatPreviewImageProvider(const QString &previe
 						const QByteArray bytes = reply->readAll();
 						const bool success     = reply->error() == QNetworkReply::NoError;
 						reply->deleteLater();
+						if (!persistentChatPreviewImageRequestMatches(
+								previewKey, mediaItemIndex, sourceIdentity, requestToken)) {
+							return;
+						}
 
 						if (success && redirectTarget.isValid()) {
 							const QUrl redirected = sourceUrl.resolved(redirectTarget.toUrl());
 							if (redirected.scheme().toLower() == QLatin1String("https")
 								&& isSafePreviewTarget(redirected)) {
-								requestPersistentChatPreviewImageProvider(previewKey, mediaItemIndex, sourceIdentity,
-																	 redirected, suggestedMime, redirectCount + 1);
+								requestPersistentChatPreviewImageProvider(
+									previewKey, mediaItemIndex, sourceIdentity, requestToken, redirected,
+									suggestedMime, redirectCount + 1);
 							} else {
 								complete(QString(), false);
 							}
@@ -34189,9 +34475,13 @@ void MainWindow::requestPersistentChatPreviewImageProvider(const QString &previe
 						}
 						const bool animated = resolvedMime == QLatin1String("image/gif");
 						const QString stableKey = mediaItemIndex < 0
-							? previewKey + QStringLiteral(":media:") + sourceIdentity
-							: previewKey + QStringLiteral(":item:%1:").arg(mediaItemIndex) + sourceIdentity;
+							? previewKey + QStringLiteral(":media:%1").arg(requestToken)
+							: previewKey + QStringLiteral(":item:%1:%2").arg(mediaItemIndex).arg(requestToken);
 						const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost->imagePipeline();
+						if (!persistentChatPreviewImageRequestMatches(
+								previewKey, mediaItemIndex, sourceIdentity, requestToken)) {
+							return;
+						}
 						if (!animated) {
 							complete(pipeline->registerEncoded(bytes, resolvedMime.toLatin1(), stableKey), false);
 							return;
@@ -34205,19 +34495,22 @@ void MainWindow::requestPersistentChatPreviewImageProvider(const QString &previe
 
 void MainWindow::completePersistentChatPreviewMetadataImageProvider(
 	const QString &previewKey, const QString &metadataKey, const QString &sourceIdentity,
-	const QString &providerUrl) {
+	const quint64 requestToken, const QString &providerUrl) {
+	if (!persistentChatPreviewMetadataImageRequestMatches(
+			previewKey, metadataKey, sourceIdentity, requestToken)) {
+		return;
+	}
+	QString verifiedProviderUrl = providerUrl;
+	if (!verifiedProviderUrl.isEmpty()
+		&& (!m_qmlShellHost || !m_qmlShellHost->imagePipeline()
+			|| !m_qmlShellHost->imagePipeline()->containsSource(verifiedProviderUrl))) {
+		verifiedProviderUrl.clear();
+	}
 	auto previewIt = m_persistentChatPreviews.find(previewKey);
-	if (previewIt == m_persistentChatPreviews.end()
-		|| (!isPersistentChatMediaItemImageKey(metadataKey)
-			&& previewIt->metadata.value(metadataKey).toString().trimmed() != sourceIdentity)) {
-		return;
-	}
+	if (previewIt == m_persistentChatPreviews.end()) return;
 	auto managedIt = previewIt->metadataImages.find(metadataKey);
-	if (managedIt == previewIt->metadataImages.end() || managedIt->source != sourceIdentity) {
-		return;
-	}
 
-	managedIt->providerUrl = providerUrl;
+	managedIt->providerUrl = verifiedProviderUrl;
 	managedIt->requested   = false;
 	managedIt->finished    = true;
 	publishPersistentChatPreviewUpdate(previewKey);
@@ -34225,10 +34518,10 @@ void MainWindow::completePersistentChatPreviewMetadataImageProvider(
 
 void MainWindow::requestPersistentChatPreviewMetadataImageProvider(
 	const QString &previewKey, const QString &metadataKey, const QString &sourceIdentity,
-	const QUrl &requestUrl, const QString &suggestedMime, const int redirectCount) {
-	const auto complete = [this, previewKey, metadataKey, sourceIdentity](const QString &providerUrl) {
+	const quint64 requestToken, const QUrl &requestUrl, const QString &suggestedMime, const int redirectCount) {
+	const auto complete = [this, previewKey, metadataKey, sourceIdentity, requestToken](const QString &providerUrl) {
 		completePersistentChatPreviewMetadataImageProvider(
-			previewKey, metadataKey, sourceIdentity, providerUrl);
+			previewKey, metadataKey, sourceIdentity, requestToken, providerUrl);
 	};
 
 	if (previewKey.isEmpty() || metadataKey.isEmpty() || sourceIdentity.isEmpty()
@@ -34238,16 +34531,8 @@ void MainWindow::requestPersistentChatPreviewMetadataImageProvider(
 		return;
 	}
 
-	const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
-	if (previewIt == m_persistentChatPreviews.cend()
-		|| (!isPersistentChatMediaItemImageKey(metadataKey)
-			&& previewIt->metadata.value(metadataKey).toString().trimmed() != sourceIdentity)) {
-		return;
-	}
-	const auto managedIt = previewIt->metadataImages.constFind(metadataKey);
-	if (managedIt == previewIt->metadataImages.cend() || managedIt->source != sourceIdentity) {
-		return;
-	}
+	if (!persistentChatPreviewMetadataImageRequestMatches(
+			previewKey, metadataKey, sourceIdentity, requestToken)) return;
 
 	QNetworkRequest request(requestUrl);
 	preparePreviewImageRequest(request);
@@ -34260,7 +34545,8 @@ void MainWindow::requestPersistentChatPreviewMetadataImageProvider(
 	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_IMAGE_BYTES);
 	connect(reply, &QNetworkReply::finished, this,
-			[this, reply, previewKey, metadataKey, sourceIdentity, suggestedMime, redirectCount, complete]() {
+			[this, reply, previewKey, metadataKey, sourceIdentity, requestToken, suggestedMime,
+			 redirectCount, complete]() {
 				const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
 				const QUrl sourceUrl          = reply->request().url();
 				const QString contentType = reply->header(QNetworkRequest::ContentTypeHeader)
@@ -34271,13 +34557,17 @@ void MainWindow::requestPersistentChatPreviewMetadataImageProvider(
 				const QByteArray bytes = reply->readAll();
 				const bool success     = reply->error() == QNetworkReply::NoError;
 				reply->deleteLater();
+				if (!persistentChatPreviewMetadataImageRequestMatches(
+						previewKey, metadataKey, sourceIdentity, requestToken)) {
+					return;
+				}
 
 				if (success && redirectTarget.isValid()) {
 					const QUrl redirected = sourceUrl.resolved(redirectTarget.toUrl());
 					if (redirected.scheme().toLower() == QLatin1String("https")
 						&& isSafePreviewTarget(redirected)) {
 						requestPersistentChatPreviewMetadataImageProvider(
-							previewKey, metadataKey, sourceIdentity, redirected, suggestedMime,
+							previewKey, metadataKey, sourceIdentity, requestToken, redirected, suggestedMime,
 							redirectCount + 1);
 					} else {
 						complete(QString());
@@ -34300,19 +34590,13 @@ void MainWindow::requestPersistentChatPreviewMetadataImageProvider(
 					complete(QString());
 					return;
 				}
-				const auto currentPreview = m_persistentChatPreviews.constFind(previewKey);
-				if (currentPreview == m_persistentChatPreviews.cend()
-					|| (!isPersistentChatMediaItemImageKey(metadataKey)
-						&& currentPreview->metadata.value(metadataKey).toString().trimmed() != sourceIdentity)) {
-					return;
-				}
-				const auto currentManaged = currentPreview->metadataImages.constFind(metadataKey);
-				if (currentManaged == currentPreview->metadataImages.cend()
-					|| currentManaged->source != sourceIdentity) {
+				if (!persistentChatPreviewMetadataImageRequestMatches(
+						previewKey, metadataKey, sourceIdentity, requestToken)) {
 					return;
 				}
 
-				const QString stableKey = previewKey + QStringLiteral(":metadata:") + metadataKey;
+				const QString stableKey = previewKey + QStringLiteral(":metadata:") + metadataKey
+					+ QStringLiteral(":%1").arg(requestToken);
 				complete(m_qmlShellHost->imagePipeline()->registerEncoded(
 					bytes, resolvedMime.toLatin1(), stableKey));
 			});
@@ -34656,7 +34940,7 @@ bool MainWindow::requestPersistentChatWebhallenProductPreview(const QString &pre
 		}
 
 		previewIt->remoteMediaRequested = false;
-		previewIt->remoteMediaFinished  = true;
+		previewIt->remoteMediaFinished  = false;
 		previewIt->metadataFinished     = true;
 
 		if (!success || data.isEmpty()) {
@@ -34980,7 +35264,13 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 		return false;
 	}
 
+	// This is a genuine in-place hydration epoch. Chained review/deal requests
+	// retain the same epoch and must not rearm an already emitted stage.
+	it->modernShellPublicationPolicy.reset();
+	it->modernShellPublicationTicket.clear();
+	it->remoteMediaPipelineStarted = true;
 	it->remoteMediaRequested = true;
+	it->remoteMediaFinished = false;
 
 	QNetworkRequest request(steamAppDetailsUrl(*appId));
 	preparePreviewRequest(request);
@@ -35138,14 +35428,11 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 			}
 		}
 
+		const bool continued = requestPersistentChatSteamReviewPreview(previewKey, *appId);
+		auto nextPreviewIt = m_persistentChatPreviews.find(previewKey);
+		if (nextPreviewIt == m_persistentChatPreviews.end()) return;
+		if (!continued) nextPreviewIt->remoteMediaFinished = true;
 		publishPersistentChatPreviewUpdate(previewKey);
-		if (!requestPersistentChatSteamReviewPreview(previewKey, *appId)) {
-			auto finalPreviewIt = m_persistentChatPreviews.find(previewKey);
-			if (finalPreviewIt != m_persistentChatPreviews.end()) {
-				finalPreviewIt->remoteMediaFinished = true;
-				publishPersistentChatPreviewUpdate(previewKey);
-			}
-		}
 	});
 
 	return true;
@@ -35196,14 +35483,11 @@ bool MainWindow::requestPersistentChatSteamReviewPreview(const QString &previewK
 			}
 		}
 
+		const bool continued = requestPersistentChatIsThereAnyDealPreview(previewKey, appId);
+		auto nextPreviewIt = m_persistentChatPreviews.find(previewKey);
+		if (nextPreviewIt == m_persistentChatPreviews.end()) return;
+		if (!continued) nextPreviewIt->remoteMediaFinished = true;
 		publishPersistentChatPreviewUpdate(previewKey);
-		if (!requestPersistentChatIsThereAnyDealPreview(previewKey, appId)) {
-			auto finalPreviewIt = m_persistentChatPreviews.find(previewKey);
-			if (finalPreviewIt != m_persistentChatPreviews.end()) {
-				finalPreviewIt->remoteMediaFinished = true;
-				publishPersistentChatPreviewUpdate(previewKey);
-			}
-		}
 	});
 
 	return true;
@@ -35364,7 +35648,13 @@ bool MainWindow::requestPersistentChatXPostPreview(const QString &previewKey, co
 		return false;
 	}
 
+	// A session refresh is a genuine in-place hydration epoch. The entire
+	// primary-post and reply-context chain below remains one remote fanout unit.
+	it->modernShellPublicationPolicy.reset();
+	it->modernShellPublicationTicket.clear();
+	it->remoteMediaPipelineStarted = true;
 	it->remoteMediaRequested = true;
+	it->remoteMediaFinished = false;
 
 	QNetworkRequest request(xPostSyndicationUrl(previewUrl));
 	preparePreviewRequest(request);
@@ -35384,7 +35674,7 @@ bool MainWindow::requestPersistentChatXPostPreview(const QString &previewKey, co
 		}
 
 		previewIt->remoteMediaRequested = false;
-		previewIt->remoteMediaFinished  = true;
+		previewIt->remoteMediaFinished  = false;
 		previewIt->metadataFinished     = true;
 
 		const QString fallbackHandle = xPostHandleFromUrl(previewUrl);
@@ -35562,26 +35852,28 @@ bool MainWindow::requestPersistentChatXPostPreview(const QString &previewKey, co
 		previewIt->siteSnapshotFinished  = true;
 		previewIt->thumbnailFinished     = true;
 		previewIt->failed                = !parsedSyndication;
+		const bool continued = parsedSyndication && !parentStatusId.isEmpty()
+			&& requestPersistentChatXPostReplyContext(previewKey, parentStatusId, 3);
+		previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) return;
+		if (!continued) previewIt->remoteMediaFinished = true;
 		publishPersistentChatPreviewUpdate(previewKey);
-		if (parsedSyndication && !parentStatusId.isEmpty()) {
-			requestPersistentChatXPostReplyContext(previewKey, parentStatusId, 3);
-		}
 	});
 
 	return true;
 }
 
-void MainWindow::requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId,
-														int remaining, QVariantList directChain) {
+bool MainWindow::requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId,
+												 int remaining, QVariantList directChain) {
 	const QString trimmedStatusId = statusId.trimmed();
-	if (previewKey.isEmpty() || trimmedStatusId.isEmpty() || remaining <= 0) {
-		return;
-	}
+	if (previewKey.isEmpty() || trimmedStatusId.isEmpty() || remaining <= 0 || !Global::get().nam) return false;
 
 	const QUrl requestUrl = xPostSyndicationUrl(trimmedStatusId);
-	if (!requestUrl.isValid()) {
-		return;
-	}
+	if (!requestUrl.isValid()) return false;
+	auto requestPreviewIt = m_persistentChatPreviews.find(previewKey);
+	if (requestPreviewIt == m_persistentChatPreviews.end()) return false;
+	requestPreviewIt->remoteMediaRequested = true;
+	requestPreviewIt->remoteMediaFinished = false;
 
 	QNetworkRequest request(requestUrl);
 	preparePreviewRequest(request);
@@ -35593,20 +35885,30 @@ void MainWindow::requestPersistentChatXPostReplyContext(const QString &previewKe
 				const QByteArray data = reply->readAll();
 				const bool success    = reply->error() == QNetworkReply::NoError;
 				reply->deleteLater();
+				auto terminalize = [this, &previewKey]() {
+					auto terminalIt = m_persistentChatPreviews.find(previewKey);
+					if (terminalIt == m_persistentChatPreviews.end()) return;
+					terminalIt->remoteMediaRequested = false;
+					terminalIt->remoteMediaFinished = true;
+					publishPersistentChatPreviewUpdate(previewKey);
+				};
 
 				if (!success || data.isEmpty()) {
+					terminalize();
 					return;
 				}
 
 				QJsonParseError error;
 				const QJsonDocument document = QJsonDocument::fromJson(data, &error);
 				if (error.error != QJsonParseError::NoError || !document.isObject()) {
+					terminalize();
 					return;
 				}
 
 				const QJsonObject object = document.object();
 				const QVariantMap summary = xPostSummaryMetadata(object);
 				if (summary.isEmpty()) {
+					terminalize();
 					return;
 				}
 
@@ -35631,6 +35933,8 @@ void MainWindow::requestPersistentChatXPostReplyContext(const QString &previewKe
 				if (previewIt == m_persistentChatPreviews.end()) {
 					return;
 				}
+				previewIt->remoteMediaRequested = false;
+				previewIt->remoteMediaFinished = false;
 
 				QVariantList displayChain;
 				for (int i = nextChain.size() - 1; i >= 0; --i) {
@@ -35645,23 +35949,30 @@ void MainWindow::requestPersistentChatXPostReplyContext(const QString &previewKe
 				previewIt->thumbnailFinished    = true;
 				previewIt->siteSnapshotRequested = false;
 				previewIt->siteSnapshotFinished  = true;
-				publishPersistentChatPreviewUpdate(previewKey);
 
-				if (remaining <= 1 || nextChain.size() >= 3) {
-					return;
-				}
-
-				QString parentStatusId = xPostParentStatusIdFromSyndicationObject(object);
-				if (parentStatusId.isEmpty() || parentStatusId == currentStatusId) {
-					return;
-				}
-				for (const QVariant &value : std::as_const(nextChain)) {
-					if (value.toMap().value(QStringLiteral("id")).toString().trimmed() == parentStatusId) {
-						return;
+				QString parentStatusId;
+				bool parentAlreadyIncluded = false;
+				if (remaining > 1 && nextChain.size() < 3) {
+					parentStatusId = xPostParentStatusIdFromSyndicationObject(object);
+					for (const QVariant &value : std::as_const(nextChain)) {
+						if (!parentStatusId.isEmpty()
+							&& value.toMap().value(QStringLiteral("id")).toString().trimmed()
+								== parentStatusId) {
+							parentAlreadyIncluded = true;
+							break;
+						}
 					}
 				}
-				requestPersistentChatXPostReplyContext(previewKey, parentStatusId, remaining - 1, nextChain);
+				const bool continued = !currentStatusId.isEmpty() && !alreadyIncluded
+					&& !parentStatusId.isEmpty() && parentStatusId != currentStatusId && !parentAlreadyIncluded
+					&& requestPersistentChatXPostReplyContext(
+						previewKey, parentStatusId, remaining - 1, nextChain);
+				previewIt = m_persistentChatPreviews.find(previewKey);
+				if (previewIt == m_persistentChatPreviews.end()) return;
+				if (!continued) previewIt->remoteMediaFinished = true;
+				publishPersistentChatPreviewUpdate(previewKey);
 			});
+	return true;
 }
 
 bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, const QUrl &previewUrl) {

@@ -242,6 +242,7 @@ set(MUMBLE_SOURCES
 	"ModernSettingsController.h"
 	"ModernShellMenuSerializer.cpp"
 	"ModernShellMenuSerializer.h"
+	"ModernShellPreviewPublicationPolicy.h"
 	"ModernTheme.cpp"
 	"ModernTheme.h"
 	"MumbleApplication.cpp"

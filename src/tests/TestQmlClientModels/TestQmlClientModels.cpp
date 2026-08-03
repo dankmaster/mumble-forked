@@ -3,6 +3,7 @@
 #include "QmlClientModels.h"
 #include "ChatPerfTrace.h"
 #include "EmbedDocument.h"
+#include "ModernShellPreviewPublicationPolicy.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -54,7 +55,10 @@ private slots:
 	void activityLogRowsUseProtocolStableKeysAndSeparateLegacyBuffer();
 	void chatTimelineAppliesDirectIncrementalMessages();
 	void chatTimelineDefersPresentationUpdatesDuringScroll();
+	void modernShellPreviewPublicationPolicyIsProgressiveAndTerminal();
+	void modernShellPreviewPublicationTicketsAndSourcesStayGenerationSafe();
 	void mainWindowDefersPreviewDtoBuildsDuringScroll();
+	void mainWindowProgressivePreviewPublicationIsGenerationSafe();
 	void chatTimelineTracksUserHistory();
 	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
 	void chatTimelinePreservesTypedAttachments();
@@ -2618,6 +2622,344 @@ void TestQmlClientModels::chatTimelineDefersPresentationUpdatesDuringScroll() {
 	QCOMPARE(pendingSpy.count(), 2);
 }
 
+void TestQmlClientModels::modernShellPreviewPublicationPolicyIsProgressiveAndTerminal() {
+	using mumble::modernshell::ModernShellPreviewPublicationPolicy;
+	using mumble::modernshell::PreviewPublicationDecision;
+	using mumble::modernshell::PreviewPublicationInput;
+	using mumble::modernshell::PreviewSelectedMediaFingerprint;
+
+	ModernShellPreviewPublicationPolicy policy;
+	PreviewPublicationInput input;
+	input.corePending = true;
+	input.fanoutPendingUnits = 27;
+	input.selectedFingerprint = PreviewSelectedMediaFingerprint {
+		0, QStringLiteral("https://cdn.example/selected.jpg"), 41
+	};
+	input.selectedManagedRenderSource = QStringLiteral("image://mumble/selected?g=1");
+	input.selectedManagedRenderSourceVerified = true;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+
+	input.corePending = false;
+	input.selectedManagedRenderSource.clear();
+	input.selectedManagedRenderSourceVerified = false;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+
+	// The selected artwork is one of 27 total fanout units. Its completion
+	// leaves 26, publishes once, then the next 25 completions (25..1) hold and
+	// the 26th reaches quiescence/final.
+	input.fanoutPendingUnits = 26;
+	input.selectedManagedRenderSource = QStringLiteral("image://mumble/selected?g=1");
+	input.selectedManagedRenderSourceVerified = true;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::PublishSelected);
+	const quint64 selectedGeneration = policy.generation();
+	QVERIFY(policy.canApplyScheduled(
+		PreviewPublicationDecision::PublishSelected, selectedGeneration, input.selectedFingerprint));
+	QVERIFY(policy.markScheduledApplied(
+		PreviewPublicationDecision::PublishSelected, selectedGeneration, input.selectedFingerprint));
+	for (int pending = 25; pending >= 1; --pending) {
+		input.fanoutPendingUnits = pending;
+		QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+	}
+	input.fanoutPendingUnits = 0;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::PublishFinal);
+	QVERIFY(policy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, selectedGeneration, input.selectedFingerprint));
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+
+	// A rail completion before selected readiness remains invisible. Readiness
+	// of that same logical generation is the only progressive transition.
+	policy.reset();
+	input.fanoutPendingUnits = 26;
+	input.selectedFingerprint.requestToken = 42;
+	input.selectedManagedRenderSource.clear();
+	input.selectedManagedRenderSourceVerified = false;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+	input.fanoutPendingUnits = 25;
+	input.selectedManagedRenderSource = QStringLiteral("image://mumble/selected?g=2");
+	input.selectedManagedRenderSourceVerified = true;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::PublishSelected);
+}
+
+void TestQmlClientModels::modernShellPreviewPublicationTicketsAndSourcesStayGenerationSafe() {
+	using mumble::modernshell::ModernShellPreviewPublicationPolicy;
+	using mumble::modernshell::PreviewArtworkCandidate;
+	using mumble::modernshell::PreviewPublicationDecision;
+	using mumble::modernshell::PreviewPublicationInput;
+	using mumble::modernshell::PreviewPublicationTicket;
+	using mumble::modernshell::PreviewSelectedMediaFingerprint;
+
+	ModernShellPreviewPublicationPolicy policy;
+	PreviewPublicationInput input;
+	input.fanoutPendingUnits = 3;
+	input.selectedFingerprint = PreviewSelectedMediaFingerprint {
+		1, QStringLiteral("https://cdn.example/poster.jpg"), 77
+	};
+	input.selectedManagedRenderSource = QStringLiteral("image://mumble/poster?g=4");
+	input.selectedManagedRenderSourceVerified = true;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::PublishSelected);
+	const quint64 generation = policy.generation();
+	const PreviewPublicationTicket selectedTicket {
+		PreviewPublicationDecision::PublishSelected, generation, input.selectedFingerprint,
+		input.selectedManagedRenderSource, input.selectedManagedAnimated
+	};
+	QVERIFY(selectedTicket.isReadyFor(input));
+	PreviewPublicationInput unverifiedSelectedInput = input;
+	unverifiedSelectedInput.selectedManagedRenderSourceVerified = false;
+	QVERIFY(!selectedTicket.isReadyFor(unverifiedSelectedInput));
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+	QVERIFY(policy.cancelScheduled(
+		PreviewPublicationDecision::PublishSelected, generation, input.selectedFingerprint));
+	QVERIFY(!policy.canApplyScheduled(
+		PreviewPublicationDecision::PublishSelected, generation, input.selectedFingerprint));
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::PublishSelected);
+	QVERIFY(policy.markScheduledApplied(
+		PreviewPublicationDecision::PublishSelected, generation, input.selectedFingerprint));
+
+	const quint64 appliedGeneration = policy.generation();
+	PreviewPublicationInput invalidCandidate = input;
+	invalidCandidate.selectedFingerprint = {};
+	invalidCandidate.selectedManagedRenderSource = QStringLiteral("https://cdn.example/poster.jpg");
+	invalidCandidate.selectedManagedRenderSourceVerified = true;
+	QVERIFY(policy.decide(invalidCandidate) == PreviewPublicationDecision::Hold);
+	QVERIFY(policy.generation() != appliedGeneration);
+	const quint64 noSelectionGeneration = policy.generation();
+	QVERIFY(policy.decide(invalidCandidate) == PreviewPublicationDecision::Hold);
+	QCOMPARE(policy.generation(), noSelectionGeneration);
+	input.selectedManagedRenderSourceVerified = false;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+	input.selectedManagedRenderSourceVerified = true;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+
+	// An explicit nonzero request-token transition is a new logical generation.
+	input.selectedFingerprint.requestToken = 78;
+	input.selectedManagedRenderSource = QStringLiteral("image://mumble/poster?g=5");
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::Hold);
+	QVERIFY(policy.generation() != appliedGeneration);
+	input.fanoutPendingUnits = 0;
+	QVERIFY(policy.decide(input) == PreviewPublicationDecision::PublishFinal);
+	QVERIFY(policy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, policy.generation(), input.selectedFingerprint));
+
+	ModernShellPreviewPublicationPolicy finalPolicy;
+	PreviewPublicationInput finalInput;
+	QVERIFY(finalPolicy.decide(finalInput) == PreviewPublicationDecision::PublishFinal);
+	const quint64 finalGeneration = finalPolicy.generation();
+	QVERIFY(finalPolicy.decide(finalInput) == PreviewPublicationDecision::Hold);
+	QVERIFY(finalPolicy.cancelScheduled(PreviewPublicationDecision::PublishFinal, finalGeneration, {}));
+	finalInput.fanoutPendingUnits = 1;
+	QVERIFY(finalPolicy.decide(finalInput) == PreviewPublicationDecision::Hold);
+	finalInput.fanoutPendingUnits = 0;
+	QVERIFY(finalPolicy.decide(finalInput) == PreviewPublicationDecision::PublishFinal);
+	QVERIFY(finalPolicy.markScheduledApplied(PreviewPublicationDecision::PublishFinal, finalGeneration, {}));
+	QVERIFY(finalPolicy.decide(finalInput) == PreviewPublicationDecision::Hold);
+
+	QVERIFY(!ModernShellPreviewPublicationPolicy::isManagedRenderSource(
+		QStringLiteral("https://cdn.example/image.jpg")));
+	const QString animatedSource =
+		QUrl::fromLocalFile(QStringLiteral("C:/managed/preview.gif")).toString(QUrl::FullyEncoded);
+	QVERIFY(!ModernShellPreviewPublicationPolicy::isManagedRenderSource(animatedSource, false));
+	QVERIFY(ModernShellPreviewPublicationPolicy::isManagedRenderSource(animatedSource, true));
+	ModernShellPreviewPublicationPolicy sourcePolicy;
+	PreviewPublicationInput sourceInput;
+	sourceInput.fanoutPendingUnits = 1;
+	sourceInput.selectedFingerprint = PreviewSelectedMediaFingerprint {
+		0, QStringLiteral("https://cdn.example/image.jpg"), 101
+	};
+	sourceInput.selectedManagedRenderSource = QStringLiteral("https://cdn.example/image.jpg");
+	sourceInput.selectedManagedRenderSourceVerified = true;
+	QVERIFY(sourcePolicy.decide(sourceInput) == PreviewPublicationDecision::Hold);
+	sourceInput.selectedManagedRenderSource = QStringLiteral("image://mumble/missing?g=1");
+	sourceInput.selectedManagedRenderSourceVerified = false;
+	QVERIFY(sourcePolicy.decide(sourceInput) == PreviewPublicationDecision::Hold);
+	sourceInput.selectedFingerprint.requestToken = 102;
+	sourceInput.selectedManagedRenderSource = animatedSource;
+	sourceInput.selectedManagedAnimated = false;
+	sourceInput.selectedManagedRenderSourceVerified = true;
+	QVERIFY(sourcePolicy.decide(sourceInput) == PreviewPublicationDecision::Hold);
+	sourceInput.selectedManagedAnimated = true;
+	QVERIFY(sourcePolicy.decide(sourceInput) == PreviewPublicationDecision::PublishSelected);
+
+	QVERIFY(ModernShellPreviewPublicationPolicy::completionMatches(
+		QStringLiteral("source-a"), 9, QStringLiteral("source-a"), 9));
+	QVERIFY(!ModernShellPreviewPublicationPolicy::completionMatches(
+		QStringLiteral("source-a"), 10, QStringLiteral("source-a"), 9));
+	QVERIFY(!ModernShellPreviewPublicationPolicy::completionMatches(
+		QStringLiteral("source-a"), 9, QStringLiteral("source-b"), 9));
+	QVERIFY(!ModernShellPreviewPublicationPolicy::completionMatches(
+		QStringLiteral("source-a"), 0, QStringLiteral("source-a"), 0));
+
+	QCOMPARE(ModernShellPreviewPublicationPolicy::remotePendingUnits(true, false, false), 1);
+	QCOMPARE(ModernShellPreviewPublicationPolicy::remotePendingUnits(true, true, false), 1);
+	QCOMPARE(ModernShellPreviewPublicationPolicy::remotePendingUnits(false, true, false), 1);
+	QCOMPARE(ModernShellPreviewPublicationPolicy::remotePendingUnits(false, true, true), 0);
+	const QStringList rawMediaSources { QString(), QStringLiteral("https://cdn.example/item-1.jpg") };
+	QCOMPARE(ModernShellPreviewPublicationPolicy::firstLogicalSlot(
+		rawMediaSources.size(), [&rawMediaSources](const int index) {
+			return !rawMediaSources.at(index).trimmed().isEmpty();
+	}), 1);
+
+	ModernShellPreviewPublicationPolicy remotePolicy;
+	PreviewPublicationInput remoteInput;
+	remoteInput.fanoutPendingUnits = 1;
+	remoteInput.selectedFingerprint = PreviewSelectedMediaFingerprint {
+		0, QStringLiteral("https://cdn.example/steam-header.jpg"), 201
+	};
+	remoteInput.selectedManagedRenderSource = QStringLiteral("image://mumble/steam-header?g=1");
+	remoteInput.selectedManagedRenderSourceVerified = true;
+	QVERIFY(remotePolicy.decide(remoteInput) == PreviewPublicationDecision::PublishSelected);
+	const quint64 remoteGeneration = remotePolicy.generation();
+	QVERIFY(remotePolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishSelected, remoteGeneration, remoteInput.selectedFingerprint));
+	remoteInput.fanoutPendingUnits =
+		ModernShellPreviewPublicationPolicy::remotePendingUnits(false, true, false);
+	QVERIFY(remotePolicy.decide(remoteInput) == PreviewPublicationDecision::Hold);
+	remoteInput.fanoutPendingUnits =
+		ModernShellPreviewPublicationPolicy::remotePendingUnits(false, true, true);
+	QVERIFY(remotePolicy.decide(remoteInput) == PreviewPublicationDecision::PublishFinal);
+	QVERIFY(remotePolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, remoteGeneration, remoteInput.selectedFingerprint));
+	QVERIFY(remotePolicy.decide(remoteInput) == PreviewPublicationDecision::Hold);
+
+	constexpr int topThumbnailSlot = 0x3fffffff;
+	PreviewArtworkCandidate pendingPoster {
+		0, QStringLiteral("https://cdn.example/poster.jpg"), 301, QString(), false
+	};
+	const PreviewArtworkCandidate emptyThumbnail;
+	const PreviewArtworkCandidate readyThumbnail {
+		0, QStringLiteral("https://cdn.example/thumbnail.jpg"), 304,
+		QStringLiteral("image://mumble/thumbnail?g=1"), false
+	};
+	PreviewArtworkCandidate readyTop {
+		topThumbnailSlot, QStringLiteral("preview:thumbnail:cache-1"), 302,
+		QStringLiteral("image://mumble/top?g=1"), false
+	};
+	auto selection = ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+		pendingPoster, emptyThumbnail, readyTop);
+	QCOMPARE(selection.fingerprint.logicalSlot, 0);
+	QCOMPARE(selection.fingerprint.sourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(selection.fingerprint.requestToken, pendingPoster.requestToken);
+	QCOMPARE(selection.fingerprint.renderLogicalSlot, topThumbnailSlot);
+	QCOMPARE(selection.fingerprint.renderSourceIdentity, readyTop.sourceIdentity);
+	QCOMPARE(selection.fingerprint.renderRequestToken, readyTop.requestToken);
+	QCOMPARE(selection.managedRenderSource, readyTop.managedRenderSource);
+	const auto thumbnailSelection = ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+		pendingPoster, readyThumbnail, readyTop);
+	QCOMPARE(thumbnailSelection.fingerprint.sourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(thumbnailSelection.fingerprint.renderSourceIdentity, readyThumbnail.sourceIdentity);
+	QCOMPARE(thumbnailSelection.managedRenderSource, readyThumbnail.managedRenderSource);
+
+	PreviewArtworkCandidate readyPoster = pendingPoster;
+	readyPoster.managedRenderSource = QStringLiteral("image://mumble/poster?g=1");
+	const auto posterSelection = ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+		readyPoster, readyThumbnail, readyTop);
+	QCOMPARE(posterSelection.fingerprint.sourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(posterSelection.fingerprint.renderSourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(posterSelection.managedRenderSource, readyPoster.managedRenderSource);
+
+	PreviewArtworkCandidate failedPoster = pendingPoster;
+	failedPoster.terminalFailure = true;
+	const auto failedPosterSelection = ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+		failedPoster, emptyThumbnail, readyTop);
+	QCOMPARE(failedPosterSelection.fingerprint.sourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(failedPosterSelection.fingerprint.requestToken, pendingPoster.requestToken);
+	QCOMPARE(failedPosterSelection.fingerprint.renderSourceIdentity, readyTop.sourceIdentity);
+	QCOMPARE(failedPosterSelection.managedRenderSource, readyTop.managedRenderSource);
+	const auto failedPosterThumbnailSelection =
+		ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+			failedPoster, readyThumbnail, readyTop);
+	QCOMPARE(failedPosterThumbnailSelection.fingerprint.sourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(failedPosterThumbnailSelection.fingerprint.renderSourceIdentity,
+		readyThumbnail.sourceIdentity);
+	QCOMPARE(failedPosterThumbnailSelection.managedRenderSource,
+		readyThumbnail.managedRenderSource);
+
+	PreviewArtworkCandidate unavailableTop = readyTop;
+	unavailableTop.managedRenderSource.clear();
+	const auto noRenderSelection = ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+		failedPoster, emptyThumbnail, unavailableTop);
+	QCOMPARE(noRenderSelection.fingerprint.sourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(noRenderSelection.fingerprint.renderLogicalSlot, -1);
+	QVERIFY(noRenderSelection.fingerprint != failedPosterSelection.fingerprint);
+
+	PreviewArtworkCandidate regeneratedTop = readyTop;
+	regeneratedTop.requestToken = 303;
+	regeneratedTop.managedRenderSource = QStringLiteral("image://mumble/top?g=2");
+	const auto regeneratedTopSelection = ModernShellPreviewPublicationPolicy::selectNonImageArtwork(
+		failedPoster, emptyThumbnail, regeneratedTop);
+	QCOMPARE(regeneratedTopSelection.fingerprint.sourceIdentity, pendingPoster.sourceIdentity);
+	QCOMPARE(regeneratedTopSelection.fingerprint.renderRequestToken, regeneratedTop.requestToken);
+	QVERIFY(regeneratedTopSelection.fingerprint != failedPosterSelection.fingerprint);
+
+	ModernShellPreviewPublicationPolicy fallbackPolicy;
+	PreviewPublicationInput fallbackInput;
+	fallbackInput.fanoutPendingUnits = 2;
+	fallbackInput.selectedFingerprint = selection.fingerprint;
+	fallbackInput.selectedManagedRenderSource = selection.managedRenderSource;
+	fallbackInput.selectedManagedRenderSourceVerified = true;
+	QVERIFY(fallbackPolicy.decide(fallbackInput) == PreviewPublicationDecision::PublishSelected);
+	QVERIFY(fallbackPolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishSelected, fallbackPolicy.generation(), selection.fingerprint));
+	const quint64 selectedFallbackGeneration = fallbackPolicy.generation();
+	fallbackInput.fanoutPendingUnits = 1;
+	fallbackInput.selectedFingerprint = posterSelection.fingerprint;
+	fallbackInput.selectedManagedRenderSource = posterSelection.managedRenderSource;
+	QVERIFY(fallbackPolicy.decide(fallbackInput) == PreviewPublicationDecision::Hold);
+	QVERIFY(fallbackPolicy.generation() != selectedFallbackGeneration);
+	fallbackInput.selectedFingerprint = failedPosterSelection.fingerprint;
+	fallbackInput.selectedManagedRenderSource = failedPosterSelection.managedRenderSource;
+	QVERIFY(fallbackPolicy.decide(fallbackInput) == PreviewPublicationDecision::Hold);
+	fallbackInput.fanoutPendingUnits = 0;
+	QVERIFY(fallbackPolicy.decide(fallbackInput) == PreviewPublicationDecision::PublishFinal);
+	const PreviewPublicationTicket staleFinalTicket {
+		PreviewPublicationDecision::PublishFinal, fallbackPolicy.generation(),
+		failedPosterSelection.fingerprint, QString(), false
+	};
+	QVERIFY(staleFinalTicket.isReadyFor(fallbackInput));
+	PreviewPublicationInput regeneratedBeforeDrain = fallbackInput;
+	regeneratedBeforeDrain.selectedFingerprint = regeneratedTopSelection.fingerprint;
+	regeneratedBeforeDrain.selectedManagedRenderSource = regeneratedTopSelection.managedRenderSource;
+	QVERIFY(!staleFinalTicket.isReadyFor(regeneratedBeforeDrain));
+	QVERIFY(fallbackPolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, fallbackPolicy.generation(),
+		failedPosterSelection.fingerprint));
+	fallbackInput.selectedFingerprint = regeneratedTopSelection.fingerprint;
+	fallbackInput.selectedManagedRenderSource = regeneratedTopSelection.managedRenderSource;
+	QVERIFY(fallbackPolicy.decide(fallbackInput) == PreviewPublicationDecision::PublishFinal);
+	QVERIFY(fallbackPolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, fallbackPolicy.generation(),
+		regeneratedTopSelection.fingerprint));
+	QVERIFY(fallbackPolicy.decide(fallbackInput) == PreviewPublicationDecision::Hold);
+	fallbackPolicy.reset();
+	fallbackInput.fanoutPendingUnits = 1;
+	QVERIFY(fallbackPolicy.decide(fallbackInput) == PreviewPublicationDecision::PublishSelected);
+
+	ModernShellPreviewPublicationPolicy generatedPosterPolicy;
+	PreviewPublicationInput generatedPosterInput;
+	generatedPosterInput.selectedFingerprint = noRenderSelection.fingerprint;
+	QVERIFY(generatedPosterPolicy.decide(generatedPosterInput)
+		== PreviewPublicationDecision::PublishFinal);
+	QVERIFY(generatedPosterPolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, generatedPosterPolicy.generation(),
+		noRenderSelection.fingerprint));
+	generatedPosterInput.selectedFingerprint = failedPosterSelection.fingerprint;
+	generatedPosterInput.selectedManagedRenderSource = failedPosterSelection.managedRenderSource;
+	generatedPosterInput.selectedManagedRenderSourceVerified = true;
+	QVERIFY(generatedPosterPolicy.decide(generatedPosterInput)
+		== PreviewPublicationDecision::PublishFinal);
+	QVERIFY(generatedPosterPolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, generatedPosterPolicy.generation(),
+		failedPosterSelection.fingerprint));
+	QVERIFY(generatedPosterPolicy.decide(generatedPosterInput) == PreviewPublicationDecision::Hold);
+	generatedPosterInput.selectedFingerprint = {};
+	generatedPosterInput.selectedManagedRenderSource.clear();
+	generatedPosterInput.selectedManagedRenderSourceVerified = false;
+	QVERIFY(generatedPosterPolicy.decide(generatedPosterInput)
+		== PreviewPublicationDecision::PublishFinal);
+	QVERIFY(generatedPosterPolicy.markScheduledApplied(
+		PreviewPublicationDecision::PublishFinal, generatedPosterPolicy.generation(), {}));
+	QVERIFY(generatedPosterPolicy.decide(generatedPosterInput) == PreviewPublicationDecision::Hold);
+}
+
 void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
 	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
@@ -2629,7 +2971,7 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	const qsizetype publishStart =
 		source.indexOf(QStringLiteral("void MainWindow::publishModernShellPreviewUpdateForKey"));
 	const qsizetype publishEnd =
-		source.indexOf(QStringLiteral("void MainWindow::applyModernShellPreviewUpdateForKey"), publishStart);
+		source.indexOf(QStringLiteral("bool MainWindow::applyModernShellPreviewUpdateForKey"), publishStart);
 	QVERIFY(publishStart >= 0);
 	QVERIFY(publishEnd > publishStart);
 
@@ -2639,15 +2981,14 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(publishBody.contains(QStringLiteral("scheduleDeferredModernShellPreviewUpdateDrain()")));
 	QVERIFY(publishBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
 	QVERIFY(publishBody.contains(QStringLiteral("qml.chat.preview_update.pipeline_coalesced")));
-	QVERIFY(publishBody.contains(QStringLiteral("item.imageProviderRequested && !item.imageProviderFinished")));
-	QVERIFY(publishBody.contains(QStringLiteral("managedIt->requested && !managedIt->finished")));
+	QVERIFY(publishBody.contains(QStringLiteral("modernShellPublicationPolicy.decide(input)")));
+	QVERIFY(publishBody.contains(QStringLiteral("modernShellPublicationTicket")));
 	QVERIFY(!publishBody.contains(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)")));
 	const qsizetype applyStart = publishEnd;
 	const qsizetype applyEnd =
 		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain"), applyStart);
 	QVERIFY(applyEnd > applyStart);
 	const QString applyBody = source.mid(applyStart, applyEnd - applyStart);
-	QVERIFY(!applyBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
 	QVERIFY(applyBody.contains(QStringLiteral("evictModernShellMessageDtoCacheForMessage(message)")));
 	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPendingChanged")));
 	QVERIFY(source.contains(QStringLiteral("deferredPresentationUpdatesPending()")));
@@ -2810,6 +3151,215 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("qml.chat.scope_sync.deferred_fallback")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode)")));
+}
+
+void TestQmlClientModels::mainWindowProgressivePreviewPublicationIsGenerationSafe() {
+	const QString sourcePath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	const QString headerPath = QFINDTESTDATA("../../mumble/MainWindow.h");
+	QVERIFY2(!sourcePath.isEmpty(), "MainWindow.cpp test data was not found");
+	QVERIFY2(!headerPath.isEmpty(), "MainWindow.h test data was not found");
+	QFile sourceFile(sourcePath);
+	QFile headerFile(headerPath);
+	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	QVERIFY(headerFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const QString header = QString::fromUtf8(headerFile.readAll());
+
+	const qsizetype inputStart = source.indexOf(
+		QStringLiteral("PreviewPublicationInput MainWindow::modernShellPreviewPublicationInput"));
+	const qsizetype publishStart = source.indexOf(
+		QStringLiteral("void MainWindow::publishModernShellPreviewUpdateForKey"), inputStart);
+	QVERIFY(inputStart >= 0);
+	QVERIFY(publishStart > inputStart);
+	const QString inputBody = source.mid(inputStart, publishStart - inputStart);
+	QVERIFY(inputBody.contains(QStringLiteral("!preview.metadataFinished || !preview.thumbnailFinished")));
+	QVERIFY(inputBody.contains(QStringLiteral("remotePendingUnits(")));
+	QVERIFY(inputBody.contains(QStringLiteral("item.imageProviderRequested && !item.imageProviderFinished")));
+	QVERIFY(inputBody.contains(QStringLiteral("managedIt->requested && !managedIt->finished")));
+	QVERIFY(inputBody.contains(QStringLiteral("firstLogicalSlot(")));
+	QVERIFY(inputBody.contains(QStringLiteral("persistentChatMediaItemImageKey(selectedMediaIndex, field)")));
+	QVERIFY(inputBody.contains(QStringLiteral("selectNonImageArtwork(")));
+	QVERIFY(inputBody.contains(QStringLiteral("selection.fingerprint")));
+	QVERIFY(inputBody.contains(QStringLiteral("selection.managedRenderSource")));
+	const qsizetype posterIndex = inputBody.indexOf(QStringLiteral("QStringLiteral(\"poster\")"));
+	const qsizetype thumbnailIndex = inputBody.indexOf(QStringLiteral("QStringLiteral(\"thumbnail\")"), posterIndex);
+	const qsizetype topThumbnailIndex = inputBody.indexOf(QStringLiteral("thumbnailProviderSourceIdentity"));
+	QVERIFY(posterIndex >= 0);
+	QVERIFY(thumbnailIndex > posterIndex);
+	QVERIFY(topThumbnailIndex > thumbnailIndex);
+	QVERIFY(inputBody.contains(QStringLiteral("TopLevelMediaLogicalSlot")));
+	QVERIFY(inputBody.contains(QStringLiteral("TopLevelThumbnailLogicalSlot")));
+	QVERIFY(inputBody.contains(QStringLiteral("isManagedRenderSource(managedSource, managedAnimated)")));
+	QVERIFY(inputBody.contains(QStringLiteral("imagePipeline()->containsSource(managedSource)")));
+
+	const qsizetype applyStart = source.indexOf(
+		QStringLiteral("bool MainWindow::applyModernShellPreviewUpdateForKey"), publishStart);
+	const QString publishBody = source.mid(publishStart, applyStart - publishStart);
+	QVERIFY(publishBody.indexOf(QStringLiteral("modernShellPreviewPublicationInput(preview)"))
+		< publishBody.indexOf(QStringLiteral("modernShellPublicationPolicy.decide(input)")));
+	QVERIFY(!publishBody.contains(QStringLiteral("!input.selectedFingerprint.isValid()")));
+	QVERIFY(publishBody.contains(QStringLiteral("modernShellPublicationPolicy.selectedFingerprint()")));
+	QVERIFY(publishBody.contains(QStringLiteral("modernShellPublicationTicket.clear()")));
+
+	const qsizetype drainStart = source.indexOf(
+		QStringLiteral("void MainWindow::drainDeferredModernShellPreviewUpdates"), applyStart);
+	const qsizetype drainEnd = source.indexOf(
+		QStringLiteral("void MainWindow::publishPersistentChatInlineDataImageUpdate"), drainStart);
+	const QString drainBody = source.mid(drainStart, drainEnd - drainStart);
+	QVERIFY(drainBody.contains(QStringLiteral("ensurePersistentChatPreviewImageProviders(previewKey)")));
+	QVERIFY(drainBody.contains(QStringLiteral("modernShellPreviewPublicationInput(preview)")));
+	QVERIFY(drainBody.contains(QStringLiteral("canApplyScheduled(")));
+	QVERIFY(drainBody.contains(QStringLiteral("ticket.isReadyFor(input)")));
+	QVERIFY(!drainBody.contains(QStringLiteral(".decide(")));
+	const qsizetype applyTicketIndex = drainBody.indexOf(
+		QStringLiteral("applyModernShellPreviewUpdateForKey(previewKey)"));
+	const qsizetype markAppliedIndex = drainBody.indexOf(QStringLiteral("markScheduledApplied("));
+	QVERIFY(applyTicketIndex >= 0);
+	QVERIFY(markAppliedIndex > applyTicketIndex);
+
+	const qsizetype ensureStart = source.indexOf(
+		QStringLiteral("void MainWindow::ensurePersistentChatPreviewImageProviders"));
+	const qsizetype ensureEnd = source.indexOf(
+		QStringLiteral("QString MainWindow::persistentChatVideoPosterSource"), ensureStart);
+	const QString ensureBody = source.mid(ensureStart, ensureEnd - ensureStart);
+	QVERIFY(ensureBody.contains(QStringLiteral("thumbnailProviderImageCacheKey != imageCacheKey")));
+	QVERIFY(ensureBody.contains(QStringLiteral("thumbnailProviderRequestToken = nextPersistentChatPreviewImageRequestToken()")));
+	const qsizetype retainedThumbnailIdentityIndex = ensureBody.indexOf(
+		QStringLiteral("thumbnailProviderImageCacheKey != imageCacheKey"));
+	const qsizetype retainedThumbnailEvictionIndex = ensureBody.indexOf(
+		QStringLiteral("!pipeline->containsSource(preview.thumbnailProviderUrl)"),
+		retainedThumbnailIdentityIndex);
+	const qsizetype retainedThumbnailReregisterIndex = ensureBody.indexOf(
+		QStringLiteral("pipeline->registerImage(preview.thumbnailImage"),
+		retainedThumbnailEvictionIndex);
+	QVERIFY(retainedThumbnailEvictionIndex > retainedThumbnailIdentityIndex);
+	QVERIFY(retainedThumbnailReregisterIndex > retainedThumbnailEvictionIndex);
+	QVERIFY(ensureBody.mid(retainedThumbnailEvictionIndex,
+		retainedThumbnailReregisterIndex - retainedThumbnailEvictionIndex)
+		.contains(QStringLiteral("thumbnailProviderRequestToken = nextPersistentChatPreviewImageRequestToken()")));
+	QVERIFY(ensureBody.contains(QStringLiteral("!preview.mediaImageProviderRequested && !preview.mediaImageProviderFinished")));
+	QVERIFY(ensureBody.contains(QStringLiteral("!item.imageProviderRequested && !item.imageProviderFinished")));
+	QVERIFY(ensureBody.contains(QStringLiteral("managed.requestToken")));
+
+	const qsizetype imageRequestStart = source.indexOf(
+		QStringLiteral("void MainWindow::requestPersistentChatPreviewImageProvider"));
+	const qsizetype metadataCompleteStart = source.indexOf(
+		QStringLiteral("void MainWindow::completePersistentChatPreviewMetadataImageProvider"), imageRequestStart);
+	const QString imageRequestBody = source.mid(imageRequestStart, metadataCompleteStart - imageRequestStart);
+	QVERIFY(imageRequestBody.count(QStringLiteral("persistentChatPreviewImageRequestMatches(")) >= 3);
+	QVERIFY(imageRequestBody.contains(QStringLiteral("sourceIdentity, requestToken, redirected")));
+	QVERIFY(imageRequestBody.contains(QStringLiteral("QStringLiteral(\":media:%1\").arg(requestToken)")));
+	QVERIFY(imageRequestBody.indexOf(QStringLiteral("persistentChatPreviewImageRequestMatches("),
+		imageRequestBody.indexOf(QStringLiteral("reply->deleteLater()")))
+		< imageRequestBody.indexOf(QStringLiteral("registerEncoded(")));
+
+	const qsizetype metadataRequestStart = source.indexOf(
+		QStringLiteral("void MainWindow::requestPersistentChatPreviewMetadataImageProvider"));
+	const qsizetype metadataRequestEnd = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatRemotePlayableMediaCache"), metadataRequestStart);
+	const QString metadataRequestBody = source.mid(metadataRequestStart, metadataRequestEnd - metadataRequestStart);
+	QVERIFY(metadataRequestBody.count(
+		QStringLiteral("persistentChatPreviewMetadataImageRequestMatches(")) >= 3);
+	QVERIFY(metadataRequestBody.contains(QStringLiteral("sourceIdentity, requestToken, redirected")));
+	QVERIFY(metadataRequestBody.contains(QStringLiteral("QStringLiteral(\":%1\").arg(requestToken)")));
+
+	const qsizetype steamStart = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatSteamAppPreview"));
+	const qsizetype reviewStart = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatSteamReviewPreview"), steamStart);
+	const qsizetype itadStart = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatIsThereAnyDealPreview"), reviewStart);
+	const QString steamBody = source.mid(steamStart, reviewStart - steamStart);
+	const QString reviewBody = source.mid(reviewStart, itadStart - reviewStart);
+	QVERIFY(steamBody.indexOf(QStringLiteral("modernShellPublicationPolicy.reset()"))
+		< steamBody.indexOf(QStringLiteral("remoteMediaPipelineStarted = true")));
+	QVERIFY(steamBody.indexOf(QStringLiteral("requestPersistentChatSteamReviewPreview"))
+		< steamBody.indexOf(QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)")));
+	QCOMPARE(steamBody.count(QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)")), 1);
+	QVERIFY(reviewBody.indexOf(QStringLiteral("requestPersistentChatIsThereAnyDealPreview"))
+		< reviewBody.indexOf(QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)")));
+	QCOMPARE(reviewBody.count(QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)")), 1);
+	QVERIFY(!reviewBody.contains(QStringLiteral("modernShellPublicationPolicy.reset()")));
+	const qsizetype xStart = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatXPostPreview"));
+	const qsizetype xReplyStart = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatXPostReplyContext"), xStart);
+	const qsizetype oEmbedStart = source.indexOf(
+		QStringLiteral("bool MainWindow::requestPersistentChatOEmbedPreview"), xReplyStart);
+	QVERIFY(xStart >= 0);
+	QVERIFY(xReplyStart > xStart);
+	QVERIFY(oEmbedStart > xReplyStart);
+	const QString xBody = source.mid(xStart, xReplyStart - xStart);
+	const QString xReplyBody = source.mid(xReplyStart, oEmbedStart - xReplyStart);
+	QVERIFY(xBody.indexOf(QStringLiteral("modernShellPublicationPolicy.reset()"))
+		< xBody.indexOf(QStringLiteral("remoteMediaPipelineStarted = true")));
+	QVERIFY(xBody.indexOf(QStringLiteral("requestPersistentChatXPostReplyContext"))
+		< xBody.indexOf(QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)")));
+	QCOMPARE(xBody.count(QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)")), 1);
+	const qsizetype xPrimaryContinueIndex = xBody.indexOf(
+		QStringLiteral("requestPersistentChatXPostReplyContext"));
+	const qsizetype xPrimaryTerminalIndex = xBody.indexOf(
+		QStringLiteral("if (!continued) previewIt->remoteMediaFinished = true"),
+		xPrimaryContinueIndex);
+	const qsizetype xPrimaryPublishIndex = xBody.indexOf(
+		QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)"), xPrimaryTerminalIndex);
+	QVERIFY(xPrimaryContinueIndex >= 0);
+	QVERIFY(xPrimaryTerminalIndex > xPrimaryContinueIndex);
+	QVERIFY(xPrimaryPublishIndex > xPrimaryTerminalIndex);
+	const qsizetype xTerminalizeStart = xReplyBody.indexOf(QStringLiteral("auto terminalize ="));
+	const qsizetype xFirstFailureStart = xReplyBody.indexOf(
+		QStringLiteral("if (!success || data.isEmpty())"), xTerminalizeStart);
+	QVERIFY(xTerminalizeStart >= 0);
+	QVERIFY(xFirstFailureStart > xTerminalizeStart);
+	const QString xTerminalizeBody = xReplyBody.mid(
+		xTerminalizeStart, xFirstFailureStart - xTerminalizeStart);
+	const qsizetype terminalRequestedIndex = xTerminalizeBody.indexOf(
+		QStringLiteral("terminalIt->remoteMediaRequested = false"));
+	const qsizetype terminalFinishedIndex = xTerminalizeBody.indexOf(
+		QStringLiteral("terminalIt->remoteMediaFinished = true"));
+	const qsizetype terminalPublishIndex = xTerminalizeBody.indexOf(
+		QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)"));
+	QVERIFY(terminalRequestedIndex >= 0);
+	QVERIFY(terminalFinishedIndex > terminalRequestedIndex);
+	QVERIFY(terminalPublishIndex > terminalFinishedIndex);
+	const qsizetype xParseFailureStart = xReplyBody.indexOf(
+		QStringLiteral("if (error.error != QJsonParseError::NoError || !document.isObject())"),
+		xFirstFailureStart);
+	const qsizetype xEmptySummaryStart = xReplyBody.indexOf(
+		QStringLiteral("if (summary.isEmpty())"), xParseFailureStart);
+	const qsizetype xReplyMutationStart = xReplyBody.indexOf(
+		QStringLiteral("QVariantList nextChain"), xEmptySummaryStart);
+	QVERIFY(xParseFailureStart > xFirstFailureStart);
+	QVERIFY(xEmptySummaryStart > xParseFailureStart);
+	QVERIFY(xReplyMutationStart > xEmptySummaryStart);
+	const QString xTransportFailureBody = xReplyBody.mid(
+		xFirstFailureStart, xParseFailureStart - xFirstFailureStart);
+	const QString xParseFailureBody = xReplyBody.mid(
+		xParseFailureStart, xEmptySummaryStart - xParseFailureStart);
+	const QString xEmptySummaryBody = xReplyBody.mid(
+		xEmptySummaryStart, xReplyMutationStart - xEmptySummaryStart);
+	for (const QString &failureBody : { xTransportFailureBody, xParseFailureBody, xEmptySummaryBody }) {
+		const qsizetype terminalizeIndex = failureBody.indexOf(QStringLiteral("terminalize();"));
+		const qsizetype returnIndex = failureBody.indexOf(QStringLiteral("return;"));
+		QVERIFY(terminalizeIndex >= 0);
+		QVERIFY(returnIndex > terminalizeIndex);
+	}
+	const qsizetype xReplyContinuedIndex = xReplyBody.indexOf(QStringLiteral("const bool continued"));
+	const qsizetype xReplyRecursiveIndex = xReplyBody.indexOf(
+		QStringLiteral("&& requestPersistentChatXPostReplyContext("), xReplyContinuedIndex);
+	const qsizetype xReplyPublishIndex = xReplyBody.indexOf(
+		QStringLiteral("publishPersistentChatPreviewUpdate(previewKey)"), xReplyRecursiveIndex);
+	QVERIFY(xReplyContinuedIndex >= 0);
+	QVERIFY(xReplyRecursiveIndex > xReplyContinuedIndex);
+	QVERIFY(xReplyPublishIndex > xReplyRecursiveIndex);
+	QVERIFY(xReplyBody.contains(QStringLiteral("if (!continued) previewIt->remoteMediaFinished = true")));
+
+	QVERIFY(header.contains(QStringLiteral("thumbnailProviderSourceIdentity")));
+	QVERIFY(header.contains(QStringLiteral("thumbnailProviderRequestToken")));
+	QVERIFY(header.contains(QStringLiteral("remoteMediaPipelineStarted")));
+	QVERIFY(header.contains(QStringLiteral("modernShellPublicationTicket")));
+	QVERIFY(source.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.remove(invalidatedPreviewKey)")));
+	QVERIFY(source.contains(QStringLiteral("m_deferredModernShellPreviewUpdateKeys.remove(previewKey)")));
 }
 
 void TestQmlClientModels::chatTimelineTracksUserHistory() {

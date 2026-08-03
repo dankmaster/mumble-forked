@@ -28,6 +28,7 @@
 #include "ConnectionFailTypes.h"
 #include "Log.h"
 #include "ModernShellMenuSerializer.h"
+#include "ModernShellPreviewPublicationPolicy.h"
 #include "Mumble.pb.h"
 #include "MumbleProtocol.h"
 #include "PersistentChatState.h"
@@ -376,7 +377,9 @@ public:
 		QString streamKind;
 		QString thumbnail;
 		QString poster;
+		QString imageProviderSourceIdentity;
 		QString imageProviderUrl;
+		quint64 imageProviderRequestToken = 0;
 		bool imageProviderRequested = false;
 		bool imageProviderFinished  = false;
 		bool imageProviderAnimated  = false;
@@ -385,6 +388,7 @@ public:
 	struct PersistentChatPreviewMetadataImage {
 		QString source;
 		QString providerUrl;
+		quint64 requestToken = 0;
 		bool requested = false;
 		bool finished  = false;
 	};
@@ -401,9 +405,13 @@ public:
 		QString mediaMime;
 		QString mediaKind;
 		QString thumbnailProviderUrl;
+		QString thumbnailProviderSourceIdentity;
+		qint64 thumbnailProviderImageCacheKey = 0;
+		quint64 thumbnailProviderRequestToken = 0;
 		QString thumbnailRequestSource;
 		QString mediaImageProviderUrl;
 		QString mediaImageProviderSource;
+		quint64 mediaImageProviderRequestToken = 0;
 		std::vector< PersistentChatPreviewMediaItem > mediaItems;
 		QVariantMap metadata;
 		QHash< QString, PersistentChatPreviewMetadataImage > metadataImages;
@@ -417,10 +425,13 @@ public:
 		bool siteSnapshotFinished   = false;
 		bool remoteMediaRequested   = false;
 		bool remoteMediaFinished    = false;
+		bool remoteMediaPipelineStarted = false;
 		bool mediaImageProviderRequested = false;
 		bool mediaImageProviderFinished  = false;
 		bool mediaImageProviderAnimated  = false;
 		QString videoPosterAttemptedSource;
+		mumble::modernshell::ModernShellPreviewPublicationPolicy modernShellPublicationPolicy;
+		mumble::modernshell::PreviewPublicationTicket modernShellPublicationTicket;
 	};
 
 	struct PersistentChatAssetDownload {
@@ -576,7 +587,7 @@ public:
 	bool requestPersistentChatTikTokMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatFacebookMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl);
-	void requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId, int remaining,
+	bool requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId, int remaining,
 												QVariantList directChain = QVariantList());
 	bool requestPersistentChatGitHubPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatWebhallenProductPreview(const QString &previewKey, const QUrl &previewUrl);
@@ -605,6 +616,11 @@ public:
 	bool applyPersistentChatRemoteAudioMedia(PersistentChatPreview &preview, const QUrl &audioUrl,
 											 const QString &suggestedMime = QString());
 	void applyPersistentChatListingMediaItems(PersistentChatPreview &preview);
+	quint64 nextPersistentChatPreviewImageRequestToken();
+	bool persistentChatPreviewImageRequestMatches(const QString &previewKey, int mediaItemIndex,
+										 const QString &sourceIdentity, quint64 requestToken) const;
+	bool persistentChatPreviewMetadataImageRequestMatches(const QString &previewKey, const QString &metadataKey,
+											 const QString &sourceIdentity, quint64 requestToken) const;
 	void ensurePersistentChatPreviewImageProviders(const QString &previewKey);
 	QString persistentChatVideoPosterSource(const PersistentChatPreview &preview) const;
 	void queuePersistentChatVideoPoster(const QString &previewKey);
@@ -613,18 +629,21 @@ public:
 										 const QImage &image = QImage());
 	void cancelPersistentChatVideoPosters(const QString &previewKey = QString());
 	void requestPersistentChatPreviewImageProvider(const QString &previewKey, int mediaItemIndex,
-											 const QString &sourceIdentity, const QUrl &requestUrl,
+											 const QString &sourceIdentity, quint64 requestToken, const QUrl &requestUrl,
 											 const QString &suggestedMime = QString(), int redirectCount = 0);
 	void registerPersistentChatPreviewDataImageProvider(const QString &previewKey, int mediaItemIndex,
-												 const QString &sourceIdentity, const QString &mime);
+												 const QString &sourceIdentity, quint64 requestToken, const QString &mime);
 	void completePersistentChatPreviewImageProvider(const QString &previewKey, int mediaItemIndex,
-										  const QString &sourceIdentity, const QString &providerUrl,
+										  const QString &sourceIdentity, quint64 requestToken,
+										  const QString &providerUrl,
 										  bool animated);
 	void requestPersistentChatPreviewMetadataImageProvider(const QString &previewKey, const QString &metadataKey,
-											 const QString &sourceIdentity, const QUrl &requestUrl,
+											 const QString &sourceIdentity, quint64 requestToken,
+											 const QUrl &requestUrl,
 											 const QString &suggestedMime = QString(), int redirectCount = 0);
 	void completePersistentChatPreviewMetadataImageProvider(const QString &previewKey, const QString &metadataKey,
-											  const QString &sourceIdentity, const QString &providerUrl);
+											  const QString &sourceIdentity, quint64 requestToken,
+											  const QString &providerUrl);
 	QNetworkReply *startPersistentChatPreviewGet(const QNetworkRequest &request, const QString &previewKey);
 	QNetworkReply *startPersistentChatPreviewPost(const QNetworkRequest &request, const QByteArray &body,
 												 const QString &previewKey);
@@ -769,8 +788,10 @@ public:
 	void publishModernShellServerLogReset(const PersistentChatTarget &target);
 	void clearModernShellMessageDtoCache(const char *reason);
 	void evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message);
+	mumble::modernshell::PreviewPublicationInput modernShellPreviewPublicationInput(
+		const PersistentChatPreview &preview) const;
 	void publishModernShellPreviewUpdateForKey(const QString &previewKey);
-	void applyModernShellPreviewUpdateForKey(const QString &previewKey);
+	bool applyModernShellPreviewUpdateForKey(const QString &previewKey);
 	void scheduleDeferredModernShellPreviewUpdateDrain();
 	void drainDeferredModernShellPreviewUpdates();
 	QString modernShellAvatarDataUrlForTextureHash(const QByteArray &textureHash, int avatarSize);
@@ -1045,6 +1066,7 @@ protected:
 	QHash< QString, std::size_t > m_persistentChatMessageIndexByKey;
 	bool m_persistentChatMessageIndexValid = false;
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
+	quint64 m_persistentChatPreviewImageRequestToken = 0;
 	QHash< QNetworkReply *, QString > m_persistentChatPreviewNetworkReplies;
 	QStringList m_persistentChatVideoPosterQueue;
 	QSet< QString > m_persistentChatVideoPosterQueuedKeys;
