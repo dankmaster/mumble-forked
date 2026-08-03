@@ -316,10 +316,15 @@ TestCase {
 		id: controlledImageComponent
 
 		Image {
+			property bool everReady: false
 			width: 320
 			height: 180
 			asynchronous: true
 			cache: false
+			onStatusChanged: {
+				if (status === Image.Ready)
+					everReady = true
+			}
 		}
 	}
 
@@ -5277,10 +5282,19 @@ TestCase {
 			return controlledImageProvider.receipt(firstId).requestedCount === 1
 		})
 		compare(controlledImageProvider.receipt(firstId).requestedCount, 1)
-		compare(controlledImageProvider.release(firstId), 1)
-		controlledImageProvider.reset()
+		const telemetryBeforeReset = controlledImageProvider.completionTelemetry()
+		compare(controlledImageProvider.releaseAndReset(firstId), 1)
+		tryVerify(function() {
+			const telemetry = controlledImageProvider.completionTelemetry()
+			return telemetry.attemptCount === telemetryBeforeReset.attemptCount + 1
+				&& telemetry.staleGenerationRejectedCount
+					=== telemetryBeforeReset.staleGenerationRejectedCount + 1
+		})
+		const telemetryAfterStale = controlledImageProvider.completionTelemetry()
+		compare(telemetryAfterStale.successCount, telemetryBeforeReset.successCount)
 		wait(80)
 		verify(image.status !== Image.Ready)
+		compare(image.everReady, false)
 
 		const secondId = "controlled-steam-reset-new-" + Date.now()
 		image.source = "image://mumble/" + secondId
@@ -5290,7 +5304,13 @@ TestCase {
 		})
 		compare(controlledImageProvider.release(secondId), 1)
 		tryCompare(image, "status", Image.Ready)
+		compare(image.everReady, true)
 		compare(controlledImageProvider.receipt(secondId).finishedCount, 1)
+		const telemetryAfterSuccess = controlledImageProvider.completionTelemetry()
+		compare(telemetryAfterSuccess.attemptCount, telemetryAfterStale.attemptCount + 1)
+		compare(telemetryAfterSuccess.staleGenerationRejectedCount,
+			telemetryAfterStale.staleGenerationRejectedCount)
+		compare(telemetryAfterSuccess.successCount, telemetryAfterStale.successCount + 1)
 	}
 
 	function test_retained_static_loading_request_survives_render_inactive_churn() {

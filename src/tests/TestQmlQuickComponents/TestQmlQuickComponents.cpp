@@ -76,12 +76,18 @@ public:
 	bool claimCompletion(const quint64 token, const quint64 generation,
 			const QString &id) {
 		QMutexLocker locker(&m_mutex);
+		++m_completionAttemptCount;
+		if (generation != m_generation) {
+			++m_staleGenerationRejectedCount;
+			return false;
+		}
 		auto iterator = m_records.find(token);
-		if (generation != m_generation || iterator == m_records.end()
-				|| iterator->generation != generation || iterator->id != id
+		if (iterator == m_records.end() || iterator->generation != generation
+				|| iterator->id != id
 				|| !iterator->released || iterator->finished || iterator->cancelled)
 			return false;
 		iterator->finished = true;
+		++m_completionSuccessCount;
 		return true;
 	}
 
@@ -101,6 +107,9 @@ public:
 			resetGeneration = ++m_generation;
 			m_records.clear();
 			m_lastId.clear();
+			m_completionAttemptCount = 0;
+			m_staleGenerationRejectedCount = 0;
+			m_completionSuccessCount = 0;
 		}
 		emit resetRequested(resetGeneration);
 	}
@@ -123,6 +132,40 @@ public:
 		if (releaseCount > 0)
 			emit releaseRequested(id, releaseGeneration);
 		return releaseCount;
+	}
+
+	Q_INVOKABLE int releaseAndReset(const QString &id = QString()) {
+		quint64 releaseGeneration = 0;
+		quint64 resetGeneration = 0;
+		int releaseCount = 0;
+		{
+			QMutexLocker locker(&m_mutex);
+			releaseGeneration = m_generation;
+			for (auto iterator = m_records.begin(); iterator != m_records.end(); ++iterator) {
+				if (iterator->generation != releaseGeneration || iterator->released
+						|| iterator->finished || iterator->cancelled
+						|| (!id.isEmpty() && iterator->id != id))
+					continue;
+				iterator->released = true;
+				++releaseCount;
+			}
+			resetGeneration = ++m_generation;
+			m_records.clear();
+			m_lastId.clear();
+		}
+		if (releaseCount > 0)
+			emit releaseRequested(id, releaseGeneration);
+		emit resetRequested(resetGeneration);
+		return releaseCount;
+	}
+
+	Q_INVOKABLE QVariantMap completionTelemetry() const {
+		QMutexLocker locker(&m_mutex);
+		return {
+			{QStringLiteral("attemptCount"), m_completionAttemptCount},
+			{QStringLiteral("staleGenerationRejectedCount"), m_staleGenerationRejectedCount},
+			{QStringLiteral("successCount"), m_completionSuccessCount}
+		};
 	}
 
 	Q_INVOKABLE QVariantMap receipt(const QString &id = QString()) const {
@@ -170,6 +213,9 @@ private:
 	quint64 m_generation = 1;
 	quint64 m_nextToken = 0;
 	QString m_lastId;
+	int m_completionAttemptCount = 0;
+	int m_staleGenerationRejectedCount = 0;
+	int m_completionSuccessCount = 0;
 };
 
 ControlledImageResponse::ControlledImageResponse(ControlledImageProviderController *controller,
