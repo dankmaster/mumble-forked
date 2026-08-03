@@ -5273,6 +5273,9 @@ TestCase {
 			{ "source": "image://mumble/" + firstId })
 		verify(image !== null)
 		tryCompare(image, "status", Image.Loading)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(firstId).requestedCount === 1
+		})
 		compare(controlledImageProvider.receipt(firstId).requestedCount, 1)
 		compare(controlledImageProvider.release(firstId), 1)
 		controlledImageProvider.reset()
@@ -5282,6 +5285,9 @@ TestCase {
 		const secondId = "controlled-steam-reset-new-" + Date.now()
 		image.source = "image://mumble/" + secondId
 		tryCompare(image, "status", Image.Loading)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(secondId).requestedCount === 1
+		})
 		compare(controlledImageProvider.release(secondId), 1)
 		tryCompare(image, "status", Image.Ready)
 		compare(controlledImageProvider.receipt(secondId).finishedCount, 1)

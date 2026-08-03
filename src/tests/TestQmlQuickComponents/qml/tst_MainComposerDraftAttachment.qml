@@ -264,7 +264,7 @@ TestCase {
 			asyncDelegateSource))
 		verify(/readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending/.test(
 			asyncDelegateSource))
-		verify(/clip:\s*richGeometrySettling\s*\|\|\s*\(item[\s\S]*presentationHeightMeasuredHeight\s*>\s*height\s*\+\s*0\.5\)/.test(
+		verify(/clip:\s*stationaryThumbWarmPinned\s*\|\|\s*richGeometrySettling\s*\|\|\s*\(item[\s\S]*presentationHeightMeasuredHeight\s*>\s*height\s*\+\s*0\.5\)/.test(
 			asyncDelegateSource))
 		verify(/function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(
 			asyncDelegateSource))
@@ -606,17 +606,17 @@ TestCase {
 		verify(finiteMeasuredHeight > 0
 			&& finiteMeasuredHeight < conservativeEstimate)
 		compare(Math.max(58, finiteMeasuredHeight), finiteMeasuredHeight)
-		const heightStart = asyncSource.indexOf("height: presentationHeightCommittedHeight")
+		const heightStart = asyncSource.indexOf("height: stationaryThumbWarmPinned")
 		const heightEnd = asyncSource.indexOf("onHeightChanged:", heightStart)
 		verify(heightStart >= 0 && heightEnd > heightStart)
 		const heightSource = asyncSource.slice(heightStart, heightEnd)
-		verify(/presentationHeightCommittedHeight\s*>\s*0[\s\S]*Math\.max\([\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(heightSource))
+		verify(/stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*Math\.max\([\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(heightSource))
 		verify(!/item\.implicitHeight/.test(heightSource))
-		const clipStart = asyncSource.indexOf("clip: richGeometrySettling")
+		const clipStart = asyncSource.indexOf("clip: stationaryThumbWarmPinned")
 		const clipEnd = asyncSource.indexOf("opacity:", clipStart)
 		verify(clipStart >= 0 && clipEnd > clipStart)
 		const clipSource = asyncSource.slice(clipStart, clipEnd)
-		verify(/clip:\s*richGeometrySettling[\s\S]*item[\s\S]*presentationHeightMeasuredHeight\s*>\s*height\s*\+\s*0\.5/.test(clipSource))
+		verify(/clip:\s*stationaryThumbWarmPinned\s*\|\|\s*richGeometrySettling[\s\S]*item[\s\S]*presentationHeightMeasuredHeight\s*>\s*height\s*\+\s*0\.5/.test(clipSource))
 		verify(!/presentationHeightCommittedHeight\s*<=\s*0/.test(clipSource))
 		// A late post-commit growth clips only while it exceeds the retained
 		// outer height; once the gated commit catches up, clipping turns off.
@@ -1342,12 +1342,18 @@ TestCase {
 			asyncDelegateSource))
 		verify(/property string viewportProbeStableId:\s*""[\s\S]*property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*property bool inVisibleViewport:\s*false[\s\S]*property bool inHydrationWindow:\s*false/.test(
 			asyncDelegateSource))
-		const viewportProbeSeedMatch =
-			/property real viewportProbeHeight:[\s\S]*?\n\s*function viewportProbeBaseHeight\(\)/.exec(
-				asyncDelegateSource)
-		verify(viewportProbeSeedMatch !== null)
+		const viewportProbeSeedStart = asyncDelegateSource.indexOf(
+			"property real viewportProbeHeight:")
+		const viewportProbeSeedEnd = asyncDelegateSource.indexOf(
+			"readonly property var stationaryThumbWarmPin:", viewportProbeSeedStart)
+		verify(viewportProbeSeedStart >= 0
+			&& viewportProbeSeedEnd > viewportProbeSeedStart)
+		const viewportProbeSeedSource = asyncDelegateSource.slice(
+			viewportProbeSeedStart, viewportProbeSeedEnd)
+		verify(/property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)/.test(
+			viewportProbeSeedSource))
 		verify(!/\bitem\b|\brichGeometrySettling\b|\bheight\b/.test(
-			viewportProbeSeedMatch[0]))
+			viewportProbeSeedSource))
 		const viewportProbeUpdateStart =
 			asyncDelegateSource.indexOf("function updateViewportProbeHeight()")
 		const viewportProbeUpdateEnd =
