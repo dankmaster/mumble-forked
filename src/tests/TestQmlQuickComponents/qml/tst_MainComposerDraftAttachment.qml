@@ -1432,8 +1432,18 @@ TestCase {
 			hydrationWindowSource))
 		verify(!/asyncMessageDelegate\.(?:y|height|viewportProbeHeight)|timeline\.contentY/.test(
 			hydrationWindowSource))
+		const asyncRichHandoffStart = asyncDelegateSource.indexOf(
+			"id: asyncRichHandoff")
+		const asyncRichHandoffSummaryStart = asyncDelegateSource.indexOf(
+			'objectName: "asyncRichHandoffSummary"', asyncRichHandoffStart)
+		verify(asyncRichHandoffStart >= 0
+			&& asyncRichHandoffSummaryStart > asyncRichHandoffStart)
+		const asyncRichHandoffOuterSource = asyncDelegateSource.slice(
+			asyncRichHandoffStart, asyncRichHandoffSummaryStart)
 		verify(/visible:\s*asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
-			asyncDelegateSource))
+			asyncRichHandoffOuterSource))
+		verify(/radius:\s*0[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
+			asyncRichHandoffOuterSource))
 		verify(/readonly property bool previewLoaderFailed:\s*item\s*\?\s*item\.previewLoaderFailed\s*:\s*false\s*readonly property bool nearViewportPrefetchTerminal:\s*item\s*\?\s*item\.nearViewportPrefetchTerminal\s*:\s*false/.test(
 			asyncDelegateSource))
 		verify(/function markNearViewportPrefetchTerminal\(\)\s*\{\s*if\s*\(item\)\s*item\.markNearViewportPrefetchTerminal\(\)\s*\}/.test(
@@ -1533,23 +1543,51 @@ TestCase {
 			paintedDeferredInlineStart, paintedDeferredInlineEnd)
 		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible\s*\?\s*1\s*:\s*0[\s\S]*RowLayout\s*{[\s\S]*visible:\s*true/.test(
 			paintedDeferredInlineSource))
-		verify(/id:\s*asyncMessageDelegate[\s\S]*previewOnlyAtomicHandoff:[\s\S]*messageBodyIsPreviewSourceOnly\(bodySegments\s*\|\|\s*\[\],[\s\S]*normalizedModelList\(attachments\)\.length\s*===\s*0[\s\S]*objectName:\s*"asyncRichHandoffSummary"[\s\S]*visible:\s*!asyncMessageDelegate\.previewOnlyAtomicHandoff/.test(mainSource))
-		const cachedStaticHandoffStart = mainSource.indexOf(
+		const previewOnlyAtomicHandoffStart = asyncDelegateSource.indexOf(
+			"readonly property bool previewOnlyAtomicHandoff:")
+		const previewOnlyAtomicHandoffEnd = asyncDelegateSource.indexOf(
+			"readonly property string cachedStaticHandoffSource:",
+			previewOnlyAtomicHandoffStart)
+		verify(previewOnlyAtomicHandoffStart >= 0
+			&& previewOnlyAtomicHandoffEnd > previewOnlyAtomicHandoffStart)
+		const previewOnlyAtomicHandoffSource = asyncDelegateSource.slice(
+			previewOnlyAtomicHandoffStart, previewOnlyAtomicHandoffEnd)
+		verify(/previewOnlyAtomicHandoff:[\s\S]*messageBodyIsPreviewSourceOnly\(bodySegments\s*\|\|\s*\[\],[\s\S]*normalizedModelList\(attachments\)\.length\s*===\s*0/.test(
+			previewOnlyAtomicHandoffSource))
+		const asyncRichHandoffSummaryEnd = asyncDelegateSource.indexOf(
+			'objectName: "asyncCachedStaticPreviewHandoff"',
+			asyncRichHandoffSummaryStart)
+		verify(asyncRichHandoffSummaryStart >= 0
+			&& asyncRichHandoffSummaryEnd > asyncRichHandoffSummaryStart)
+		const asyncRichHandoffSummarySource = asyncDelegateSource.slice(
+			asyncRichHandoffSummaryStart, asyncRichHandoffSummaryEnd)
+		verify(/objectName:\s*"asyncRichHandoffSummary"[\s\S]*visible:\s*true[\s\S]*anchors\.top:\s*parent\.top[\s\S]*anchors\.topMargin:\s*Theme\.space2[\s\S]*height:\s*Math\.min\(48,\s*Math\.max\(1,\s*parent\.height\s*-\s*Theme\.space2\s*\*\s*2\)\)[\s\S]*anchors\.leftMargin:\s*Theme\.space3[\s\S]*anchors\.rightMargin:\s*Theme\.space3/.test(
+			asyncRichHandoffSummarySource))
+		verify(!/visible:\s*!asyncMessageDelegate\.previewOnlyAtomicHandoff/.test(
+			asyncRichHandoffSummarySource))
+		const cachedStaticHandoffStart = asyncDelegateSource.indexOf(
 			"readonly property string cachedStaticHandoffSource:")
-		const cachedStaticHandoffEnd = mainSource.indexOf(
-			"function openAutomationActions()", cachedStaticHandoffStart)
+		const cachedStaticHandoffVisualStart = asyncDelegateSource.indexOf(
+			'objectName: "asyncCachedStaticPreviewHandoff"', cachedStaticHandoffStart)
+		const cachedStaticHandoffVisualEnd = asyncDelegateSource.indexOf(
+			"function openAutomationActions()", cachedStaticHandoffVisualStart)
 		verify(cachedStaticHandoffStart >= 0
-			&& cachedStaticHandoffEnd > cachedStaticHandoffStart)
-		const cachedStaticHandoffSource = mainSource.slice(cachedStaticHandoffStart,
-			cachedStaticHandoffEnd)
+			&& cachedStaticHandoffVisualStart > cachedStaticHandoffStart
+			&& cachedStaticHandoffVisualEnd > cachedStaticHandoffVisualStart)
+		const cachedStaticHandoffSource = asyncDelegateSource.slice(
+			cachedStaticHandoffStart, cachedStaticHandoffVisualStart)
+		const cachedStaticHandoffVisualSource = asyncDelegateSource.slice(
+			cachedStaticHandoffVisualStart, cachedStaticHandoffVisualEnd)
+		const cachedStaticHandoffCombinedSource = asyncDelegateSource.slice(
+			cachedStaticHandoffStart, cachedStaticHandoffVisualEnd)
 		verify(/cachedStaticHandoffSource:[\s\S]*!accessibilityPooled\s*&&\s*cachedStaticHandoffEligible[\s\S]*timeline\.staticPreviewSourceFor\(preview\s*\|\|\s*\(\{\}\)\)[\s\S]*cachedStaticHandoffReady:[\s\S]*staticPreviewPreheatCompletedSources/.test(
 			cachedStaticHandoffSource))
 		verify(!/cachedStaticHandoffSource:[\s\S]{0,120}previewOnlyAtomicHandoff/.test(
 			cachedStaticHandoffSource))
 		verify(/objectName:\s*"asyncCachedStaticPreviewHandoff"[\s\S]*x:\s*asyncMessageDelegate\.cachedStaticHandoffCardX[\s\S]*visible:\s*!asyncMessageDelegate\.accessibilityPooled[\s\S]*cachedStaticHandoffReady[\s\S]*source:\s*asyncRichHandoff\.visible[\s\S]*!asyncMessageDelegate\.accessibilityPooled[\s\S]*cachedStaticHandoffSource[\s\S]*asynchronous:\s*true[\s\S]*cache:\s*true[\s\S]*sourceSize:\s*Qt\.size\(1280,\s*960\)[\s\S]*fillMode:\s*Image\.PreserveAspectCrop/.test(
-			cachedStaticHandoffSource))
+			cachedStaticHandoffVisualSource))
 		verify(!/visible:[\s\S]{0,180}cachedStaticHandoffImage\.status\s*===\s*Image\.Ready/.test(
-			cachedStaticHandoffSource))
+			cachedStaticHandoffVisualSource))
 		verify(/function\s+staticPreviewHandoffMediaItem\(preview\)[\s\S]*staticPreviewMediaSource\(item\)\.eligible\s*===\s*true[\s\S]*function\s+staticPreviewHandoffMediaExpanded\(item\)[\s\S]*safeStaticPreviewDirectMediaUrl[\s\S]*safeStaticPreviewExternalUrl[\s\S]*function\s+staticPreviewHandoffUsesCompactHeader\(preview\)[\s\S]*!staticPreviewHandoffMediaExpanded\(currentMedia\)/.test(mainSource))
 		verify(/typedDocument\s*&&\s*currentKind\.length\s*>\s*0[\s\S]*return false[\s\S]*cachedStaticHandoffItemKind:[\s\S]*cachedStaticHandoffMediaExpanded:[\s\S]*cachedStaticHandoffItemKind\.length\s*>\s*0/.test(mainSource))
 		verify(/function\s+staticPreviewHandoffEmbedGeometry\(preview\)[\s\S]*\^https:\\\/\\\/[\s\S]*reserveEmbedGeometry[\s\S]*cachedStaticHandoffEmbedGeometry:[\s\S]*staticPreviewHandoffEmbedGeometry/.test(mainSource))
@@ -1560,11 +1598,12 @@ TestCase {
 		verify(/cachedStaticHandoffSystemMessage[\s\S]*Math\.min\(cachedStaticHandoffLaneWidth,\s*680\)[\s\S]*cachedStaticHandoffMessageX/.test(cachedStaticHandoffSource))
 		verify(/cachedStaticHandoffAspect\s*===\s*"twitch"[\s\S]*cachedStaticHandoffEmbedMediaWidth \* 3 \/ 4[\s\S]*cachedStaticHandoffDirectVideo[\s\S]*cachedStaticHandoffCardWidth \* 9 \/ 16[\s\S]*cachedStaticHandoffCardHeight:[\s\S]*cachedStaticHandoffMediaHeight \+ 132/.test(cachedStaticHandoffSource))
 		verify(/cachedStaticHandoffY:[\s\S]*height - 1[\s\S]*cachedStaticHandoffVisibleHeight:[\s\S]*height - cachedStaticHandoffY/.test(cachedStaticHandoffSource))
-		verify(!/objectName:\s*"asyncCachedStaticPreviewHandoff"[\s\S]{0,500}parent\.height - height/.test(cachedStaticHandoffSource))
+		verify(!/objectName:\s*"asyncCachedStaticPreviewHandoff"[\s\S]{0,500}parent\.height - height/.test(
+			cachedStaticHandoffVisualSource))
 		verify(/function\s+staticPreviewSourceFor\(preview\)[\s\S]*metadata\.contentWarning[\s\S]*thumbnailBlur[\s\S]*return ""[\s\S]*state\s*!==\s*"ready"/.test(mainSource))
 		verify(/staticPreviewLookaheadDistance:[\s\S]{0,100}height \* 1\.35/.test(mainSource))
 		verify(!/AnimatedImage|InlineMediaPlayer|MediaPlayer/.test(
-			cachedStaticHandoffSource))
+			cachedStaticHandoffCombinedSource))
 		verify(/id:\s*messageBody[\s\S]*visible:\s*!messageDelegate\.deleted[\s\S]*!messageDelegate\.previewSourceOnly/.test(mainSource))
 		verify(/function\s+messageBodyIsPreviewSourceOnly\(segments,\s*preview\)[\s\S]*sourceUrls\s*=\s*\[typedSourceUrl,\s*value\.url,\s*value\.sourceUrl,[\s\S]*value\.embedUrl,\s*value\.mediaUrl\][\s\S]*sourceUrls\.indexOf\(bodyUrl\)\s*<\s*0/.test(mainSource))
 		verify(/id:\s*messageFooter[\s\S]*visible:\s*messageDelegate\.hasEmbeddedFooterContent[\s\S]{0,100}!messageDelegate\.previewOnlyPaintPending/.test(mainSource))
