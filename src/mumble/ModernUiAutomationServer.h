@@ -72,6 +72,9 @@ private:
 		int targetSteps = 0;
 		int presentedFramesBeforeSeed = 0;
 		int presentedFramesBeforeRun = 0;
+		QString galleryMessageKey;
+		QString gallerySelectedSource;
+		QVariantMap galleryFinalMessage;
 		QString failureReason;
 		QMetaObject::Connection animationConnection;
 	} m_chatPerformanceWorkload;

@@ -161,6 +161,8 @@ private slots:
 	void visualFixturePresentationWaitIsBoundedAndDestroySafe();
 	void mediaAutomationReadinessStateIsTyped();
 	void conversationAutomationUsesLiveTypedControllers();
+	void stationaryGalleryAutomationSourcesAreStaged();
+	void stationaryGalleryAutomationIsStagedAndObservable();
 	void detachedMediaWindowWaitsForRuntimeReadiness();
 	void automationWalkProbesUseDeterministicFixtures();
 	void persistentChatAttachmentIoIsStrictAndAsynchronous();
@@ -3373,7 +3375,8 @@ void TestModernDialogControllers::conversationAutomationUsesLiveTypedControllers
 	QVERIFY(automationSource.contains(QStringLiteral("media->reopenSharedPlayer()")));
 	QVERIFY(automationSource.contains(QStringLiteral(
 		"host->commandController()->requestPreviewHydration(scopeToken, messageIds, highPriority)")));
-	QVERIFY(automationSource.contains(QStringLiteral("automationLiveRichPreviewState(host, messageId)")));
+	QVERIFY(automationSource.contains(QStringLiteral(
+		"automationLiveRichPreviewState(host, messageId, includeWarmStatic)")));
 	QVERIFY(automationSource.contains(QStringLiteral("timeline->rowForStableId(stableId)")));
 	QVERIFY(automationSource.contains(QStringLiteral("\"requestInlinePlaybackWithFocus\"")));
 	QVERIFY(automationSource.contains(QStringLiteral("\"requestCurrentDirectMediaPopout\"")));
@@ -3414,6 +3417,144 @@ void TestModernDialogControllers::conversationAutomationUsesLiveTypedControllers
 	QVERIFY(snapshotBody.contains(QStringLiteral("captureWindowReady(QStringLiteral(\"direct-message\"))")));
 	QVERIFY(snapshotBody.contains(QStringLiteral("automationScreenShareViewerStates()")));
 	QVERIFY(snapshotBody.contains(QStringLiteral("automationToastState(host->toastController())")));
+}
+
+void TestModernDialogControllers::stationaryGalleryAutomationSourcesAreStaged() {
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	const QString automationHeaderPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.h");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+	QVERIFY2(!automationHeaderPath.isEmpty(), "ModernUiAutomationServer.h test data was not found");
+	const QString source = readTestSource(automationPath);
+	const QString header = readTestSource(automationHeaderPath);
+	QVERIFY(!source.isEmpty());
+	QVERIFY(!header.isEmpty());
+
+	const qsizetype builderStart = source.indexOf(
+		QStringLiteral("QVariantMap automationPerformanceGalleryMessage("));
+	const qsizetype selectedStart = source.indexOf(
+		QStringLiteral("QVariantMap automationPerformanceGallerySelectedMessage("), builderStart);
+	const qsizetype stateStart = source.indexOf(
+		QStringLiteral("QVariantMap automationPerformanceGalleryMessageState("), selectedStart);
+	const qsizetype stateEnd = source.indexOf(
+		QStringLiteral("void automationCollectPreviewImageSources("), stateStart);
+	QVERIFY(builderStart >= 0);
+	QVERIFY(selectedStart > builderStart);
+	QVERIFY(stateStart > selectedStart);
+	QVERIFY(stateEnd > stateStart);
+	const QString builder = source.mid(builderStart, selectedStart - builderStart);
+	const QString selected = source.mid(selectedStart, stateStart - selectedStart);
+	const QString state = source.mid(stateStart, stateEnd - stateStart);
+	QVERIFY(builder.contains(QStringLiteral("for (int index = 0; index < 16; ++index)")));
+	QVERIFY(builder.contains(QStringLiteral("automationPreviewImageDataUrl(")));
+	QVERIFY(builder.contains(QStringLiteral("automationRegisterPreviewImages(")));
+	QVERIFY(builder.contains(QStringLiteral("QStringLiteral(\"steam\")")));
+	QVERIFY(builder.contains(QStringLiteral("gameStoreMediaItems")));
+	QVERIFY(builder.contains(QStringLiteral("cdn.example.invalid/qml-performance-gallery")));
+	QVERIFY(selected.contains(QStringLiteral("if (index > 0)")));
+	QVERIFY(selected.contains(QStringLiteral("item.remove(QStringLiteral(\"url\"))")));
+	QVERIFY(!selected.contains(QStringLiteral("item.remove(QStringLiteral(\"externalUrl\"))")));
+	QVERIFY(selected.contains(QStringLiteral("gameStoreImages")));
+	QVERIFY(selected.contains(QStringLiteral("gameStoreMediaItems")));
+	QVERIFY(state.contains(QStringLiteral("pipeline->containsSource(source)")));
+	QVERIFY(state.contains(QStringLiteral("managedReadyCount")));
+	QVERIFY(state.contains(QStringLiteral("externalOnlyCount")));
+	QVERIFY(state.contains(QStringLiteral("selectedSourceReady")));
+	QVERIFY(header.contains(QStringLiteral("QVariantMap galleryFinalMessage")));
+	QVERIFY(header.contains(QStringLiteral("QString gallerySelectedSource")));
+}
+
+void TestModernDialogControllers::stationaryGalleryAutomationIsStagedAndObservable() {
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+	const QString source = readTestSource(automationPath);
+	QVERIFY(!source.isEmpty());
+
+	const qsizetype commandStart = source.indexOf(
+		QStringLiteral("command == QLatin1String(\"qmlPerformanceChatGalleryStage\")"));
+	const qsizetype commandEnd = source.indexOf(
+		QStringLiteral("command == QLatin1String(\"qmlPerformanceChatStructuralStimulus\")"),
+		commandStart);
+	QVERIFY(commandStart >= 0);
+	QVERIFY(commandEnd > commandStart);
+	const QString command = source.mid(commandStart, commandEnd - commandStart);
+	const QString normalizedCommand = command.simplified();
+	QVERIFY(command.contains(QStringLiteral("!m_chatPerformanceWorkload.active")));
+	QVERIFY(command.contains(QStringLiteral("m_chatPerformanceWorkload.running")));
+	QVERIFY(command.contains(QStringLiteral("mediaItemCount != 16")));
+	QVERIFY(command.contains(QStringLiteral("timelinePresentationState")));
+	QVERIFY(command.contains(QStringLiteral("scrollbarPressed")));
+	QVERIFY(command.contains(QStringLiteral("scrollbarDragActive")));
+	QVERIFY(command.contains(QStringLiteral("scrollbarReleasePending")));
+	QVERIFY(command.contains(QStringLiteral(
+		"chat->presentationBusy() || chat->deferredPresentationUpdatesPending()")));
+	QVERIFY(command.contains(QStringLiteral("chat->get(targetRow).value(QStringLiteral(\"deferredPresentation\"))")));
+	QVERIFY(normalizedCommand.contains(QStringLiteral(
+		"if (!chat->presentationBusy() || !scrollbarPressed || !scrollbarDragActive || scrollbarReleasePending) {")));
+	QVERIFY(command.contains(QStringLiteral("appliedStateBefore")));
+	QVERIFY(command.contains(QStringLiteral(
+		"appliedStateBefore.value(QStringLiteral(\"managedReadyCount\")).toInt() != 1")));
+	QVERIFY(command.contains(QStringLiteral(
+		"requestedState.value(QStringLiteral(\"managedReadyCount\")).toInt() != 16")));
+	QVERIFY(command.contains(QStringLiteral("automationRichPreviewCardState(")));
+	QVERIFY(command.contains(QStringLiteral("host->window(), messageKey, true")));
+	QVERIFY(command.contains(QStringLiteral("documentGalleryCurrentVisualStatusName")));
+	QVERIFY(command.contains(QStringLiteral("documentGalleryPaintedSurface")));
+	QVERIFY(command.contains(QStringLiteral(
+		"requestedMessage = m_chatPerformanceWorkload.galleryFinalMessage")));
+	QVERIFY(command.contains(QStringLiteral("chat->upsertMessage(requestedMessage)")));
+	QVERIFY(command.contains(QStringLiteral("!chat->deferredPresentationUpdatesPending()")));
+	QVERIFY(command.contains(QStringLiteral("appliedState != appliedStateBefore")));
+	QVERIFY(command.contains(QStringLiteral("queuedForPresentation")));
+	QVERIFY(command.contains(QStringLiteral("requestedManagedReadyCount")));
+	QVERIFY(command.contains(QStringLiteral("appliedManagedReadyCount")));
+	QVERIFY(command.contains(QStringLiteral("selectedSourceStable")));
+	QVERIFY(!command.contains(QStringLiteral("automationPreviewImageDataUrl(")));
+
+	const qsizetype finderStart = source.indexOf(
+		QStringLiteral("QObject *automationFindRichPreviewCard("));
+	const qsizetype cardStateStart = source.indexOf(
+		QStringLiteral("QVariantMap automationRichPreviewCardState("), finderStart);
+	const qsizetype cardStateEnd = source.indexOf(
+		QStringLiteral("QVariantMap automationLiveRichPreviewState("), cardStateStart);
+	QVERIFY(finderStart >= 0);
+	QVERIFY(cardStateStart > finderStart);
+	QVERIFY(cardStateEnd > cardStateStart);
+	const QString finder = source.mid(finderStart, cardStateStart - finderStart);
+	const QString cardState = source.mid(cardStateStart, cardStateEnd - cardStateStart);
+	QVERIFY(finder.contains(QStringLiteral("const bool includeWarmStatic = false")));
+	QVERIFY(finder.contains(QStringLiteral("candidate->property(\"renderActive\").toBool()")));
+	QVERIFY(finder.contains(QStringLiteral(
+		"includeWarmStatic && candidate->property(\"warmStaticActive\").toBool()")));
+	for (const QString &field : { QStringLiteral("warmStaticActive"), QStringLiteral("mediaItemCount"),
+			 QStringLiteral("selectedMediaIndex"), QStringLiteral("documentGalleryCurrentVisualStatus"),
+			 QStringLiteral("documentGalleryPaintedSurface"), QStringLiteral("documentGallerySurfaceState"),
+			 QStringLiteral("visibleThumbnailSlots") }) {
+		QVERIFY2(cardState.contains(field),
+			qPrintable(QStringLiteral("Missing gallery observation field: %1").arg(field)));
+	}
+	QVERIFY(cardState.contains(QStringLiteral("thumbnailImage->property(\"source\").toString()")));
+	QVERIFY(cardState.contains(QStringLiteral("thumbnailImage->property(\"status\").toInt()")));
+	QVERIFY(!cardState.contains(QStringLiteral(
+		"thumbnailImage->property(\"source\").toString().isEmpty()")));
+
+	const qsizetype richStateStart = source.indexOf(
+		QStringLiteral("if (command == QLatin1String(\"richPreviewState\"))"));
+	const qsizetype richActionStart = source.indexOf(
+		QStringLiteral("if (command == QLatin1String(\"invokeRichPreviewAction\"))"), richStateStart);
+	const qsizetype richActionEnd = source.indexOf(
+		QStringLiteral("if (command == QLatin1String(\"screenShareViewerState\"))"), richActionStart);
+	QVERIFY(richStateStart >= 0);
+	QVERIFY(richActionStart > richStateStart);
+	QVERIFY(richActionEnd > richActionStart);
+	const QString richState = source.mid(richStateStart, richActionStart - richStateStart);
+	const QString richAction = source.mid(richActionStart, richActionEnd - richActionStart);
+	QVERIFY(richState.contains(QStringLiteral(
+		"request.value(QStringLiteral(\"includeWarmStatic\"), false)")));
+	QVERIFY(richState.contains(QStringLiteral(
+		"automationLiveRichPreviewState(host, messageId, includeWarmStatic)")));
+	QVERIFY(richAction.contains(QStringLiteral(
+		"automationFindRichPreviewCard(host->window(), messageId)")));
+	QVERIFY(!richAction.contains(QStringLiteral("includeWarmStatic")));
 }
 
 void TestModernDialogControllers::detachedMediaWindowWaitsForRuntimeReadiness() {

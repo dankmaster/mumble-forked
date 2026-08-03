@@ -2992,6 +2992,138 @@ namespace {
 		return result;
 	}
 
+	QVariantMap automationPreviewImageItem(const QString &source, const QString &title);
+	QVariantMap automationProviderPreview(const QString &url, const QString &title, const QString &subtitle,
+										 const QString &description, const QString &openLabel,
+										 const QVariantMap &metadata, const QVariantList &mediaItems,
+										 const QString &size);
+
+	QVariantMap automationPerformanceGalleryMessage(const QString &messageKey,
+													 const std::shared_ptr< QmlImagePipeline > &pipeline) {
+		const QStringList accents {
+			QStringLiteral("#2f6f91"), QStringLiteral("#687a36"), QStringLiteral("#9d6734"),
+			QStringLiteral("#6c4e8c"), QStringLiteral("#32685c"), QStringLiteral("#9a4f5a"),
+			QStringLiteral("#4e6795"), QStringLiteral("#876a35")
+		};
+		QVariantList mediaItems;
+		mediaItems.reserve(16);
+		for (int index = 0; index < 16; ++index) {
+			QVariantMap item = automationPreviewImageItem(
+				automationPreviewImageDataUrl(
+					QStringLiteral("Halo: Campaign Evolved"),
+					QStringLiteral("Deterministic gallery frame %1 of 16").arg(index + 1),
+					accents.at(index % accents.size()), accents.at((index + 3) % accents.size())),
+				QStringLiteral("Gallery frame %1").arg(index + 1));
+			item.insert(QStringLiteral("externalUrl"),
+				QStringLiteral("https://cdn.example.invalid/qml-performance-gallery/frame-%1.png")
+					.arg(index + 1));
+			mediaItems.push_back(item);
+		}
+
+		const QVariantList tags {
+			QStringLiteral("Action"), QStringLiteral("Campaign"), QStringLiteral("Singleplayer")
+		};
+		const QVariantMap metadata {
+			{ QStringLiteral("provider"), QStringLiteral("steam") },
+			{ QStringLiteral("previewProvider"), QStringLiteral("steam") },
+			{ QStringLiteral("previewKind"), QStringLiteral("gameStoreProduct") },
+			{ QStringLiteral("gameStoreProvider"), QStringLiteral("steam") },
+			{ QStringLiteral("gameStoreName"), QStringLiteral("Steam") },
+			{ QStringLiteral("gameStoreProductTitle"), QStringLiteral("Halo: Campaign Evolved") },
+			{ QStringLiteral("gameStoreDescription"),
+			  QStringLiteral("A deterministic sixteen-frame Steam gallery used for stationary-scroll acceptance.") },
+			{ QStringLiteral("gameStorePrice"), QStringLiteral("59,99 €") },
+			{ QStringLiteral("gameStoreBrand"), QStringLiteral("Halo Studios") },
+			{ QStringLiteral("gameStorePlatform"), QStringLiteral("Windows") },
+			{ QStringLiteral("gameStoreReleaseDate"), QStringLiteral("28 Jul, 2026") },
+			{ QStringLiteral("gameStoreRating"), QStringLiteral("Mixed") },
+			{ QStringLiteral("gameStoreImage"), mediaItems.first().toMap().value(QStringLiteral("url")) },
+			{ QStringLiteral("gameStoreTags"), tags },
+			{ QStringLiteral("gameStoreImages"), mediaItems },
+			{ QStringLiteral("gameStoreMedia"), mediaItems },
+			{ QStringLiteral("gameStoreMediaItems"), mediaItems }
+		};
+		const QString url = QStringLiteral(
+			"https://store.steampowered.com/app/2806050/Halo_Campaign_Evolved/");
+		const QVariantMap preview = automationProviderPreview(
+			url, QStringLiteral("Halo: Campaign Evolved"), QStringLiteral("Steam"),
+			QStringLiteral("Deterministic sixteen-frame stationary-scroll gallery"),
+			QStringLiteral("Open on Steam"), metadata, mediaItems, QStringLiteral("large"));
+		const QVariantMap message {
+			{ QStringLiteral("messageKey"), messageKey },
+			{ QStringLiteral("actor"), QStringLiteral("Performance peer") },
+			{ QStringLiteral("bodyText"), url },
+			{ QStringLiteral("timeLabel"), QStringLiteral("18:51") },
+			{ QStringLiteral("deliveryState"), QStringLiteral("sent") },
+			{ QStringLiteral("own"), false },
+			{ QStringLiteral("preview"), preview }
+		};
+		const QVariantList registered = automationRegisterPreviewImages(
+			QVariantList { message }, pipeline, QStringLiteral("performance-gallery"));
+		return registered.isEmpty() ? QVariantMap() : registered.first().toMap();
+	}
+
+	QVariantMap automationPerformanceGallerySelectedMessage(const QVariantMap &finalMessage) {
+		QVariantMap selectedMessage = finalMessage;
+		QVariantMap preview = selectedMessage.value(QStringLiteral("preview")).toMap();
+		const QVariantList finalItems = preview.value(QStringLiteral("mediaItems")).toList();
+		QVariantList selectedItems;
+		selectedItems.reserve(finalItems.size());
+		for (int index = 0; index < finalItems.size(); ++index) {
+			QVariantMap item = finalItems.at(index).toMap();
+			if (index > 0) {
+				item.remove(QStringLiteral("url"));
+				item.remove(QStringLiteral("thumbnail"));
+				item.remove(QStringLiteral("thumbnailUrl"));
+				item.remove(QStringLiteral("poster"));
+				item.remove(QStringLiteral("posterUrl"));
+			}
+			selectedItems.push_back(item);
+		}
+		const QString selectedSource = selectedItems.isEmpty()
+			? QString() : selectedItems.first().toMap().value(QStringLiteral("url")).toString();
+		preview.insert(QStringLiteral("mediaItems"), selectedItems);
+		preview.insert(QStringLiteral("thumbnailUrl"), selectedSource);
+		QVariantMap metadata = preview.value(QStringLiteral("metadata")).toMap();
+		metadata.insert(QStringLiteral("gameStoreImage"), selectedSource);
+		metadata.insert(QStringLiteral("gameStoreImages"), selectedItems);
+		metadata.insert(QStringLiteral("gameStoreMedia"), selectedItems);
+		metadata.insert(QStringLiteral("gameStoreMediaItems"), selectedItems);
+		preview.insert(QStringLiteral("metadata"), metadata);
+		selectedMessage.insert(QStringLiteral("preview"), preview);
+		return selectedMessage;
+	}
+
+	QVariantMap automationPerformanceGalleryMessageState(const QVariantMap &message,
+													  const std::shared_ptr< QmlImagePipeline > &pipeline) {
+		const QVariantMap preview = message.value(QStringLiteral("preview")).toMap();
+		const QVariantList mediaItems = preview.value(QStringLiteral("mediaItems")).toList();
+		const int mediaItemCount = static_cast< int >(mediaItems.size());
+		int managedReadyCount = 0;
+		int externalOnlyCount = 0;
+		for (const QVariant &entry : mediaItems) {
+			const QVariantMap item = entry.toMap();
+			const QString source = item.value(QStringLiteral("url")).toString().trimmed();
+			if (!source.isEmpty() && pipeline && pipeline->containsSource(source)) {
+				++managedReadyCount;
+			} else if (source.isEmpty()
+					   && !item.value(QStringLiteral("externalUrl")).toString().trimmed().isEmpty()) {
+				++externalOnlyCount;
+			}
+		}
+		const QString selectedSource = mediaItems.isEmpty()
+			? QString() : mediaItems.first().toMap().value(QStringLiteral("url")).toString();
+		return QVariantMap {
+			{ QStringLiteral("mediaItemCount"), mediaItemCount },
+			{ QStringLiteral("managedReadyCount"), managedReadyCount },
+			{ QStringLiteral("pendingCount"), qMax(0, mediaItemCount - managedReadyCount) },
+			{ QStringLiteral("externalOnlyCount"), externalOnlyCount },
+			{ QStringLiteral("selectedSource"), selectedSource },
+			{ QStringLiteral("selectedSourceReady"), !selectedSource.isEmpty() && pipeline
+				&& pipeline->containsSource(selectedSource) }
+		};
+	}
+
 	void automationCollectPreviewImageSources(const QVariant &value, QStringList &providerUrls,
 											 int &dataImageSourceCount) {
 		if (value.typeId() == QMetaType::QString) {
@@ -4535,7 +4667,8 @@ namespace {
 		return states;
 	}
 
-	QObject *automationFindRichPreviewCard(QQuickWindow *window, const QString &messageId) {
+	QObject *automationFindRichPreviewCard(QQuickWindow *window, const QString &messageId,
+										 const bool includeWarmStatic = false) {
 		if (!window || messageId.trimmed().isEmpty()) {
 			return nullptr;
 		}
@@ -4545,8 +4678,10 @@ namespace {
 		// misses live, rendered cards after ListView delegate reuse.
 		for (QQuickItem *candidate : automationQuickItemSubtree(window->contentItem())) {
 			const QVariant identityValue = candidate->property("previewIdentity");
+			const bool observable = candidate->property("renderActive").toBool()
+				|| (includeWarmStatic && candidate->property("warmStaticActive").toBool());
 			if (identityValue.isValid() && identityValue.toString().startsWith(prefix)
-				&& candidate->property("renderActive").toBool()
+				&& observable
 				&& automationQuickItemHasVisibleAncestry(candidate)) {
 				return candidate;
 			}
@@ -4620,12 +4755,18 @@ namespace {
 		return true;
 	}
 
-	QVariantMap automationRichPreviewCardState(QQuickWindow *window, const QString &messageId) {
+	QVariantMap automationRichPreviewCardState(QQuickWindow *window, const QString &messageId,
+											 const bool includeWarmStatic = false) {
 		QVariantMap state;
 		state.insert(QStringLiteral("messageId"), messageId);
-		QObject *card = automationFindRichPreviewCard(window, messageId);
+		QObject *card = automationFindRichPreviewCard(window, messageId, includeWarmStatic);
 		state.insert(QStringLiteral("rendered"), card != nullptr);
 		if (!card) {
+			state.insert(QStringLiteral("renderActive"), false);
+			state.insert(QStringLiteral("warmStaticActive"), false);
+			state.insert(QStringLiteral("mediaItemCount"), 0);
+			state.insert(QStringLiteral("selectedMediaIndex"), 0);
+			state.insert(QStringLiteral("visibleThumbnailSlots"), QVariantList());
 			state.insert(QStringLiteral("compact"), false);
 			state.insert(QStringLiteral("playAccessibilityName"), QString());
 			state.insert(QStringLiteral("providerDetailsVisible"), false);
@@ -4651,6 +4792,9 @@ namespace {
 		state.insert(QStringLiteral("mediaRequiresReveal"), card->property("mediaRequiresReveal").toBool());
 		state.insert(QStringLiteral("previewState"), card->property("previewState").toString());
 		state.insert(QStringLiteral("renderActive"), card->property("renderActive").toBool());
+		state.insert(QStringLiteral("warmStaticActive"), card->property("warmStaticActive").toBool());
+		state.insert(QStringLiteral("mediaItemCount"), card->property("mediaItems").toList().size());
+		state.insert(QStringLiteral("selectedMediaIndex"), card->property("selectedMediaIndex").toInt());
 		state.insert(QStringLiteral("inlinePlaybackActive"), card->property("inlinePlaybackActive").toBool());
 		state.insert(QStringLiteral("inlineProviderLoadTimeoutRunning"),
 			card->property("inlineProviderLoadTimeoutRunning").toBool());
@@ -4709,6 +4853,9 @@ namespace {
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("embedDocumentAnimatedImageLoader")) : nullptr;
 		QObject *documentPlaybackPrompt = cardItem
 			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("embedDocumentPlaybackPrompt")) : nullptr;
+		QQuickItem *documentThumbnailList = cardItem
+			? qobject_cast< QQuickItem * >(automationFindQuickItemByObjectName(
+				cardItem, QStringLiteral("embedDocumentMediaThumbnailList"))) : nullptr;
 		state.insert(QStringLiteral("playVisible"), playButton && playButton->property("visible").toBool());
 		state.insert(QStringLiteral("embedPosterStatus"),
 			embedPoster ? embedPoster->property("status").toInt() : -1);
@@ -4739,6 +4886,19 @@ namespace {
 			documentGallery ? documentGallery->property("currentKind").toString() : QString());
 		state.insert(QStringLiteral("documentGalleryCurrentImageSource"),
 			documentGallery ? documentGallery->property("currentImageSource").toString() : QString());
+		state.insert(QStringLiteral("documentGalleryCurrentVisualStatus"),
+			documentGallery ? documentGallery->property("currentVisualStatus").toInt() : -1);
+		state.insert(QStringLiteral("documentGalleryCurrentVisualStatusName"),
+			automationImageStatusName(
+				documentGallery ? documentGallery->property("currentVisualStatus").toInt() : -1));
+		state.insert(QStringLiteral("documentGalleryPaintedSurface"),
+			documentGallery && documentGallery->property("paintedSurface").toBool());
+		state.insert(QStringLiteral("documentGalleryPaintedLoading"),
+			documentGallery && documentGallery->property("paintedLoading").toBool());
+		state.insert(QStringLiteral("documentGalleryPaintedTerminal"),
+			documentGallery && documentGallery->property("paintedTerminal").toBool());
+		state.insert(QStringLiteral("documentGallerySurfaceState"),
+			documentGallery ? documentGallery->property("performanceMediaSurfaceState").toString() : QString());
 		state.insert(QStringLiteral("documentGalleryCompactFallback"),
 			documentGallery && documentGallery->property("compactFallback").toBool());
 		state.insert(QStringLiteral("documentImageSource"),
@@ -4751,6 +4911,37 @@ namespace {
 			documentAnimation && documentAnimation->property("active").toBool());
 		state.insert(QStringLiteral("documentPlaybackPromptVisible"),
 			documentPlaybackPrompt && documentPlaybackPrompt->property("visible").toBool());
+
+		QVariantList visibleThumbnailSlots;
+		const int mediaItemCount = state.value(QStringLiteral("mediaItemCount")).toInt();
+		for (int index = 0; documentThumbnailList && index < mediaItemCount; ++index) {
+			QQuickItem *thumbnailImage = qobject_cast< QQuickItem * >(
+				automationFindQuickItemByObjectName(documentThumbnailList,
+					QStringLiteral("embedDocumentMediaThumbnailImage_%1").arg(index)));
+			QQuickItem *thumbnailButton = qobject_cast< QQuickItem * >(
+				automationFindQuickItemByObjectName(documentThumbnailList,
+					QStringLiteral("embedDocumentMediaThumbnail_%1").arg(index)));
+			if (!thumbnailImage || !thumbnailButton
+				|| !thumbnailButton->property("inThumbnailViewport").toBool()) {
+				continue;
+			}
+			QRectF sceneRect;
+			QRectF visibleSceneRect;
+			if (!automationEffectiveImageRects(
+					thumbnailImage, cardItem, &sceneRect, &visibleSceneRect)) {
+				continue;
+			}
+			const int status = thumbnailImage->property("status").toInt();
+			visibleThumbnailSlots.push_back(QVariantMap {
+				{ QStringLiteral("index"), index },
+				{ QStringLiteral("source"), thumbnailImage->property("source").toString() },
+				{ QStringLiteral("status"), status },
+				{ QStringLiteral("statusName"), automationImageStatusName(status) },
+				{ QStringLiteral("sceneRect"), automationSceneRectState(sceneRect) },
+				{ QStringLiteral("visibleSceneRect"), automationSceneRectState(visibleSceneRect) }
+			});
+		}
+		state.insert(QStringLiteral("visibleThumbnailSlots"), visibleThumbnailSlots);
 
 		bool focused = false;
 		if (window) {
@@ -4820,7 +5011,8 @@ namespace {
 		return state;
 	}
 
-	QVariantMap automationLiveRichPreviewState(QmlShellHost *host, const QString &messageId) {
+	QVariantMap automationLiveRichPreviewState(QmlShellHost *host, const QString &messageId,
+											 const bool includeWarmStatic = false) {
 		const QString stableId = messageId.trimmed();
 		QVariantMap state {
 			{ QStringLiteral("messageId"), stableId },
@@ -4861,7 +5053,8 @@ namespace {
 			state.insert(QStringLiteral("imagePipelineCachedBytes"), imagePipeline->cachedBytes());
 			state.insert(QStringLiteral("imagePipelineSourceCount"), imagePipeline->sourceCountForTest());
 		}
-		state.insert(QStringLiteral("card"), automationRichPreviewCardState(host->window(), stableId));
+		state.insert(QStringLiteral("card"),
+			automationRichPreviewCardState(host->window(), stableId, includeWarmStatic));
 		return state;
 	}
 
@@ -5585,6 +5778,166 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 									 && layout.value(QStringLiteral("settled")).toBool()
 									 && !layout.value(QStringLiteral("firstVisibleId")).toString().isEmpty()
 									 && frames > m_chatPerformanceWorkload.presentedFramesBeforeSeed);
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceChatGalleryStage")) {
+			if (!m_chatPerformanceWorkload.active || m_chatPerformanceWorkload.liveMode)
+				return errorResponse(tr("No deterministic chat performance fixture is active."));
+			if (m_chatPerformanceWorkload.running)
+				return errorResponse(tr("Wait for the chat-scroll performance workload to settle first."));
+			if (!host->imagePipeline())
+				return errorResponse(tr("The managed image pipeline is not active."));
+			const QString stage = request.value(QStringLiteral("stage")).toString().trimmed().toLower();
+			if (stage != QLatin1String("selected") && stage != QLatin1String("final"))
+				return errorResponse(tr("The gallery stage must be 'selected' or 'final'."));
+			const int mediaItemCount = request.value(QStringLiteral("mediaItemCount"), 16).toInt();
+			if (mediaItemCount != 16)
+				return errorResponse(tr("The stationary gallery fixture requires exactly 16 media items."));
+			const QString messageKey = request.value(
+				QStringLiteral("messageKey"), QStringLiteral("qml-perf-message-63"))
+				.toString().trimmed();
+			ChatTimelineModel *chat = host->chatModel();
+			const int targetRow = chat->rowForStableId(messageKey);
+			if (messageKey.isEmpty() || targetRow < 0)
+				return errorResponse(tr("The stationary gallery target row is not present."));
+			QVariant timelineStateValue;
+			if (!QMetaObject::invokeMethod(host->window(), "timelinePresentationState",
+					Q_RETURN_ARG(QVariant, timelineStateValue))) {
+				return errorResponse(tr("The Qt Quick root does not expose timeline ownership state."));
+			}
+			const QVariantMap timelineOwnership = timelineStateValue.toMap();
+			const bool scrollbarPressed = timelineOwnership.value(QStringLiteral("scrollbarPressed")).toBool();
+			const bool scrollbarDragActive =
+				timelineOwnership.value(QStringLiteral("scrollbarDragActive")).toBool();
+			const bool scrollbarReleasePending =
+				timelineOwnership.value(QStringLiteral("scrollbarReleasePending")).toBool();
+			const auto appliedMessageForTarget = [chat, messageKey]() {
+				const int row = chat->rowForStableId(messageKey);
+				return row >= 0 ? chat->get(row) : QVariantMap();
+			};
+
+			QVariantMap requestedMessage;
+			QVariantMap appliedStateBefore;
+			if (stage == QLatin1String("selected")) {
+				if (chat->presentationBusy() || chat->deferredPresentationUpdatesPending())
+					return errorResponse(tr("Apply the selected gallery stage before holding the scrollbar."));
+				if (scrollbarPressed || scrollbarDragActive || scrollbarReleasePending)
+					return errorResponse(tr("Release the scrollbar before applying the selected gallery stage."));
+				if (chat->get(targetRow).value(QStringLiteral("deferredPresentation")).toBool())
+					return errorResponse(tr("Position the stationary gallery target in the materialized viewport first."));
+				m_chatPerformanceWorkload.galleryFinalMessage =
+					automationPerformanceGalleryMessage(messageKey, host->imagePipeline());
+				if (m_chatPerformanceWorkload.galleryFinalMessage.isEmpty())
+					return errorResponse(tr("The deterministic gallery images could not be registered."));
+				requestedMessage = automationPerformanceGallerySelectedMessage(
+					m_chatPerformanceWorkload.galleryFinalMessage);
+				m_chatPerformanceWorkload.galleryMessageKey = messageKey;
+				m_chatPerformanceWorkload.gallerySelectedSource =
+					automationPerformanceGalleryMessageState(
+						requestedMessage, host->imagePipeline()).value(QStringLiteral("selectedSource")).toString();
+			} else {
+				if (m_chatPerformanceWorkload.galleryMessageKey != messageKey
+					|| m_chatPerformanceWorkload.galleryFinalMessage.isEmpty()) {
+					return errorResponse(tr("Apply the selected gallery stage before the final stage."));
+				}
+				if (!chat->presentationBusy() || !scrollbarPressed || !scrollbarDragActive
+					|| scrollbarReleasePending) {
+					return errorResponse(tr("Hold the physical scrollbar before applying the final gallery stage."));
+				}
+				if (chat->get(targetRow).value(QStringLiteral("deferredPresentation")).toBool())
+					return errorResponse(tr("The held stationary gallery row is not materialized."));
+				appliedStateBefore = automationPerformanceGalleryMessageState(
+					appliedMessageForTarget(), host->imagePipeline());
+				if (appliedStateBefore.value(QStringLiteral("mediaItemCount")).toInt() != 16
+					|| appliedStateBefore.value(QStringLiteral("managedReadyCount")).toInt() != 1
+					|| appliedStateBefore.value(QStringLiteral("selectedSource")).toString()
+						!= m_chatPerformanceWorkload.gallerySelectedSource) {
+					return errorResponse(tr("The selected gallery stage is not visibly applied before final publication."));
+				}
+				const QVariantMap heldCard = automationRichPreviewCardState(
+					host->window(), messageKey, true);
+				if (!heldCard.value(QStringLiteral("rendered")).toBool()
+					|| !heldCard.value(QStringLiteral("warmStaticActive")).toBool()
+					|| heldCard.value(QStringLiteral("documentGalleryCurrentImageSource")).toString()
+						!= m_chatPerformanceWorkload.gallerySelectedSource
+					|| heldCard.value(QStringLiteral("documentGalleryCurrentVisualStatusName")).toString()
+						!= QLatin1String("ready")
+					|| !heldCard.value(QStringLiteral("documentGalleryPaintedSurface")).toBool()) {
+					return errorResponse(tr("The selected gallery surface is not warm and painted during the held thumb."));
+				}
+				requestedMessage = m_chatPerformanceWorkload.galleryFinalMessage;
+			}
+
+			const QVariantMap requestedState = automationPerformanceGalleryMessageState(
+				requestedMessage, host->imagePipeline());
+			if (requestedState.value(QStringLiteral("mediaItemCount")).toInt() != 16
+				|| requestedState.value(QStringLiteral("selectedSource")).toString().isEmpty()
+				|| requestedState.value(QStringLiteral("selectedSource")).toString()
+					!= m_chatPerformanceWorkload.gallerySelectedSource) {
+				return errorResponse(tr("The deterministic gallery stage lost its selected source identity."));
+			}
+			if ((stage == QLatin1String("selected")
+					 && requestedState.value(QStringLiteral("managedReadyCount")).toInt() != 1)
+				|| (stage == QLatin1String("final")
+					&& requestedState.value(QStringLiteral("managedReadyCount")).toInt() != 16)) {
+				return errorResponse(tr("The deterministic gallery stage has an invalid managed-source count."));
+			}
+
+			bool upserted = false;
+			{
+				host->setVisualFixtureMutationActive(true);
+				const auto mutationGuard = qScopeGuard(
+					[host]() { host->setVisualFixtureMutationActive(false); });
+				upserted = chat->upsertMessage(requestedMessage);
+			}
+			if (!upserted)
+				return errorResponse(tr("The deterministic gallery stage was rejected by the chat model."));
+			host->window()->update();
+
+			const int rowIndex = chat->rowForStableId(messageKey);
+			const QVariantMap appliedMessage = appliedMessageForTarget();
+			const QVariantMap appliedState = automationPerformanceGalleryMessageState(
+				appliedMessage, host->imagePipeline());
+			if (stage == QLatin1String("selected")
+				&& (chat->presentationBusy() || chat->deferredPresentationUpdatesPending()
+					|| appliedState.value(QStringLiteral("mediaItemCount")).toInt() != 16
+					|| appliedState.value(QStringLiteral("managedReadyCount")).toInt() != 1)) {
+				return errorResponse(tr("The selected gallery stage did not apply synchronously."));
+			}
+			if (stage == QLatin1String("final")
+				&& (!chat->deferredPresentationUpdatesPending()
+					|| appliedState != appliedStateBefore)) {
+				return errorResponse(tr("The final gallery stage did not remain deferred during scrollbar ownership."));
+			}
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("stage"), stage);
+			response.insert(QStringLiteral("messageKey"), messageKey);
+			response.insert(QStringLiteral("rowIndex"), rowIndex);
+			response.insert(QStringLiteral("upserted"), upserted);
+			response.insert(QStringLiteral("presentationBusy"), chat->presentationBusy());
+			response.insert(QStringLiteral("scrollbarPressed"), scrollbarPressed);
+			response.insert(QStringLiteral("scrollbarDragActive"), scrollbarDragActive);
+			response.insert(QStringLiteral("scrollbarReleasePending"), scrollbarReleasePending);
+			response.insert(QStringLiteral("deferredPresentationUpdatesPending"),
+				chat->deferredPresentationUpdatesPending());
+			response.insert(QStringLiteral("queuedForPresentation"),
+				stage == QLatin1String("final") && chat->presentationBusy()
+					&& chat->deferredPresentationUpdatesPending());
+			response.insert(QStringLiteral("requested"), requestedState);
+			response.insert(QStringLiteral("applied"), appliedState);
+			response.insert(QStringLiteral("requestedMediaItemCount"),
+				requestedState.value(QStringLiteral("mediaItemCount")));
+			response.insert(QStringLiteral("requestedManagedReadyCount"),
+				requestedState.value(QStringLiteral("managedReadyCount")));
+			response.insert(QStringLiteral("appliedMediaItemCount"),
+				appliedState.value(QStringLiteral("mediaItemCount")));
+			response.insert(QStringLiteral("appliedManagedReadyCount"),
+				appliedState.value(QStringLiteral("managedReadyCount")));
+			response.insert(QStringLiteral("selectedSource"),
+				m_chatPerformanceWorkload.gallerySelectedSource);
+			response.insert(QStringLiteral("selectedSourceStable"),
+				!m_chatPerformanceWorkload.gallerySelectedSource.isEmpty()
+					&& appliedState.value(QStringLiteral("selectedSource")).toString()
+						== m_chatPerformanceWorkload.gallerySelectedSource);
 			return response;
 		} else if (command == QLatin1String("qmlPerformanceChatStructuralStimulus")) {
 			if (!m_chatPerformanceWorkload.active || m_chatPerformanceWorkload.liveMode)
@@ -6623,8 +6976,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		if (!host) return errorResponse(tr("The Qt Quick frontend is not active."));
 		const QString messageId = request.value(QStringLiteral("messageId")).toString().trimmed();
 		if (messageId.isEmpty()) return errorResponse(tr("Missing preview messageId."));
+		const bool includeWarmStatic = request.value(QStringLiteral("includeWarmStatic"), false).toBool();
 		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("richPreview"), automationLiveRichPreviewState(host, messageId));
+		response.insert(QStringLiteral("richPreview"),
+			automationLiveRichPreviewState(host, messageId, includeWarmStatic));
 		return response;
 	}
 
