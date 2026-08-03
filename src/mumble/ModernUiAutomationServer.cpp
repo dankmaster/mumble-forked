@@ -5867,14 +5867,20 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 				}
 				const QVariantMap heldCard = automationRichPreviewCardState(
 					host->window(), messageKey, true);
+				const bool heldCardPresentationOwned =
+					heldCard.value(QStringLiteral("renderActive")).toBool()
+					|| heldCard.value(QStringLiteral("warmStaticActive")).toBool();
 				if (!heldCard.value(QStringLiteral("rendered")).toBool()
-					|| !heldCard.value(QStringLiteral("warmStaticActive")).toBool()
+					|| !heldCardPresentationOwned
 					|| heldCard.value(QStringLiteral("documentGalleryCurrentImageSource")).toString()
 						!= m_chatPerformanceWorkload.gallerySelectedSource
 					|| heldCard.value(QStringLiteral("documentGalleryCurrentVisualStatusName")).toString()
 						!= QLatin1String("ready")
-					|| !heldCard.value(QStringLiteral("documentGalleryPaintedSurface")).toBool()) {
-					return errorResponse(tr("The selected gallery surface is not warm and painted during the held thumb."));
+					|| !heldCard.value(QStringLiteral("documentGalleryPaintedSurface")).toBool()
+					|| heldCard.value(QStringLiteral("documentGalleryPaintedLoading")).toBool()
+					|| heldCard.value(QStringLiteral("documentGallerySurfaceState")).toString()
+						== QLatin1String("blank")) {
+					return errorResponse(tr("The selected gallery surface is not live-or-warm and painted during the held thumb."));
 				}
 				requestedMessage = m_chatPerformanceWorkload.galleryFinalMessage;
 			}

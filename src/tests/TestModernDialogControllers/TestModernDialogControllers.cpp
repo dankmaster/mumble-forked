@@ -3497,8 +3497,14 @@ void TestModernDialogControllers::stationaryGalleryAutomationIsStagedAndObservab
 		"requestedState.value(QStringLiteral(\"managedReadyCount\")).toInt() != 16")));
 	QVERIFY(command.contains(QStringLiteral("automationRichPreviewCardState(")));
 	QVERIFY(command.contains(QStringLiteral("host->window(), messageKey, true")));
+	QVERIFY(command.contains(QStringLiteral("const bool heldCardPresentationOwned")));
+	QVERIFY(command.contains(QStringLiteral("heldCard.value(QStringLiteral(\"renderActive\")).toBool()")));
+	QVERIFY(command.contains(QStringLiteral("heldCard.value(QStringLiteral(\"warmStaticActive\")).toBool()")));
+	QVERIFY(command.contains(QStringLiteral("|| !heldCardPresentationOwned")));
 	QVERIFY(command.contains(QStringLiteral("documentGalleryCurrentVisualStatusName")));
 	QVERIFY(command.contains(QStringLiteral("documentGalleryPaintedSurface")));
+	QVERIFY(command.contains(QStringLiteral("documentGalleryPaintedLoading")));
+	QVERIFY(command.contains(QStringLiteral("documentGallerySurfaceState")));
 	QVERIFY(command.contains(QStringLiteral(
 		"requestedMessage = m_chatPerformanceWorkload.galleryFinalMessage")));
 	QVERIFY(command.contains(QStringLiteral("chat->upsertMessage(requestedMessage)")));
