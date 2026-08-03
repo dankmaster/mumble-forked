@@ -498,6 +498,8 @@ class ChatTimelineModel final : public StableListModel {
 	Q_PROPERTY(bool prependPending READ prependPending NOTIFY prependPendingChanged)
 	Q_PROPERTY(bool presentationBusy READ presentationBusy WRITE setPresentationBusy
 				   NOTIFY presentationBusyChanged)
+	Q_PROPERTY(bool deferredPresentationUpdatesPending READ deferredPresentationUpdatesPending
+				   NOTIFY deferredPresentationUpdatesPendingChanged)
 	Q_PROPERTY(ChatTimelinePresentationProxyModel *presentationModel READ presentationModel CONSTANT)
 	Q_PROPERTY(ChatTimelinePresentationProxyModel *deferredPresentationModel READ deferredPresentationModel CONSTANT)
 public:
@@ -563,6 +565,7 @@ private:
 		QVariantList segments;
 	};
 
+	MessageMutation applyAcceptedMessage(const QVariantMap &message);
 	QVariantMap messageRow(const QVariantMap &message, QList< RichBodyParseRequest > *requests = nullptr);
 	static void decoratePresentationRow(QVariantMap &row, const QVariantMap &previousRow);
 	static bool isUserHistoryRow(const QVariantMap &row);

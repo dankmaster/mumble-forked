@@ -2060,10 +2060,15 @@ ApplicationWindow {
 				"prependAnchorInsertedExtent": timeline.prependAnchorInsertedExtent,
 				"prependQueuePending": chatModel.prependPending,
 				"appendQueuePending": chatModel.appendPending,
+				"chatModelPresentationBusy": chatModel.presentationBusy,
+				"deferredPresentationUpdatesPending":
+					chatModel.deferredPresentationUpdatesPending,
 				"deferredPrependRichCount":
 					Object.keys(timeline.deferredPrependRichIds || ({})).length,
 				"richLoaderResumeQueueCount": timeline.richLoaderResumeQueue.length,
 				"richLoaderResumeActiveId": timeline.richLoaderResumeActiveId,
+				"richContentResumeRunning": richContentResumeTimer.running,
+				"richLoaderResumeRunning": richLoaderResumeTimer.running,
 				"nearViewportPrefetchActiveId": timeline.nearViewportPrefetchActiveId,
 				"nearViewportWarmId": timeline.nearViewportWarmId,
 				"nearViewportPrefetchReadyId": timeline.nearViewportPrefetchReadyId,

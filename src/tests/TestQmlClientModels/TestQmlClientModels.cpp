@@ -8,6 +8,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QMetaProperty>
 #include <QtCore/QRegularExpression>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QtTest>
@@ -55,6 +56,9 @@ private slots:
 	void activityLogRowsUseProtocolStableKeysAndSeparateLegacyBuffer();
 	void chatTimelineAppliesDirectIncrementalMessages();
 	void chatTimelineDefersPresentationUpdatesDuringScroll();
+	void chatTimelineDrainsAuthorizedFixturePresentationUpdateAfterScopeCloses();
+	void chatTimelineRemovalCancelsAuthorizedDeferredPresentationUpdate();
+	void chatTimelineNewestAcceptedUpdateSupersedesScheduledDeferredUpdate();
 	void modernShellPreviewPublicationPolicyIsProgressiveAndTerminal();
 	void modernShellPreviewPublicationTicketsAndSourcesStayGenerationSafe();
 	void mainWindowDefersPreviewDtoBuildsDuringScroll();
@@ -2620,6 +2624,132 @@ void TestQmlClientModels::chatTimelineDefersPresentationUpdatesDuringScroll() {
 	QCOMPARE(changedSpy.count(), 1);
 	QCOMPARE(busySpy.count(), 2);
 	QCOMPARE(pendingSpy.count(), 2);
+}
+
+void TestQmlClientModels::chatTimelineDrainsAuthorizedFixturePresentationUpdateAfterScopeCloses() {
+	ChatTimelineModel model;
+	const int pendingPropertyIndex =
+		model.metaObject()->indexOfProperty("deferredPresentationUpdatesPending");
+	QVERIFY(pendingPropertyIndex >= 0);
+	const QMetaProperty pendingProperty = model.metaObject()->property(pendingPropertyIndex);
+	QVERIFY(pendingProperty.isReadable());
+	QVERIFY(pendingProperty.hasNotifySignal());
+	model.setProperty(QmlVisualFixtureMutation::OverrideProperty, true);
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, true);
+	const QVariantMap initial {
+		{ QStringLiteral("messageKey"), QStringLiteral("fixture-gallery") },
+		{ QStringLiteral("bodyText"), QStringLiteral("Selected frame") },
+		{ QStringLiteral("preview"), QVariantMap {
+			{ QStringLiteral("title"), QStringLiteral("One ready frame") }
+		} }
+	};
+	QVERIFY(model.upsertMessage(initial));
+
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy pendingSpy(&model,
+		&ChatTimelineModel::deferredPresentationUpdatesPendingChanged);
+	model.setPresentationBusy(true);
+	QVariantMap finalUpdate = initial;
+	finalUpdate.insert(QStringLiteral("bodyText"), QStringLiteral("All frames ready"));
+	finalUpdate.insert(QStringLiteral("preview"), QVariantMap {
+		{ QStringLiteral("title"), QStringLiteral("Sixteen ready frames") }
+	});
+	QVERIFY(model.upsertMessage(finalUpdate));
+	QVERIFY(model.deferredPresentationUpdatesPending());
+	QCOMPARE(changedSpy.count(), 0);
+
+	// The automation command's write scope ends while the accepted update is
+	// still queued behind scrollbar presentation ownership.
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, false);
+	bool fixtureWriteWasOpenDuringDataChanged = true;
+	bool nestedUnownedWriteAccepted = true;
+	connect(&model, &QAbstractItemModel::dataChanged, &model,
+		[&model, &fixtureWriteWasOpenDuringDataChanged, &nestedUnownedWriteAccepted]() {
+			fixtureWriteWasOpenDuringDataChanged =
+				model.property(QmlVisualFixtureMutation::WriteProperty).toBool();
+			nestedUnownedWriteAccepted = model.upsertMessage({
+				{ QStringLiteral("messageKey"), QStringLiteral("unowned-live-write") },
+				{ QStringLiteral("bodyText"), QStringLiteral("must remain rejected") }
+			});
+		});
+	model.setPresentationBusy(false);
+
+	QTRY_COMPARE_WITH_TIMEOUT(model.get(0).value(QStringLiteral("subtitle")).toString(),
+		QStringLiteral("All frames ready"), 1000);
+	QCOMPARE(model.get(0).value(QStringLiteral("preview")).toMap()
+			 .value(QStringLiteral("title")).toString(), QStringLiteral("Sixteen ready frames"));
+	QVERIFY(!model.deferredPresentationUpdatesPending());
+	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(pendingSpy.count(), 2);
+	QVERIFY(!fixtureWriteWasOpenDuringDataChanged);
+	QVERIFY(!nestedUnownedWriteAccepted);
+	QVERIFY(!model.property(QmlVisualFixtureMutation::WriteProperty).toBool());
+	QCOMPARE(model.rowCount(), 1);
+}
+
+void TestQmlClientModels::chatTimelineRemovalCancelsAuthorizedDeferredPresentationUpdate() {
+	ChatTimelineModel model;
+	model.setProperty(QmlVisualFixtureMutation::OverrideProperty, true);
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, true);
+	const QVariantMap initial {
+		{ QStringLiteral("messageKey"), QStringLiteral("fixture-removed") },
+		{ QStringLiteral("bodyText"), QStringLiteral("Initial") }
+	};
+	QVERIFY(model.upsertMessage(initial));
+	model.setPresentationBusy(true);
+	QVariantMap queuedUpdate = initial;
+	queuedUpdate.insert(QStringLiteral("bodyText"), QStringLiteral("Must not resurrect"));
+	QVERIFY(model.upsertMessage(queuedUpdate));
+	QVERIFY(model.deferredPresentationUpdatesPending());
+
+	QSignalSpy pendingSpy(&model,
+		&ChatTimelineModel::deferredPresentationUpdatesPendingChanged);
+	QVERIFY(model.removeMessage(QStringLiteral("fixture-removed")));
+	QCOMPARE(model.rowCount(), 0);
+	QVERIFY(!model.deferredPresentationUpdatesPending());
+	QCOMPARE(pendingSpy.count(), 1);
+
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, false);
+	model.setPresentationBusy(false);
+	QTest::qWait(50);
+	QCOMPARE(model.rowCount(), 0);
+	QVERIFY(!model.deferredPresentationUpdatesPending());
+}
+
+void TestQmlClientModels::chatTimelineNewestAcceptedUpdateSupersedesScheduledDeferredUpdate() {
+	ChatTimelineModel model;
+	model.setProperty(QmlVisualFixtureMutation::OverrideProperty, true);
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, true);
+	const QVariantMap initial {
+		{ QStringLiteral("messageKey"), QStringLiteral("fixture-newest-wins") },
+		{ QStringLiteral("bodyText"), QStringLiteral("Initial") }
+	};
+	QVERIFY(model.upsertMessage(initial));
+
+	model.setPresentationBusy(true);
+	QVERIFY(model.upsertMessage(initial));
+	QVERIFY(!model.deferredPresentationUpdatesPending());
+	QVariantMap queuedUpdate = initial;
+	queuedUpdate.insert(QStringLiteral("bodyText"), QStringLiteral("Older queued update"));
+	QVERIFY(model.upsertMessage(queuedUpdate));
+	QVERIFY(model.deferredPresentationUpdatesPending());
+
+	QSignalSpy pendingSpy(&model,
+		&ChatTimelineModel::deferredPresentationUpdatesPendingChanged);
+	model.setPresentationBusy(false);
+	QVariantMap newestUpdate = initial;
+	newestUpdate.insert(QStringLiteral("bodyText"), QStringLiteral("Newest accepted update"));
+	QVERIFY(model.upsertMessage(newestUpdate));
+	QVERIFY(model.deferredPresentationUpdatesPending());
+	QCOMPARE(pendingSpy.count(), 0);
+
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, false);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.deferredPresentationUpdatesPending(), 1000);
+	QCOMPARE(pendingSpy.count(), 1);
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
+		QStringLiteral("Newest accepted update"));
+	QVERIFY(!model.deferredPresentationUpdatesPending());
 }
 
 void TestQmlClientModels::modernShellPreviewPublicationPolicyIsProgressiveAndTerminal() {

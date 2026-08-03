@@ -3535,6 +3535,10 @@ void ChatTimelineModel::decoratePresentationRow(QVariantMap &row, const QVariant
 
 ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVariantMap &message) {
 	if (!acceptsFrontendStateMutation(this)) return MessageMutation::Ignored;
+	return applyAcceptedMessage(message);
+}
+
+ChatTimelineModel::MessageMutation ChatTimelineModel::applyAcceptedMessage(const QVariantMap &message) {
 	QList< RichBodyParseRequest > requests;
 	QVariantMap row = messageRow(message, &requests);
 	if (row.isEmpty()) return MessageMutation::Ignored;
@@ -3557,6 +3561,15 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 			current.value(QStringLiteral("modelStartsGroup"), true));
 		row.insert(QStringLiteral("dateBoundary"),
 			current.value(QStringLiteral("dateBoundary"), true));
+		const bool hadQueuedPresentationUpdate = m_deferredPresentationUpdates.contains(id);
+		if (hadQueuedPresentationUpdate) {
+			// Preserve per-message ordering across the 16 ms drain window. A newer
+			// accepted DTO supersedes an older queued DTO instead of applying now
+			// and then being overwritten by the scheduled drain.
+			m_deferredPresentationUpdates.insert(id, message);
+			if (!m_presentationBusy) scheduleDeferredPresentationUpdateDrain();
+			return MessageMutation::Updated;
+		}
 		if (current == row) {
 			if (!m_deferredRichBodyMessageIds.contains(id)) scheduleRichBodyParses(requests);
 			return MessageMutation::Unchanged;
@@ -3571,14 +3584,14 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 			if (wasEmpty) emit deferredPresentationUpdatesPendingChanged();
 			return MessageMutation::Updated;
 		}
-		upsertRow(row);
+		upsertRowFromInternalResult(row);
 		updateUserHistoryRow(id, row);
 		if (!m_deferredRichBodyMessageIds.contains(id)) scheduleRichBodyParses(requests);
 		if (searchActive()) refreshSearchState(true);
 		return MessageMutation::Updated;
 	}
 	decoratePresentationRow(row, rowCount() > 0 ? get(rowCount() - 1) : QVariantMap {});
-	upsertRow(row);
+	upsertRowFromInternalResult(row);
 	updateUserHistoryRow(id, row);
 	scheduleRichBodyParses(requests);
 	if (searchActive()) refreshSearchState(true);
@@ -3594,6 +3607,10 @@ bool ChatTimelineModel::removeMessage(const QString &messageId) {
 	const QString id = messageId.trimmed();
 	if (id.isEmpty()) return false;
 	if (indexOf(id) < 0) return false;
+	const bool hadDeferredPresentationUpdates = !m_deferredPresentationUpdates.isEmpty();
+	m_deferredPresentationUpdates.remove(id);
+	if (hadDeferredPresentationUpdates && m_deferredPresentationUpdates.isEmpty())
+		emit deferredPresentationUpdatesPendingChanged();
 	m_deferredRowUpdates.remove(id);
 	m_deferredRichBodyMessageIds.remove(id);
 	forgetRichBodyMessage(id);
@@ -3846,7 +3863,10 @@ void ChatTimelineModel::drainDeferredPresentationUpdates() {
 	const QVariantMap message = update.value();
 	m_deferredPresentationUpdates.erase(update);
 	if (m_deferredPresentationUpdates.isEmpty()) emit deferredPresentationUpdatesPendingChanged();
-	applyMessage(message);
+	// The public entry point already authorized this exact DTO before it was
+	// queued. Apply only that captured mutation without reopening the model-wide
+	// visual-fixture write gate during synchronous dataChanged delivery.
+	applyAcceptedMessage(message);
 	scheduleDeferredPresentationUpdateDrain();
 }
 
