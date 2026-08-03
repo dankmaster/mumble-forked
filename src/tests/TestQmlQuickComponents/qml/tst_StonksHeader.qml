@@ -53,6 +53,19 @@ TestCase {
 		}
 	}
 
+	function currentTickerTrack(header, animationObjectName) {
+		const animation = findChild(header, animationObjectName)
+		verify(animation !== null)
+		tryVerify(function() {
+			return animation.target !== null
+				&& animation.target.sequenceTravel > animation.target.spacing
+		})
+		const track = animation.target
+		verify(track !== null)
+		compare(animation.target, track)
+		return { "animation": animation, "track": track }
+	}
+
 	function init() {
 		verify(loader.item !== null)
 		testCase.forceActiveFocus()
@@ -123,14 +136,12 @@ TestCase {
 		const header = loader.item
 		header.tickerDirection = "left"
 		header.tickerSpeed = "fast"
-		tryVerify(function() {
-			return findChild(header, "stonksTickerHorizontalTrack") !== null
-		})
-		const track = findChild(header, "stonksTickerHorizontalTrack")
-		const animation = findChild(header, "stonksTickerHorizontalAnimation")
-		verify(track !== null && animation !== null)
+		const current = currentTickerTrack(header, "stonksTickerHorizontalAnimation")
+		const track = current.track
+		const animation = current.animation
 		tryVerify(function() { return animation.travel > 0 })
 		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
+		compare(animation.target, track)
 		tryVerify(function() { return track.x < -1 })
 		const firstX = track.x
 		let secondX = firstX
@@ -157,12 +168,10 @@ TestCase {
 		loader.width = 620
 
 		const viewport = findChild(header, "stonksTickerViewport")
-		tryVerify(function() {
-			return findChild(header, "stonksTickerHorizontalTrack") !== null
-		})
-		const track = findChild(header, "stonksTickerHorizontalTrack")
-		const animation = findChild(header, "stonksTickerHorizontalAnimation")
-		verify(viewport !== null && track !== null && animation !== null)
+		const current = currentTickerTrack(header, "stonksTickerHorizontalAnimation")
+		const track = current.track
+		const animation = current.animation
+		verify(viewport !== null)
 		tryVerify(function() { return animation.travel > 0 && track.requiredCopyCount > 2 })
 		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
 
@@ -187,12 +196,10 @@ TestCase {
 		header.tickerDirection = "up"
 
 		const viewport = findChild(header, "stonksTickerViewport")
-		tryVerify(function() {
-			return findChild(header, "stonksTickerVerticalTrack") !== null
-		})
-		const track = findChild(header, "stonksTickerVerticalTrack")
-		const animation = findChild(header, "stonksTickerVerticalAnimation")
-		verify(viewport !== null && track !== null && animation !== null)
+		const current = currentTickerTrack(header, "stonksTickerVerticalAnimation")
+		const track = current.track
+		const animation = current.animation
+		verify(viewport !== null)
 		tryVerify(function() { return animation.travel > 0 && track.requiredCopyCount > 2 })
 		tryCompare(track, "materializedCopyCount", track.requiredCopyCount)
 		tryVerify(function() {
@@ -206,18 +213,16 @@ TestCase {
 		const header = loader.item
 		header.tickerDirection = "left"
 		header.tickerSpeed = "fast"
-		tryVerify(function() {
-			return findChild(header, "stonksTickerHorizontalTrack") !== null
-		})
-		const track = findChild(header, "stonksTickerHorizontalTrack")
-		const animation = findChild(header, "stonksTickerHorizontalAnimation")
-		verify(track !== null && animation !== null)
+		const current = currentTickerTrack(header, "stonksTickerHorizontalAnimation")
+		const track = current.track
+		const animation = current.animation
 		tryVerify(function() { return track.x < -8 && track.x > -animation.travel / 2 })
 		const beforeRefreshX = track.x
 		const refreshedState = populatedState()
 		refreshedState.tickerQuotes.RKLB.price = 18.61
 		header.stonks = refreshedState
 		wait(80)
+		compare(animation.target, track)
 		verify(track.x < beforeRefreshX - 1)
 	}
 
@@ -248,17 +253,16 @@ TestCase {
 
 	function test_only_the_active_ticker_orientation_is_materialized() {
 		const header = loader.item
+		const horizontalAnimation = findChild(header, "stonksTickerHorizontalAnimation")
+		const verticalAnimation = findChild(header, "stonksTickerVerticalAnimation")
+		verify(horizontalAnimation !== null && verticalAnimation !== null)
 		header.tickerDirection = "left"
-		tryVerify(function() {
-			return findChild(header, "stonksTickerHorizontalTrack") !== null
-		})
-		compare(findChild(header, "stonksTickerVerticalTrack"), null)
+		tryVerify(function() { return horizontalAnimation.target !== null })
+		tryVerify(function() { return verticalAnimation.target === null })
 
 		header.tickerDirection = "up"
-		tryVerify(function() {
-			return findChild(header, "stonksTickerVerticalTrack") !== null
-		})
-		compare(findChild(header, "stonksTickerHorizontalTrack"), null)
+		tryVerify(function() { return verticalAnimation.target !== null })
+		tryVerify(function() { return horizontalAnimation.target === null })
 	}
 
 	function test_pointer_focus_does_not_leave_ticker_paused() {
@@ -332,6 +336,22 @@ TestCase {
 		tryVerify(function() { return error !== null && error.visible && error.text.indexOf("temporarily unavailable") >= 0 })
 		verify(loading !== null && !loading.visible)
 		compare(loader.item.Accessible.name, "Stonks quotes unavailable")
+	}
+
+	function test_error_to_populated_rebuild_uses_the_current_track() {
+		const header = loader.item
+		const animation = findChild(header, "stonksTickerHorizontalAnimation")
+		verify(animation !== null)
+		const errorState = populatedState()
+		errorState.error = "Quote lookup is temporarily unavailable."
+		header.stonks = errorState
+		tryVerify(function() { return animation.target === null })
+
+		header.stonks = populatedState()
+		const current = currentTickerTrack(header, "stonksTickerHorizontalAnimation")
+		compare(current.animation, animation)
+		compare(animation.target, current.track)
+		tryCompare(current.track, "materializedCopyCount", current.track.requiredCopyCount)
 	}
 
 	function test_opted_in_banner_remains_visible_across_scopes_and_narrow_layout_is_bounded() {

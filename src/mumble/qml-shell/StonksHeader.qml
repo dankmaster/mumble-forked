@@ -317,7 +317,8 @@ AbstractButton {
 					sourceComponent: Component {
 						Row {
 							objectName: "stonksTickerHorizontalTrack"
-							readonly property real sequenceTravel: horizontalPrimary.width + spacing
+							readonly property real sequenceTravel: horizontalPrimary.width > 0
+								? horizontalPrimary.width + spacing : 0
 							readonly property int requiredCopyCount: sequenceTravel > 0
 								? Math.max(2,
 									Math.ceil((tickerViewport.width + spacing) / sequenceTravel) + 1)
@@ -386,7 +387,8 @@ AbstractButton {
 					sourceComponent: Component {
 						Column {
 							objectName: "stonksTickerVerticalTrack"
-							readonly property real sequenceTravel: verticalPrimary.height + spacing
+							readonly property real sequenceTravel: verticalPrimary.height > 0
+								? verticalPrimary.height + spacing : 0
 							readonly property int requiredCopyCount: sequenceTravel > 0
 								? Math.max(2,
 									Math.ceil((tickerViewport.height + spacing) / sequenceTravel) + 1)
