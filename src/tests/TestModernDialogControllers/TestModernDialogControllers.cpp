@@ -4107,8 +4107,19 @@ void TestModernDialogControllers::persistentChatProviderImagesStayManagedAndCanc
 	QVERIFY(request.contains(QStringLiteral("PREVIEW_MAX_IMAGE_BYTES")));
 	QVERIFY(request.contains(QStringLiteral("supportedMimes")));
 	QVERIFY(request.contains(QStringLiteral("startPersistentChatPreviewGet(request, previewKey)")));
-	QVERIFY(request.contains(QStringLiteral("metadata.value(metadataKey).toString().trimmed() != sourceIdentity")));
-	QVERIFY(request.contains(QStringLiteral("managedIt->source != sourceIdentity")));
+	QVERIFY(request.contains(QStringLiteral("persistentChatPreviewMetadataImageRequestMatches(")));
+	const qsizetype matchStart = source.indexOf(
+		QStringLiteral("bool MainWindow::persistentChatPreviewMetadataImageRequestMatches"));
+	const qsizetype matchEnd = source.indexOf(
+		QStringLiteral("void MainWindow::ensurePersistentChatPreviewImageProviders"), matchStart);
+	QVERIFY(matchStart >= 0);
+	QVERIFY(matchEnd > matchStart);
+	const QString match = source.mid(matchStart, matchEnd - matchStart);
+	QVERIFY(match.contains(QStringLiteral("ModernShellPreviewPublicationPolicy::completionMatches(")));
+	QVERIFY(match.contains(QStringLiteral(
+		"previewIt->metadata.value(metadataKey).toString().trimmed() == sourceIdentity")));
+	QVERIFY(match.contains(QStringLiteral("item.poster.trimmed() == sourceIdentity")));
+	QVERIFY(match.contains(QStringLiteral("item.thumbnail.trimmed() == sourceIdentity")));
 
 	QVERIFY(source.contains(QStringLiteral("validatedSteamPreviewMediaItems(mediaItems)")));
 	QVERIFY(source.contains(QStringLiteral("previewIt->mediaItems = validatedSteamPreviewMediaItems")));
