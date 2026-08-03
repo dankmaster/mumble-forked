@@ -1374,7 +1374,9 @@ TestCase {
 			&& viewportMembershipUpdateEnd > viewportMembershipUpdateStart)
 		const viewportMembershipUpdateSource = asyncDelegateSource.slice(
 			viewportMembershipUpdateStart, viewportMembershipUpdateEnd)
-		verify(/const rowTop\s*=\s*Number\(y\s*\|\|\s*0\)[\s\S]*const extent\s*=\s*Math\.max\(0,[\s\S]*Number\(viewportProbeHeight\s*\|\|\s*0\)[\s\S]*const viewportTop\s*=\s*Number\(timeline\.contentY\s*\|\|\s*0\)[\s\S]*const viewportBottom\s*=\s*viewportTop[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)[\s\S]*const warmDistance\s*=\s*Math\.min\([\s\S]*timeline\.baseCacheBuffer[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)\s*\*\s*1\.5/.test(
+		verify(/const rowTop\s*=\s*Number\(y\s*\|\|\s*0\)[\s\S]*const extent\s*=\s*Math\.max\(0,[\s\S]*Number\(effectiveViewportProbeHeight\s*\|\|\s*0\)[\s\S]*const viewportTop\s*=\s*Number\(timeline\.contentY\s*\|\|\s*0\)[\s\S]*const viewportBottom\s*=\s*viewportTop[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)[\s\S]*const warmDistance\s*=\s*Math\.min\([\s\S]*timeline\.baseCacheBuffer[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)\s*\*\s*1\.5/.test(
+			viewportMembershipUpdateSource))
+		verify(!/Number\(viewportProbeHeight\s*\|\|\s*0\)/.test(
 			viewportMembershipUpdateSource))
 		verify(/const nextVisible\s*=\s*!accessibilityPooled[\s\S]*rowTop\s*<=\s*viewportBottom[\s\S]*rowTop\s*\+\s*extent\s*>=\s*viewportTop[\s\S]*const nextHydration\s*=\s*!accessibilityPooled[\s\S]*rowTop\s*<=\s*viewportBottom\s*\+\s*warmDistance[\s\S]*rowTop\s*\+\s*extent\s*>=\s*viewportTop\s*-\s*warmDistance[\s\S]*const visibleChanged\s*=\s*inVisibleViewport\s*!==\s*nextVisible[\s\S]*const hydrationChanged\s*=\s*inHydrationWindow\s*!==\s*nextHydration[\s\S]*if\s*\(!visibleChanged\s*&&\s*!hydrationChanged\)\s*return[\s\S]*viewportMembershipUpdating\s*=\s*true\s*inHydrationWindow\s*=\s*nextHydration\s*inVisibleViewport\s*=\s*nextVisible\s*viewportMembershipUpdating\s*=\s*false\s*reconcileViewportMembership\(\)\s*if\s*\(item\s*&&\s*item\.reconcileViewportMembership\)\s*item\.reconcileViewportMembership\(\)/.test(
 			viewportMembershipUpdateSource))
