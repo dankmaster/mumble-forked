@@ -1384,8 +1384,30 @@ TestCase {
 			asyncDelegateSource))
 		verify(/id:\s*viewportProbeUpdateTimer[\s\S]*interval:\s*0[\s\S]*repeat:\s*false[\s\S]*updateViewportProbeHeight\(\)/.test(
 			asyncDelegateSource))
-		verify(/onRichGeometrySettlingChanged:[\s\S]*!richGeometrySettling[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*schedulePresentationHeightObservation\(\)[\s\S]*height:\s*presentationHeightCommittedHeight[\s\S]*onHeightChanged:[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*schedulePresentationHeightObservation\(\)/.test(
-			asyncDelegateSource))
+		const membershipSettlingStart = asyncDelegateSource.indexOf(
+			"onRichGeometrySettlingChanged:")
+		const membershipPinnedHeightStart = asyncDelegateSource.indexOf(
+			"height: stationaryThumbWarmPinned", membershipSettlingStart)
+		const membershipHeightChangedStart = asyncDelegateSource.indexOf(
+			"onHeightChanged:", membershipPinnedHeightStart)
+		const membershipClipStart = asyncDelegateSource.indexOf(
+			"clip: stationaryThumbWarmPinned", membershipHeightChangedStart)
+		verify(membershipSettlingStart >= 0
+			&& membershipPinnedHeightStart > membershipSettlingStart
+			&& membershipHeightChangedStart > membershipPinnedHeightStart
+			&& membershipClipStart > membershipHeightChangedStart)
+		const membershipSettlingSource = asyncDelegateSource.slice(
+			membershipSettlingStart, membershipPinnedHeightStart)
+		const membershipPinnedHeightSource = asyncDelegateSource.slice(
+			membershipPinnedHeightStart, membershipHeightChangedStart)
+		const membershipHeightChangedSource = asyncDelegateSource.slice(
+			membershipHeightChangedStart, membershipClipStart)
+		verify(/onRichGeometrySettlingChanged:\s*\{\s*if\s*\(!richGeometrySettling\)\s*scheduleViewportProbeHeightUpdate\(\)\s*schedulePresentationHeightObservation\(\)\s*\}/.test(
+			membershipSettlingSource))
+		verify(/height:\s*stationaryThumbWarmPinned\s*\?\s*stationaryThumbPinnedOuterHeight\s*:\s*presentationHeightCommittedHeight\s*>\s*0\s*\?\s*presentationHeightCommittedHeight\s*:\s*Math\.max\(/.test(
+			membershipPinnedHeightSource))
+		verify(/onHeightChanged:\s*\{\s*if\s*\(item\)\s*\{\s*scheduleViewportProbeHeightUpdate\(\)\s*schedulePresentationHeightObservation\(\)\s*\}\s*\}/.test(
+			membershipHeightChangedSource))
 		verify(/function scheduleViewportProbeReset\(\)[\s\S]*viewportProbeStableId[\s\S]*!==\s*identity[\s\S]*resetViewportProbeHeight\(\)[\s\S]*scheduleViewportProbeHeightUpdate\(\)/.test(
 			asyncDelegateSource))
 		verify(/onViewportProbeHeightChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*onYChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)/.test(
