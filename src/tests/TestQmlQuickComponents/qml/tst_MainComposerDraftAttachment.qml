@@ -1760,6 +1760,14 @@ TestCase {
 		verify(/contentItem\s*\?\s*contentItem\.children[\s\S]*stationaryThumbDelegateActuallyVisible[\s\S]*candidates\.sort/.test(
 			visibleSource))
 		verify(!/lightweightDeferredPresentation\s*===\s*true/.test(visibleSource))
+		const pinBudgetStart = mainSource.indexOf(
+			"readonly property int stationaryThumbWarmCurrentDwellPinCount")
+		verify(pinBudgetStart >= 0 && pinBudgetStart < visibleStart)
+		const pinBudgetSource = mainSource.slice(pinBudgetStart, updateStart)
+		verify(/stationaryThumbWarmCurrentDwellPinCount[\s\S]*pressEpoch[\s\S]*dwellGeneration/.test(
+			pinBudgetSource))
+		verify(/stationaryThumbWarmCurrentDwellPinCount[\s\S]*maximumAdmissionsPerDwell/.test(
+			pinBudgetSource))
 		const installStart = admissionSource.indexOf("function installStationaryThumbWarmPin")
 		const revalidateStart = admissionSource.indexOf(
 			"function revalidateStationaryThumbWarmAdmission")
@@ -1777,10 +1785,60 @@ TestCase {
 			"readonly property bool stationaryThumbWarmOwned:")
 		const ownerEnd = mainSource.indexOf(
 			"readonly property bool stationaryThumbWarmEligible:", ownerStart)
-		verify(ownerStart >= 0 && ownerEnd > ownerStart)
+		const eligibleEnd = mainSource.indexOf(
+			"readonly property bool paintedSummary:", ownerEnd)
+		verify(ownerStart >= 0 && ownerEnd > ownerStart
+			&& eligibleEnd > ownerEnd)
 		const ownerSource = mainSource.slice(ownerStart, ownerEnd)
+		const eligibleSource = mainSource.slice(ownerEnd, eligibleEnd)
 		verify(/paintedSurface\s*===\s*true[\s\S]*terminal\s*===\s*true[\s\S]*stationaryThumbWarmGate\.retains[\s\S]*stationaryThumbWarmGate\.owns/.test(
 			ownerSource), "pending/loading ownership must require exact owns; only painted/terminal may retain")
+		verify(/state\s*!==\s*"error"[\s\S]*statusValue\s*!==\s*"error"/.test(
+			eligibleSource))
+		verify(!/state\s*!==\s*"loading"|value\.loading\s*!==\s*true/.test(
+			eligibleSource), "a pinned visible loading row must enter the serial hydration lane")
+
+		const normalHydrationStart = mainSource.indexOf(
+			"function requestPreviewHydrationIfNeeded")
+		const stationaryHydrationStart = mainSource.indexOf(
+			"function requestStationaryThumbHydration", normalHydrationStart)
+		const stationaryResumeStart = mainSource.indexOf(
+			"function resumeStationaryThumbWarmAfterHydration", stationaryHydrationStart)
+		const normalResumeStart = mainSource.indexOf(
+			"function resumeRichContentAfterScroll", stationaryResumeStart)
+		verify(normalHydrationStart >= 0
+			&& stationaryHydrationStart > normalHydrationStart
+			&& stationaryResumeStart > stationaryHydrationStart
+			&& normalResumeStart > stationaryResumeStart)
+		const normalHydrationSource = mainSource.slice(normalHydrationStart,
+			stationaryHydrationStart)
+		const stationaryHydrationSource = mainSource.slice(stationaryHydrationStart,
+			stationaryResumeStart)
+		const stationaryResumeSource = mainSource.slice(stationaryResumeStart,
+			normalResumeStart)
+		verify(/!timeline\.richScrollInProgress/.test(normalHydrationSource),
+			"global hydration must remain blocked while the physical thumb owns scrolling")
+		verify(/stationaryThumbWarmOwned[\s\S]*pin\.pressEpoch[\s\S]*pin\.dwellGeneration[\s\S]*previewNeedsHydration[\s\S]*inVisibleViewport[\s\S]*queuePreviewHydration\(stableId,\s*true\)[\s\S]*stationaryThumbHydrationStableId[\s\S]*stationaryThumbHydrationPressEpoch[\s\S]*stationaryThumbHydrationDwellGeneration/.test(
+			stationaryHydrationSource))
+		verify(/stationaryThumbHydrationStableId[\s\S]*stationaryThumbHydrationPressEpoch[\s\S]*stationaryThumbHydrationDwellGeneration[\s\S]*stationaryThumbWarmOwned[\s\S]*stationaryThumbWarmGate\.owns[\s\S]*admitStationaryThumbWarm[\s\S]*reopenAdmission/.test(
+			stationaryResumeSource), "late hydration may reveal or requeue only its matching current generation")
+		verify(/admitStationaryThumbWarm[\s\S]*if\s*\(resumed\)[\s\S]*stationaryThumbWarmGate\.noteAdmissionProgress/.test(
+			stationaryResumeSource), "matching hydration must renew the visual watchdog before clearing ownership")
+		const stationaryAdmitStart = mainSource.indexOf(
+			"function admitStationaryThumbWarm(pressEpoch, dwellGeneration)",
+			stationaryResumeStart)
+		const stationaryAdmitEnd = mainSource.indexOf(
+			"Timer {", stationaryAdmitStart)
+		verify(stationaryAdmitStart > stationaryResumeStart
+			&& stationaryAdmitEnd > stationaryAdmitStart)
+		const stationaryAdmitSource = mainSource.slice(stationaryAdmitStart,
+			stationaryAdmitEnd)
+		verify(/messageRowMaterialized\s*=\s*true[\s\S]*if\s*\(previewNeedsHydration\)[\s\S]*requestStationaryThumbHydration[\s\S]*previewMaterializationAdmitted\s*=\s*true/.test(
+			stationaryAdmitSource))
+		verify(/onPreviewPrewarmVisualReadyChanged:[\s\S]*refreshStationaryThumbWarmState\(\)/.test(
+			mainSource), "terminal thumbnail warming must finish the active row without waiting for its watchdog")
+		verify(/previewPrewarmProgressRevision[\s\S]*onPreviewPrewarmProgressRevisionChanged:[\s\S]*noteStationaryThumbWarmProgress\(\)/.test(
+			mainSource), "serial gallery progress must keep only its matching active row alive")
 
 		const reconcileStart = mainSource.indexOf(
 			"function reconcileStationaryThumbWarmPins")

@@ -20,7 +20,11 @@ Item {
 	property var visibleStableIdProvider: null
 	property var canAdmitStableId: null
 	property var revalidateActiveStableId: null
-	readonly property int maximumAdmissionsPerPress: 2
+	// A long thumb drag may visit several non-overlapping viewports before the
+	// button is released. Bound work to the current stationary viewport rather
+	// than spending one lifetime budget near the press origin and starving every
+	// later stop. Admissions remain strictly serial.
+	readonly property int maximumAdmissionsPerDwell: 8
 	readonly property int maximumNoCandidateScansPerGeneration: 2
 	readonly property int dwellIntervalMs: 48
 	readonly property int serialIntervalMs: 16
@@ -95,6 +99,11 @@ Item {
 		pendingIndex = 0
 	}
 
+	function resetDwellBudget() {
+		admittedCount = 0
+		admittedStableIds = ({})
+	}
+
 	function invalidateActiveAdmission(reason) {
 		if (activeStableId.length === 0)
 			return false
@@ -146,8 +155,7 @@ Item {
 		invalidateActiveAdmission("new-press")
 		++pressEpoch
 		++dwellGeneration
-		admittedCount = 0
-		admittedStableIds = ({})
+		resetDwellBudget()
 		clearRetentions()
 		noCandidateScanCount = 0
 		stationaryPosition = position
@@ -176,11 +184,10 @@ Item {
 		resetPendingSnapshot()
 		noCandidateScanCount = 0
 		invalidateActiveAdmission("movement")
-		// A painted row may be considered once more after a real thumb move,
-		// but admittedCount remains consumed so the per-press cap still wins.
-		clearRetentions(true)
+		clearRetentions()
+		resetDwellBudget()
 		if (inputEligible
-				&& admittedCount < maximumAdmissionsPerPress)
+				&& admittedCount < maximumAdmissionsPerDwell)
 			dwellTimer.restart()
 	}
 
@@ -190,13 +197,15 @@ Item {
 			dwellTimer.stop()
 			serialTimer.stop()
 			resetPendingSnapshot()
+			noCandidateScanCount = 0
 			invalidateActiveAdmission("eligibility")
 			clearRetentions()
 			return
 		}
 		stationaryPosition = position
+		resetDwellBudget()
 		if (!membershipBlocked && activeStableId.length === 0
-				&& admittedCount < maximumAdmissionsPerPress)
+				&& admittedCount < maximumAdmissionsPerDwell)
 			dwellTimer.restart()
 	}
 
@@ -220,7 +229,7 @@ Item {
 			membershipRevalidationTimer.restart()
 			return
 		}
-		if (admittedCount < maximumAdmissionsPerPress)
+		if (admittedCount < maximumAdmissionsPerDwell)
 			dwellTimer.restart()
 	}
 
@@ -261,7 +270,7 @@ Item {
 					&& revalidateActiveStableId(key, activePressEpoch,
 						activeDwellGeneration) !== true)) {
 			invalidateActiveAdmission("membership-revalidation")
-			if (inputEligible && admittedCount < maximumAdmissionsPerPress)
+			if (inputEligible && admittedCount < maximumAdmissionsPerDwell)
 				dwellTimer.restart()
 			return false
 		}
@@ -270,9 +279,39 @@ Item {
 		return true
 	}
 
+	function reopenAdmission(stableId, epoch, generation) {
+		const key = String(stableId || "")
+		if (!inputEligible || key.length === 0
+				|| Number(epoch) !== pressEpoch
+				|| Number(generation) !== dwellGeneration
+				|| admittedStableIds[key] !== true
+				|| activeStableId === key)
+			return false
+		const nextAdmitted = Object.assign({}, admittedStableIds)
+		delete nextAdmitted[key]
+		admittedStableIds = nextAdmitted
+		// A matching late hydration replaces its consumed attempt; the visual
+		// retry must not spend a second slot or make the cap's last row impossible.
+		admittedCount = Math.max(0, admittedCount - 1)
+		noCandidateScanCount = 0
+		resetPendingSnapshot()
+		if (activeStableId.length === 0) {
+			dwellTimer.stop()
+			serialTimer.restart()
+		}
+		return true
+	}
+
+	function noteAdmissionProgress(stableId, epoch, generation) {
+		if (!owns(stableId, epoch, generation))
+			return false
+		activeWatchdog.restart()
+		return true
+	}
+
 	function admitNextVisible() {
 		if (!inputEligible || activeStableId.length > 0
-				|| admittedCount >= maximumAdmissionsPerPress)
+				|| admittedCount >= maximumAdmissionsPerDwell)
 			return false
 		// Every admission owns a fresh actual-visible snapshot. The serial turn
 		// must never inherit candidates captured before a thumb move or blocker.
@@ -305,7 +344,7 @@ Item {
 		}
 		resetPendingSnapshot()
 		++noCandidateScanCount
-		if (inputEligible && admittedCount < maximumAdmissionsPerPress
+		if (inputEligible && admittedCount < maximumAdmissionsPerDwell
 				&& noCandidateScanCount < maximumNoCandidateScansPerGeneration)
 			dwellTimer.restart()
 		return false
@@ -333,7 +372,7 @@ Item {
 			retainedAdmissions = nextRetained
 		}
 		admissionFinished(key, completedEpoch, completedGeneration, completion)
-		if (!inputEligible || admittedCount >= maximumAdmissionsPerPress)
+		if (!inputEligible || admittedCount >= maximumAdmissionsPerDwell)
 			return true
 		if (completedGeneration === dwellGeneration) {
 			resetPendingSnapshot()

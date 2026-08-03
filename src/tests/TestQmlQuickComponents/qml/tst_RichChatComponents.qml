@@ -67,6 +67,7 @@ TestCase {
 			property bool syntheticCandidates: false
 			property bool rejectActiveRevalidation: false
 			property bool releasePending: false
+			property bool hardBlocked: false
 			property int admissionCount: 0
 			property int cancellationCount: 0
 			property int finishCount: 0
@@ -126,6 +127,10 @@ TestCase {
 				return gate && gate.finishAdmission(lastStableId, lastPressEpoch,
 					lastDwellGeneration, outcome)
 			}
+			function finishCardIfReady() {
+				if (card && card.paintedSurface && card.prewarmVisualReady)
+					finishActive("painted")
+			}
 
 			Flickable {
 				id: warmFlickable
@@ -160,11 +165,9 @@ TestCase {
 						width: parent.width
 						height: item ? item.implicitHeight : 0
 						active: false
-						onLoaded: Qt.callLater(function() {
-							if (warmCardLoader.item
-									&& warmCardLoader.item.paintedSurface)
-								warmFixture.finishActive("painted")
-						})
+					onLoaded: Qt.callLater(function() {
+						warmFixture.finishCardIfReady()
+					})
 					}
 				}
 
@@ -244,6 +247,12 @@ TestCase {
 				value: warmFlickable.flicking
 				when: !!warmFixture.gate
 			}
+			Binding {
+				target: warmFixture.gate
+				property: "performanceScrolling"
+				value: warmFixture.hardBlocked
+				when: !!warmFixture.gate
+			}
 
 			Loader {
 				id: warmAttachmentSentinel
@@ -298,9 +307,14 @@ TestCase {
 
 			Connections {
 				target: warmFixture.card
-				function onPaintedSurfaceChanged() {
-					if (warmFixture.card.paintedSurface)
-						warmFixture.finishActive("painted")
+				function onPaintedSurfaceChanged() { warmFixture.finishCardIfReady() }
+				function onPrewarmVisualReadyChanged() { warmFixture.finishCardIfReady() }
+				function onPrewarmProgressRevisionChanged() {
+					if (warmFixture.gate)
+						warmFixture.gate.noteAdmissionProgress(warmFixture.lastStableId,
+							warmFixture.lastPressEpoch,
+							warmFixture.lastDwellGeneration)
+					warmFixture.finishCardIfReady()
 				}
 			}
 		}
@@ -4845,7 +4859,17 @@ TestCase {
 		compare(compactAction.Accessible.ignored, true)
 	}
 
-	function controlledStationaryPreview(primarySource, railSource) {
+	function controlledStationaryPreview(primarySource, railSource,
+			secondRailSource) {
+		const media = [
+			{ "id": "media:0", "kind": "image", "url": primarySource,
+				"thumbnailUrl": primarySource, "title": "Selected still" },
+			{ "id": "media:1", "kind": "image", "url": railSource,
+				"thumbnailUrl": railSource, "title": "Rail still" }
+		]
+		if (String(secondRailSource || "").length > 0)
+			media.push({ "id": "media:2", "kind": "image", "url": secondRailSource,
+				"thumbnailUrl": secondRailSource, "title": "Second rail still" })
 		return {
 			"state": "ready",
 			"title": "Stationary scrollbar preview",
@@ -4860,12 +4884,7 @@ TestCase {
 				"content": { "type": "store", "title": "Stationary scrollbar preview" },
 				"thread": {},
 				"facts": [],
-				"media": [
-					{ "id": "media:0", "kind": "image", "url": primarySource,
-						"thumbnailUrl": primarySource, "title": "Selected still" },
-					{ "id": "media:1", "kind": "image", "url": railSource,
-						"thumbnailUrl": railSource, "title": "Rail still" }
-				],
+				"media": media,
 				"playback": { "mode": "none", "provider": "steam" },
 				"state": { "status": "ready" }
 			}
@@ -4920,9 +4939,12 @@ TestCase {
 		const suffix = Date.now() + "-" + Math.floor(Math.random() * 100000)
 		const primaryId = "controlled-steam-visible-" + suffix
 		const railId = "controlled-steam-rail-" + suffix
+		const secondRailId = "controlled-steam-second-rail-" + suffix
 		const primarySource = "image://mumble/" + primaryId
 		const railSource = "image://mumble/" + railId
-		fixture.configureCard(controlledStationaryPreview(primarySource, railSource))
+		const secondRailSource = "image://mumble/" + secondRailId
+		fixture.configureCard(controlledStationaryPreview(primarySource, railSource,
+			secondRailSource))
 		compare(fixture.card, null)
 
 		const releaseY = pressAndParkWarmThumb(fixture)
@@ -4952,8 +4974,10 @@ TestCase {
 		compare(receipt.pendingCount, 1)
 		compare(receipt.cancelledCount, 0)
 		compare(controlledImageProvider.receipt(railId).requestedCount, 0)
-		compare(thumbnailRail.visible, false)
-		compare(thumbnailRail.height, 0)
+		compare(controlledImageProvider.receipt(secondRailId).requestedCount, 0)
+		compare(thumbnailRail.visible, true)
+		compare(thumbnailRail.enabled, false)
+		fuzzyCompare(thumbnailRail.Layout.preferredHeight, 64, 0.5)
 		compare(animatedLoader.active, false)
 		compare(compactImage.source.toString(), "")
 		compare(compactImage.status, Image.Null)
@@ -4978,8 +5002,53 @@ TestCase {
 		verify(findChild(card, "embedDocumentMediaImage") === sameImage)
 		compare(image.source.toString(), sameSource)
 		tryCompare(card, "paintedSurface", true)
+		compare(card.prewarmVisualReady, false)
+		compare(fixture.finishCount, 0)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(railId).requestedCount === 1
+		})
+		const railImage = findChild(card, "embedDocumentMediaThumbnailImage_1")
+		verify(railImage !== null)
+		tryCompare(railImage, "status", Image.Loading)
+		compare(controlledImageProvider.receipt(secondRailId).requestedCount, 0)
+		compare(controlledImageProvider.release(railId), 1)
+		tryCompare(railImage, "status", Image.Ready)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(secondRailId).requestedCount === 1
+		})
+		const secondRailImage = findChild(card, "embedDocumentMediaThumbnailImage_2")
+		verify(secondRailImage !== null)
+		tryCompare(secondRailImage, "status", Image.Loading)
+		compare(controlledImageProvider.release(secondRailId), 1)
+		tryCompare(secondRailImage, "status", Image.Ready)
+		compare(gallery.warmThumbnailAdmissionCount, 2)
+		tryCompare(gallery, "warmThumbnailRailComplete", true)
 		tryCompare(card, "prewarmVisualReady", true)
 		tryCompare(fixture, "finishCount", 1)
+		gallery.rearmWarmThumbnailScan()
+		wait(gallery.warmThumbnailAdmissionIntervalMs * 4)
+		compare(card.prewarmVisualReady, true)
+		compare(gallery.warmThumbnailCompletionLatched, true)
+		const lateId = "controlled-steam-late-rail-" + suffix
+		gallery.mediaItems = gallery.mediaItems.concat([{
+			"id": "media:late",
+			"kind": "image",
+			"url": "image://mumble/" + lateId,
+			"thumbnailUrl": "image://mumble/" + lateId,
+			"title": "Late same-epoch still"
+		}])
+		wait(gallery.warmThumbnailLayoutWaitMs + 48)
+		compare(gallery.warmThumbnailCompletionLatched, true)
+		compare(card.prewarmVisualReady, true)
+		const retainedRailImage = findChild(card, "embedDocumentMediaThumbnailImage_1")
+		const retainedSecondRailImage = findChild(card, "embedDocumentMediaThumbnailImage_2")
+		verify(retainedRailImage !== null)
+		verify(retainedSecondRailImage !== null)
+		compare(retainedRailImage.source.toString(), railSource)
+		compare(retainedRailImage.status, Image.Ready)
+		compare(retainedSecondRailImage.source.toString(), secondRailSource)
+		compare(retainedSecondRailImage.status, Image.Ready)
+		compare(controlledImageProvider.receipt(lateId).requestedCount, 0)
 		verify(fixture.scrollBar.pressed)
 		verify(fixture.gate.retains(fixture.lastStableId,
 			fixture.lastPressEpoch, fixture.lastDwellGeneration))
@@ -4988,7 +5057,8 @@ TestCase {
 		compare(receipt.requestedCount, 1)
 		compare(receipt.finishedCount, 1)
 		compare(receipt.cancelledCount, 0)
-		compare(controlledImageProvider.receipt(railId).requestedCount, 0)
+		compare(controlledImageProvider.receipt(railId).requestedCount, 1)
+		compare(controlledImageProvider.receipt(secondRailId).requestedCount, 1)
 		fuzzyCompare(fixture.flickable.contentY, fixture.parkedContentY, 0.5)
 		fuzzyCompare(fixture.actualOuterHeight, fixture.parkedOuterHeight, 0.5)
 		fuzzyCompare(fixture.actualProbeHeight, fixture.parkedProbeHeight, 0.5)
@@ -5011,8 +5081,216 @@ TestCase {
 		wait(96)
 		compare(fixture.admissionCount, 1)
 		compare(controlledImageProvider.receipt(primaryId).requestedCount, 1)
-		compare(controlledImageProvider.receipt(railId).requestedCount, 0)
+		compare(controlledImageProvider.receipt(railId).requestedCount, 1)
+		compare(controlledImageProvider.receipt(secondRailId).requestedCount, 1)
 		compare(fixture.attachmentSentinelCreatedCount, 0)
+	}
+
+	function test_stationary_thumbnail_watchdog_advances_without_retrying_stalled_source() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-rail-watchdog"
+		const primaryId = "controlled-steam-primary-" + suffix
+		const stalledId = "controlled-steam-stalled-" + suffix
+		const nextId = "controlled-steam-next-" + suffix
+		fixture.configureCard(controlledStationaryPreview(
+			"image://mumble/" + primaryId,
+			"image://mumble/" + stalledId,
+			"image://mumble/" + nextId))
+
+		const releaseY = pressAndParkWarmThumb(fixture)
+		tryVerify(function() { return fixture.card !== null })
+		const card = fixture.card
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		verify(gallery !== null)
+		tryCompare(findChild(card, "embedDocumentMediaImage"),
+			"status", Image.Loading)
+		compare(controlledImageProvider.release(primaryId), 1)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(stalledId).requestedCount === 1
+		})
+		compare(controlledImageProvider.receipt(nextId).requestedCount, 0)
+		wait(gallery.warmThumbnailActiveWatchdogMs + 80)
+		compare(controlledImageProvider.receipt(stalledId).requestedCount, 1)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(nextId).requestedCount === 1
+		})
+		compare(gallery.warmThumbnailExpiredAdmissions["1"], true)
+		compare(gallery.warmThumbnailAdmissions["1"], true)
+		compare(fixture.finishCount, 0)
+		const nextImage = findChild(card, "embedDocumentMediaThumbnailImage_2")
+		verify(nextImage !== null)
+		tryCompare(nextImage, "status", Image.Loading)
+		compare(controlledImageProvider.release(nextId), 1)
+		tryCompare(nextImage, "status", Image.Ready)
+		tryCompare(gallery, "warmThumbnailRailComplete", true)
+		tryCompare(card, "prewarmVisualReady", true)
+		tryCompare(fixture, "finishCount", 1)
+		compare(controlledImageProvider.receipt(stalledId).requestedCount, 1)
+		fuzzyCompare(fixture.flickable.contentY, fixture.parkedContentY, 0.5)
+		fuzzyCompare(fixture.flickable.contentHeight,
+			fixture.parkedContentHeight, 0.5)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+	}
+
+	function test_stationary_single_media_completion_stays_terminal_for_warm_epoch() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-single-media"
+		const primaryId = "controlled-steam-single-primary-" + suffix
+		const lateId = "controlled-steam-single-late-" + suffix
+		const preview = controlledStationaryPreview(
+			"image://mumble/" + primaryId,
+			"image://mumble/unused-single-" + suffix)
+		preview.document.media = [preview.document.media[0]]
+		fixture.configureCard(preview)
+
+		const releaseY = pressAndParkWarmThumb(fixture)
+		tryVerify(function() { return fixture.card !== null })
+		const card = fixture.card
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const primaryImage = findChild(card, "embedDocumentMediaImage")
+		verify(gallery !== null && primaryImage !== null)
+		tryCompare(primaryImage, "status", Image.Loading)
+		compare(gallery.warmThumbnailCompletionLatched, true)
+		compare(controlledImageProvider.release(primaryId), 1)
+		tryCompare(primaryImage, "status", Image.Ready)
+		tryCompare(card, "prewarmVisualReady", true)
+		tryCompare(fixture, "finishCount", 1)
+		gallery.mediaItems = gallery.mediaItems.concat([{
+			"id": "media:late",
+			"kind": "image",
+			"url": "image://mumble/" + lateId,
+			"thumbnailUrl": "image://mumble/" + lateId,
+			"title": "Progressive same-epoch media"
+		}])
+		wait(gallery.warmThumbnailLayoutWaitMs + 48)
+		compare(gallery.warmThumbnailCompletionLatched, true)
+		compare(card.prewarmVisualReady, true)
+		compare(fixture.finishCount, 1)
+		compare(primaryImage.source.toString(), "image://mumble/" + primaryId)
+		compare(primaryImage.status, Image.Ready)
+		compare(controlledImageProvider.receipt(lateId).requestedCount, 0)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+	}
+
+	function test_stationary_warm_skips_managed_animation_without_static_thumbnail() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-animated-skip"
+		const primaryId = "controlled-steam-static-primary-" + suffix
+		const animatedId = "controlled-steam-raw-animation-" + suffix
+		const branchAnimatedId = "controlled-steam-branch-animation-" + suffix
+		const trailingId = "controlled-steam-static-trailing-" + suffix
+		const preview = controlledStationaryPreview(
+			"image://mumble/" + primaryId,
+			"image://mumble/unused-" + suffix,
+			"image://mumble/" + trailingId)
+		const selectedMedia = preview.document.media[0]
+		const trailingMedia = preview.document.media[2]
+		trailingMedia.id = "media:3"
+		preview.document.media = [selectedMedia, {
+			"id": "media:1",
+			"kind": "image",
+			"mime": "image/gif",
+			"url": "image://mumble/" + animatedId,
+			"title": "GIF without a still"
+		}, {
+			"id": "media:2",
+			"kind": "image",
+			"contentBranch": "animated-gif-video-backed",
+			"url": "image://mumble/" + branchAnimatedId,
+			"title": "Animated branch without a still"
+		}, trailingMedia]
+		fixture.configureCard(preview)
+
+		const releaseY = pressAndParkWarmThumb(fixture)
+		tryVerify(function() { return fixture.card !== null })
+		const card = fixture.card
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const animatedLoader = findChild(card, "embedDocumentAnimatedImageLoader")
+		verify(gallery !== null && animatedLoader !== null)
+		const primaryImage = findChild(card, "embedDocumentMediaImage")
+		verify(primaryImage !== null)
+		tryCompare(primaryImage, "status", Image.Loading)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(primaryId).requestedCount === 1
+		})
+		compare(controlledImageProvider.release(primaryId), 1)
+		tryVerify(function() {
+			return controlledImageProvider.receipt(trailingId).requestedCount === 1
+		})
+		compare(controlledImageProvider.receipt(animatedId).requestedCount, 0)
+		compare(controlledImageProvider.receipt(branchAnimatedId).requestedCount, 0)
+		compare(gallery.warmThumbnailExpiredAdmissions["1"], true)
+		compare(gallery.warmThumbnailExpiredAdmissions["2"], true)
+		compare(animatedLoader.active, false)
+		const animatedThumbnail = findChild(card,
+			"embedDocumentMediaThumbnailImage_1")
+		verify(animatedThumbnail !== null)
+		compare(animatedThumbnail.source.toString(), "")
+		const branchThumbnail = findChild(card,
+			"embedDocumentMediaThumbnailImage_2")
+		verify(branchThumbnail !== null)
+		compare(branchThumbnail.source.toString(), "")
+		const trailingImage = findChild(card, "embedDocumentMediaThumbnailImage_3")
+		verify(trailingImage !== null)
+		tryCompare(trailingImage, "status", Image.Loading)
+		compare(controlledImageProvider.release(trailingId), 1)
+		tryCompare(trailingImage, "status", Image.Ready)
+		tryCompare(gallery, "warmThumbnailRailComplete", true)
+		tryCompare(card, "prewarmVisualReady", true)
+		tryCompare(fixture, "finishCount", 1)
+		compare(controlledImageProvider.receipt(animatedId).requestedCount, 0)
+		compare(controlledImageProvider.receipt(branchAnimatedId).requestedCount, 0)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+	}
+
+	function test_stationary_warm_never_activates_selected_animation_without_poster() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-selected-animation"
+		const animatedId = "controlled-steam-selected-animation-" + suffix
+		const trailingId = "controlled-steam-selected-trailing-" + suffix
+		const preview = controlledStationaryPreview(
+			"image://mumble/unused-selected-" + suffix,
+			"image://mumble/" + trailingId)
+		preview.document.media[0] = {
+			"id": "media:0",
+			"kind": "image",
+			"mime": "image/gif",
+			"url": "image://mumble/" + animatedId,
+			"title": "Selected GIF without a poster"
+		}
+		fixture.configureCard(preview)
+
+		const releaseY = pressAndParkWarmThumb(fixture)
+		tryVerify(function() { return fixture.card !== null })
+		const card = fixture.card
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const stillImage = findChild(card, "embedDocumentMediaImage")
+		const animatedLoader = findChild(card, "embedDocumentAnimatedImageLoader")
+		verify(gallery !== null && stillImage !== null && animatedLoader !== null)
+		compare(gallery.currentKind, "animated-image")
+		compare(stillImage.source.toString(), "")
+		compare(animatedLoader.active, false)
+		wait(96)
+		compare(controlledImageProvider.receipt(animatedId).requestedCount, 0)
+		compare(controlledImageProvider.receipt(trailingId).requestedCount, 0)
+		compare(fixture.finishCount, 0)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
 	}
 
 	function test_stationary_gate_membership_pause_budget_and_empty_scan_bound() {
@@ -5040,9 +5318,11 @@ TestCase {
 		verify(fixture.finishActive("painted"))
 		tryCompare(fixture, "admissionCount", 2)
 		verify(fixture.finishActive("painted"))
+		tryCompare(fixture, "admissionCount", 3)
+		verify(fixture.finishActive("painted"))
 		wait(120)
-		compare(fixture.admissionCount, 2)
-		compare(fixture.gate.admittedCount, 2)
+		compare(fixture.admissionCount, 3)
+		compare(fixture.gate.admittedCount, 3)
 		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
 
 		const emptyFixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
@@ -5061,7 +5341,156 @@ TestCase {
 		const stoppedCount = emptyFixture.snapshotCount
 		wait(160)
 		compare(emptyFixture.snapshotCount, stoppedCount)
+		emptyFixture.hardBlocked = true
+		verify(!emptyFixture.gate.hardInputEligible)
+		emptyFixture.hardBlocked = false
+		verify(emptyFixture.gate.hardInputEligible)
+		wait(180)
+		verify(emptyFixture.snapshotCount > stoppedCount)
+		verify(emptyFixture.snapshotCount <= stoppedCount
+			+ emptyFixture.gate.maximumNoCandidateScansPerGeneration)
 		mouseRelease(emptyBar, emptyBar.width / 2, emptyThumb, Qt.LeftButton)
+	}
+
+	function test_stationary_gate_reopens_a_bounded_budget_for_each_thumb_stop() {
+		const firstCohort = []
+		for (let index = 0; index < 9; ++index)
+			firstCohort.push("first-" + index)
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": firstCohort,
+				"admissibleStableIds": firstCohort })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		verify(bar.pressed)
+		for (let expected = 1;
+				expected <= fixture.gate.maximumAdmissionsPerDwell; ++expected) {
+			tryCompare(fixture, "admissionCount", expected)
+			verify(fixture.finishActive("painted"))
+		}
+		wait(fixture.gate.serialIntervalMs + 80)
+		compare(fixture.admissionCount, fixture.gate.maximumAdmissionsPerDwell)
+		compare(fixture.gate.admittedCount,
+			fixture.gate.maximumAdmissionsPerDwell)
+		const firstGeneration = fixture.lastDwellGeneration
+		const staleId = fixture.lastStableId
+		const staleEpoch = fixture.lastPressEpoch
+
+		const secondCohort = ["second-0", "second-1", "second-2", "second-3"]
+		fixture.visibleStableIds = secondCohort
+		fixture.admissibleStableIds = secondCohort
+		const nextY = Math.min(bar.height - 4, thumbCenter + 24)
+		const beforeContentY = fixture.flickable.contentY
+		mouseMove(bar, bar.width / 2, nextY, 20)
+		verify(bar.pressed)
+		tryVerify(function() {
+			return Math.abs(fixture.flickable.contentY - beforeContentY) > 0.5
+		})
+		tryCompare(fixture, "admissionCount",
+			fixture.gate.maximumAdmissionsPerDwell + 1)
+		verify(fixture.lastDwellGeneration > firstGeneration)
+		compare(fixture.gate.admittedCount, 1)
+		compare(fixture.gate.finishAdmission(staleId, staleEpoch,
+			firstGeneration, "painted"), false)
+		for (let offset = 1; offset < secondCohort.length; ++offset) {
+			verify(fixture.finishActive("painted"))
+			tryCompare(fixture, "admissionCount",
+				fixture.gate.maximumAdmissionsPerDwell + offset + 1)
+		}
+		verify(fixture.finishActive("painted"))
+		wait(fixture.gate.serialIntervalMs + 80)
+		compare(fixture.gate.admittedCount, secondCohort.length)
+		compare(fixture.admissionCount,
+			fixture.gate.maximumAdmissionsPerDwell + secondCohort.length)
+		mouseRelease(bar, bar.width / 2, nextY, Qt.LeftButton)
+	}
+
+	function test_stationary_late_matching_hydration_reopens_visual_admission() {
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": ["late-hydration"],
+				"admissibleStableIds": ["late-hydration"] })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		tryCompare(fixture, "admissionCount", 1)
+		const epoch = fixture.lastPressEpoch
+		const generation = fixture.lastDwellGeneration
+		const stableId = fixture.lastStableId
+		tryCompare(fixture, "finishCount", 1,
+			fixture.gate.activeWatchdogMs + 160)
+		compare(fixture.gate.activeStableId, "")
+		verify(fixture.gate.reopenAdmission(stableId, epoch, generation))
+		tryCompare(fixture, "admissionCount", 2)
+		compare(fixture.gate.admittedCount, 1)
+		const nextY = Math.min(bar.height - 4, thumbCenter + 24)
+		mouseMove(bar, bar.width / 2, nextY, 20)
+		tryVerify(function() { return fixture.lastDwellGeneration > generation })
+		compare(fixture.gate.reopenAdmission(stableId, epoch, generation), false)
+		mouseRelease(bar, bar.width / 2, nextY, Qt.LeftButton)
+	}
+
+	function test_stationary_progress_renews_only_the_active_admission_deadline() {
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": ["late-progress"],
+				"admissibleStableIds": ["late-progress"] })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		tryCompare(fixture, "admissionCount", 1)
+		const epoch = fixture.lastPressEpoch
+		const generation = fixture.lastDwellGeneration
+		const stableId = fixture.lastStableId
+		wait(fixture.gate.activeWatchdogMs - 56)
+		verify(fixture.gate.noteAdmissionProgress(stableId, epoch, generation))
+		wait(112)
+		compare(fixture.gate.activeStableId, stableId)
+		compare(fixture.finishCount, 0)
+		verify(fixture.finishActive("painted"))
+		tryCompare(fixture, "finishCount", 1)
+		compare(fixture.gate.noteAdmissionProgress(stableId, epoch, generation), false)
+		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+	}
+
+	function test_stationary_cap_edge_late_hydration_replaces_consumed_attempt() {
+		const visibleIds = []
+		for (let index = 0; index < 8; ++index)
+			visibleIds.push("cap-hydration-" + index)
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": visibleIds,
+				"admissibleStableIds": visibleIds })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		let lastId = ""
+		let epoch = 0
+		let generation = 0
+		for (let expected = 1;
+				expected <= fixture.gate.maximumAdmissionsPerDwell; ++expected) {
+			tryCompare(fixture, "admissionCount", expected)
+			lastId = fixture.lastStableId
+			epoch = fixture.lastPressEpoch
+			generation = fixture.lastDwellGeneration
+			verify(fixture.finishActive("watchdog"))
+		}
+		compare(fixture.gate.admittedCount,
+			fixture.gate.maximumAdmissionsPerDwell)
+		verify(fixture.gate.reopenAdmission(lastId, epoch, generation))
+		compare(fixture.gate.admittedCount,
+			fixture.gate.maximumAdmissionsPerDwell - 1)
+		tryCompare(fixture, "admissionCount",
+			fixture.gate.maximumAdmissionsPerDwell + 1)
+		compare(fixture.lastStableId, lastId)
+		compare(fixture.gate.admittedCount,
+			fixture.gate.maximumAdmissionsPerDwell)
+		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
 	}
 
 	function test_stationary_failed_membership_revalidation_clears_exact_retention() {
@@ -5090,9 +5519,13 @@ TestCase {
 		tryCompare(fixture, "admissionCount", 2)
 		compare(fixture.lastStableId, retiredId)
 		verify(fixture.finishActive("painted"))
+		tryCompare(fixture, "admissionCount", 3)
+		verify(fixture.finishActive("painted"))
 		wait(fixture.gate.dwellIntervalMs + fixture.gate.serialIntervalMs + 64)
-		compare(fixture.admissionCount, 2)
-		compare(fixture.gate.admittedCount, 2)
+		// The rejected active admission is deliberately retried before the two
+		// remaining visible IDs, so four serial attempts consume this dwell budget.
+		compare(fixture.admissionCount, 4)
+		compare(fixture.gate.admittedCount, 4)
 		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
 	}
 
@@ -5146,14 +5579,16 @@ TestCase {
 			tryCompare(secondImage, "status", Image.Ready)
 		}
 		tryCompare(fixture, "finishCount", 1)
-		compare(fixture.gate.admittedCount, 2)
+		compare(fixture.gate.admittedCount, 1)
 		compare(fixture.gate.finishAdmission("warm-visible", oldEpoch,
 			oldGeneration, "painted"), false)
 		releaseY = movePressedWarmThumb(fixture, releaseY)
 		compare(fixture.cancellationCount, 1)
 		tryCompare(fixture, "card", null)
+		tryCompare(fixture, "admissionCount", 3)
 		wait(96)
-		compare(fixture.admissionCount, 2)
+		compare(fixture.admissionCount, 3)
+		compare(fixture.gate.admittedCount, 1)
 		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
 			releaseY, Qt.LeftButton)
 	}
@@ -5191,16 +5626,17 @@ TestCase {
 		compare(secondImage.source.toString(), primarySource)
 		tryCompare(secondImage, "status", Image.Ready)
 		tryCompare(fixture, "finishCount", 2)
-		compare(fixture.gate.admittedCount, 2)
+		compare(fixture.gate.admittedCount, 1)
 		// The second gate request reuses the exact cacheable Image source; it
 		// must not create a second controlled-provider request.
 		compare(controlledImageProvider.receipt(providerId).requestedCount, 1)
 
 		releaseY = movePressedWarmThumb(fixture, releaseY)
 		tryCompare(fixture, "card", null)
+		tryCompare(fixture, "admissionCount", 3)
 		wait(fixture.gate.dwellIntervalMs + 96)
-		compare(fixture.admissionCount, 2)
-		compare(fixture.gate.admittedCount, 2)
+		compare(fixture.admissionCount, 3)
+		compare(fixture.gate.admittedCount, 1)
 		compare(controlledImageProvider.receipt(providerId).requestedCount, 1)
 		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
 			releaseY, Qt.LeftButton)

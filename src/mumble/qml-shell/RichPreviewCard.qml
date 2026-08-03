@@ -152,6 +152,10 @@ Rectangle {
 		|| performanceEmbedSurfaceState === "ready"
 		|| performanceEmbedSurfaceState === "not-required")
 	readonly property bool prewarmVisualReady: paintedSurface && !paintedLoading
+		&& (!embedDocumentMediaGallery.visible
+			|| embedDocumentMediaGallery.warmThumbnailRailComplete)
+	readonly property int prewarmProgressRevision:
+		embedDocumentMediaGallery.warmThumbnailProgressRevision
 	readonly property var embedDocument: preview && preview.document ? preview.document : ({})
 	readonly property bool typedDocumentActive: Number(embedDocument.schemaVersion || 0) === 1
 		&& embedDocument.commonPresentation === true

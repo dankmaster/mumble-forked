@@ -12,10 +12,42 @@ ColumnLayout {
 	property int selectedIndex: 0
 	property bool expanded: false
 	property bool renderActive: true
-	// A stationary pressed scrollbar may warm only this selected still. The
-	// animated loader, playback prompt actions and thumbnail rail remain owned
-	// by renderActive.
+	// A stationary pressed scrollbar may warm the selected still and a bounded
+	// set of actually instantiated thumbnail stills. Animated media, playback
+	// and provider resources remain owned by renderActive.
 	property bool warmStaticActive: false
+	readonly property int maximumWarmThumbnailAdmissions: 8
+	readonly property int warmThumbnailAdmissionIntervalMs: 16
+	property var warmThumbnailAdmissions: ({})
+	property var warmThumbnailExpiredAdmissions: ({})
+	property var warmThumbnailStatuses: ({})
+	property var warmThumbnailSources: ({})
+	property var warmThumbnailIdentities: ({})
+	property int warmThumbnailAdmissionCount: 0
+	property int warmThumbnailNoCandidateScans: 0
+	readonly property int warmThumbnailLayoutWaitMs: 128
+	property double warmThumbnailScanStartedAt: 0
+	property bool warmThumbnailScanComplete: false
+	property bool warmThumbnailCompletionLatched: false
+	property int warmThumbnailActiveIndex: -1
+	readonly property int warmThumbnailActiveWatchdogMs: 256
+	property int warmThumbnailProgressRevision: 0
+	property string warmCurrentKind: ""
+	property string warmCurrentImageSource: ""
+	property bool warmCurrentSnapshotInitialized: false
+	readonly property int warmThumbnailPendingCount: {
+		let count = 0
+		const keys = Object.keys(warmThumbnailAdmissions)
+		for (let index = 0; index < keys.length; ++index) {
+			const status = Number(warmThumbnailStatuses[keys[index]])
+			if (status !== Image.Ready && status !== Image.Error)
+				++count
+		}
+		return count
+	}
+	readonly property bool warmThumbnailRailComplete: !warmStaticActive
+		|| mediaItems.length <= 1
+		|| (warmThumbnailScanComplete && warmThumbnailPendingCount === 0)
 	// Retain only the selected still artwork while the owning rich card is
 	// outside the viewport. AnimatedImage and every playable/provider resource
 	// continue to follow renderActive strictly.
@@ -35,27 +67,34 @@ ColumnLayout {
 	readonly property bool currentAnimatedPresentation:
 		currentPresentation === "animated-image"
 		|| currentContentBranch.indexOf("animated") >= 0
-	readonly property string currentKind: currentItem.managedAnimated
-		? "animated-image" : String(currentItem.kind || "")
+	readonly property string currentKind: thumbnailPresentationKind(currentItem)
 	readonly property string currentImageSource: currentKind === "image"
 		|| currentKind === "animated-image" ? String(currentItem.url || "")
 		: String(currentItem.posterUrl || currentItem.poster
 			|| currentItem.thumbnailUrl || currentItem.thumbnail || "")
-	readonly property int currentVisualStatus: currentKind === "animated-image"
+	readonly property bool warmCurrentSnapshotActive: warmStaticActive && !renderActive
+		&& warmCurrentSnapshotInitialized
+	readonly property string effectiveCurrentKind: warmCurrentSnapshotActive
+		? warmCurrentKind : currentKind
+	readonly property string effectiveCurrentImageSource: warmCurrentSnapshotActive
+		? warmCurrentImageSource : currentImageSource
+	readonly property int currentVisualStatus: effectiveCurrentKind === "animated-image"
 		? animatedImageLoader.mediaStatus : stillImage.status
 	readonly property bool currentVisualReady: currentVisualStatus === Image.Ready
-	readonly property bool currentVisualLoading: currentKind === "animated-image"
+	readonly property bool currentVisualLoading: effectiveCurrentKind === "animated-image"
 		? animatedImageLoader.active && currentVisualStatus === Image.Loading
 		: currentVisualStatus === Image.Loading
 	readonly property bool retainedStaticVisualReady: retainStaticVisual
-		&& currentKind !== "animated-image" && currentVisualReady
+		&& effectiveCurrentKind !== "animated-image" && currentVisualReady
 	readonly property bool managedPaintableSourceAvailable:
-		currentImageSource.length > 0
+		effectiveCurrentImageSource.length > 0
 	readonly property bool staticVisualPending: (retainStaticVisual || warmStaticActive)
-		&& currentKind !== "animated-image" && currentImageSource.length > 0
+		&& effectiveCurrentKind !== "animated-image"
+		&& effectiveCurrentImageSource.length > 0
 		&& (currentVisualStatus === Image.Null || currentVisualStatus === Image.Loading)
 	readonly property bool paintedLoading: viewportVisible && !mediaRequiresReveal
-		&& currentKind !== "animated-image" && currentImageSource.length > 0
+		&& effectiveCurrentKind !== "animated-image"
+		&& effectiveCurrentImageSource.length > 0
 		&& String(stillImage.source).length > 0
 		&& (stillImage.status === Image.Null || stillImage.status === Image.Loading)
 	readonly property bool paintedTerminal: viewportVisible && !mediaRequiresReveal
@@ -72,7 +111,7 @@ ColumnLayout {
 		: currentVisualLoading ? "loading"
 		: mediaFallbackIcon.visible ? "fallback" : "blank"
 	readonly property bool compactFallback: viewportVisible
-		&& currentImageSource.length === 0 && !mediaRequiresReveal
+		&& effectiveCurrentImageSource.length === 0 && !mediaRequiresReveal
 	readonly property real resolvedViewportHeight: !viewportVisible ? 0
 		: compactFallback ? Theme.controlHeight + Theme.space5
 		: viewportPreferredHeight > 0 ? viewportPreferredHeight
@@ -81,6 +120,262 @@ ColumnLayout {
 	signal selectionRequested(int index)
 	signal mediaRequested(int index)
 	signal revealRequested()
+
+	function clearWarmThumbnailAdmissions(preserveCompletion) {
+		const keepCompletion = preserveCompletion === true
+			&& warmThumbnailCompletionLatched
+		warmThumbnailAdmissionTimer.stop()
+		if (!keepCompletion) {
+			warmThumbnailAdmissions = ({})
+			warmThumbnailExpiredAdmissions = ({})
+			warmThumbnailStatuses = ({})
+			warmThumbnailSources = ({})
+			warmThumbnailIdentities = ({})
+			warmThumbnailAdmissionCount = 0
+		}
+		warmThumbnailNoCandidateScans = 0
+		warmThumbnailScanStartedAt = 0
+		warmThumbnailScanComplete = keepCompletion
+		warmThumbnailCompletionLatched = keepCompletion
+		warmThumbnailActiveIndex = -1
+		warmThumbnailActiveWatchdog.stop()
+	}
+
+	function thumbnailPresentationKind(mediaItem) {
+		const item = mediaItem || ({})
+		const kind = String(item.kind || "").toLowerCase()
+		const mime = String(item.mime || item.mediaMime || "").toLowerCase()
+		const presentation = String(item.presentation
+			|| item.mediaPresentation || "").toLowerCase()
+		const contentBranch = String(item.contentBranch || "").toLowerCase()
+		const imageTransport = kind.length === 0 || kind === "image"
+		if (item.managedAnimated === true || kind === "gif"
+				|| kind === "animated-image"
+				|| (imageTransport && (mime === "image/gif"
+					|| presentation === "animated-image"
+					|| contentBranch.indexOf("animated") >= 0)))
+			return "animated-image"
+		return kind
+	}
+
+	function staticThumbnailSource(mediaItem) {
+		const item = mediaItem || ({})
+		const kind = thumbnailPresentationKind(item)
+		if (kind === "animated-image")
+			return String(item.thumbnailUrl || item.thumbnail
+				|| item.posterUrl || item.poster || "")
+		if (kind === "image")
+			return String(item.thumbnailUrl || item.thumbnail
+				|| item.posterUrl || item.poster || item.url || "")
+		return String(item.posterUrl || item.poster
+			|| item.thumbnailUrl || item.thumbnail || "")
+	}
+
+	function renderedThumbnailSource(mediaItem) {
+		const item = mediaItem || ({})
+		const stillSource = staticThumbnailSource(item)
+		if (stillSource.length > 0)
+			return stillSource
+		return thumbnailPresentationKind(item) === "animated-image"
+			? String(item.url || "") : ""
+	}
+
+	function warmThumbnailIdentity(mediaItem, index) {
+		const item = mediaItem || ({})
+		const stablePart = String(item.id || item.mediaId || item.key || index)
+		return stablePart + "|" + staticThumbnailSource(item)
+	}
+
+	function scheduleWarmThumbnailAdmission() {
+		if (!warmStaticActive || renderActive || warmThumbnailCompletionLatched
+				|| !currentVisualReady
+				|| mediaRequiresReveal || mediaItems.length <= 1
+				|| warmThumbnailAdmissionCount >= maximumWarmThumbnailAdmissions
+				|| warmThumbnailActiveIndex >= 0)
+			return
+		warmThumbnailAdmissionTimer.restart()
+	}
+
+	function admitNextWarmThumbnail() {
+		if (!warmStaticActive || renderActive || warmThumbnailCompletionLatched
+				|| !currentVisualReady
+				|| mediaRequiresReveal || !thumbnailList.visible)
+			return false
+		const viewportY = Math.max(0, thumbnailList.height / 2)
+		const firstVisible = thumbnailList.indexAt(
+			thumbnailList.contentX + 1, viewportY)
+		const startIndex = firstVisible >= 0 ? firstVisible
+			: Math.max(0, Math.min(selectedIndex, mediaItems.length - 1))
+		for (let index = startIndex; index < mediaItems.length; ++index) {
+			if (warmThumbnailAdmissionCount >= maximumWarmThumbnailAdmissions)
+				break
+			const item = thumbnailList.itemAtIndex(index)
+			if (!item || item.inThumbnailViewport !== true)
+				continue
+			if (index === selectedIndex
+					|| warmThumbnailAdmissions[String(index)] === true
+					|| warmThumbnailExpiredAdmissions[String(index)] === true)
+				continue
+			const key = String(index)
+			const admittedSource = staticThumbnailSource(mediaItems[index])
+			if (admittedSource.length === 0) {
+				const nextExpired = Object.assign({}, warmThumbnailExpiredAdmissions)
+				nextExpired[key] = true
+				warmThumbnailExpiredAdmissions = nextExpired
+				const terminalStatuses = Object.assign({}, warmThumbnailStatuses)
+				terminalStatuses[key] = Image.Error
+				warmThumbnailStatuses = terminalStatuses
+				++warmThumbnailAdmissionCount
+				++warmThumbnailProgressRevision
+				continue
+			}
+			const nextStatuses = Object.assign({}, warmThumbnailStatuses)
+			nextStatuses[key] = Image.Null
+			warmThumbnailStatuses = nextStatuses
+			++warmThumbnailAdmissionCount
+			warmThumbnailNoCandidateScans = 0
+			warmThumbnailActiveIndex = index
+			warmThumbnailActiveWatchdog.restart()
+			++warmThumbnailProgressRevision
+			const nextSources = Object.assign({}, warmThumbnailSources)
+			nextSources[key] = admittedSource
+			warmThumbnailSources = nextSources
+			const nextIdentities = Object.assign({}, warmThumbnailIdentities)
+			nextIdentities[key] = warmThumbnailIdentity(mediaItems[index], index)
+			warmThumbnailIdentities = nextIdentities
+			// Publish the admission last. This binding activates Image.source; all
+			// ownership and timeout state must already exist if a cache hit reports
+			// Ready synchronously.
+			const nextAdmissions = Object.assign({}, warmThumbnailAdmissions)
+			nextAdmissions[key] = true
+			warmThumbnailAdmissions = nextAdmissions
+			Qt.callLater(function() {
+				const admittedItem = thumbnailList.itemAtIndex(index)
+				if (admittedItem && warmThumbnailAdmissions[key] === true)
+					updateWarmThumbnailStatus(index, admittedItem.thumbnailStatus)
+			})
+			return true
+		}
+		if (warmThumbnailAdmissionCount >= maximumWarmThumbnailAdmissions) {
+			warmThumbnailScanComplete = true
+			return false
+		}
+		++warmThumbnailNoCandidateScans
+		if (warmThumbnailScanStartedAt <= 0)
+			warmThumbnailScanStartedAt = Date.now()
+		if (Date.now() - warmThumbnailScanStartedAt
+				< warmThumbnailLayoutWaitMs)
+			scheduleWarmThumbnailAdmission()
+		else
+			warmThumbnailScanComplete = true
+		return false
+	}
+
+	function updateWarmThumbnailStatus(index, status) {
+		const key = String(index)
+		if (warmThumbnailAdmissions[key] !== true)
+			return
+		if (warmThumbnailExpiredAdmissions[key] === true)
+			return
+		const nextStatuses = Object.assign({}, warmThumbnailStatuses)
+		nextStatuses[key] = Number(status)
+		warmThumbnailStatuses = nextStatuses
+		if (Number(index) !== warmThumbnailActiveIndex
+				|| (Number(status) !== Image.Ready
+					&& Number(status) !== Image.Error))
+			return
+		warmThumbnailActiveWatchdog.stop()
+		warmThumbnailActiveIndex = -1
+		++warmThumbnailProgressRevision
+		if (warmThumbnailAdmissionCount >= maximumWarmThumbnailAdmissions)
+			warmThumbnailScanComplete = true
+		else
+			scheduleWarmThumbnailAdmission()
+	}
+
+	function expireWarmThumbnailAdmission() {
+		if (warmThumbnailActiveIndex < 0)
+			return
+		const key = String(warmThumbnailActiveIndex)
+		const nextStatuses = Object.assign({}, warmThumbnailStatuses)
+		nextStatuses[key] = Image.Error
+		warmThumbnailStatuses = nextStatuses
+		const nextExpired = Object.assign({}, warmThumbnailExpiredAdmissions)
+		nextExpired[key] = true
+		warmThumbnailExpiredAdmissions = nextExpired
+		warmThumbnailActiveIndex = -1
+		++warmThumbnailProgressRevision
+		if (warmThumbnailAdmissionCount >= maximumWarmThumbnailAdmissions)
+			warmThumbnailScanComplete = true
+		else
+			scheduleWarmThumbnailAdmission()
+	}
+
+	function rearmWarmThumbnailScan() {
+		if (!warmStaticActive || renderActive || warmThumbnailCompletionLatched
+				|| !currentVisualReady
+				|| mediaRequiresReveal
+				|| warmThumbnailAdmissionCount >= maximumWarmThumbnailAdmissions)
+			return
+		warmThumbnailNoCandidateScans = 0
+		warmThumbnailScanComplete = false
+		scheduleWarmThumbnailAdmission()
+	}
+
+	onWarmStaticActiveChanged: {
+		if (!warmStaticActive) {
+			warmCurrentSnapshotInitialized = false
+			warmCurrentKind = ""
+			warmCurrentImageSource = ""
+			clearWarmThumbnailAdmissions()
+		} else {
+			warmCurrentImageSource = staticThumbnailSource(currentItem)
+			warmCurrentKind = currentKind === "animated-image"
+				&& warmCurrentImageSource.length > 0 ? "image" : currentKind
+			warmCurrentSnapshotInitialized = true
+			if (mediaItems.length <= 1) {
+			warmThumbnailScanComplete = true
+			warmThumbnailCompletionLatched = true
+			} else
+				scheduleWarmThumbnailAdmission()
+		}
+	}
+	onRenderActiveChanged: {
+		if (renderActive)
+			clearWarmThumbnailAdmissions()
+		else
+			scheduleWarmThumbnailAdmission()
+	}
+	onCurrentVisualReadyChanged: {
+		if (!currentVisualReady) {
+			const preserveCompletion = warmStaticActive && !renderActive
+				&& warmThumbnailCompletionLatched
+			clearWarmThumbnailAdmissions(preserveCompletion)
+		}
+		else {
+			if (warmStaticActive && !renderActive)
+				++warmThumbnailProgressRevision
+			scheduleWarmThumbnailAdmission()
+		}
+	}
+	onSelectedIndexChanged: {
+		const preserveCompletion = warmStaticActive && !renderActive
+			&& warmThumbnailCompletionLatched
+		clearWarmThumbnailAdmissions(preserveCompletion)
+		if (!preserveCompletion)
+			scheduleWarmThumbnailAdmission()
+	}
+	onMediaItemsChanged: {
+		const preserveCompletion = warmStaticActive && !renderActive
+			&& warmThumbnailCompletionLatched
+		clearWarmThumbnailAdmissions(preserveCompletion)
+		if (!preserveCompletion)
+			scheduleWarmThumbnailAdmission()
+	}
+	onWarmThumbnailRailCompleteChanged: {
+		if (warmStaticActive && !renderActive && warmThumbnailRailComplete)
+			warmThumbnailCompletionLatched = true
+	}
 
 	function previousMedia() {
 		if (mediaItems.length > 1)
@@ -141,7 +436,8 @@ ColumnLayout {
 			source: (root.renderActive || root.retainStaticVisual
 				|| root.warmStaticActive)
 				&& !root.mediaRequiresReveal
-				&& root.currentKind !== "animated-image" ? root.currentImageSource : ""
+				&& root.effectiveCurrentKind !== "animated-image"
+				? root.effectiveCurrentImageSource : ""
 			asynchronous: true
 			cache: true
 			// Share one exact decoded-size cache key with Main's bounded preheater.
@@ -318,12 +614,27 @@ ColumnLayout {
 		}
 	}
 
+	Timer {
+		id: warmThumbnailAdmissionTimer
+		interval: root.warmThumbnailAdmissionIntervalMs
+		repeat: false
+		onTriggered: root.admitNextWarmThumbnail()
+	}
+	Timer {
+		id: warmThumbnailActiveWatchdog
+		interval: root.warmThumbnailActiveWatchdogMs
+		repeat: false
+		onTriggered: root.expireWarmThumbnailAdmission()
+	}
+
 	ListView {
 		id: thumbnailList
 		objectName: "embedDocumentMediaThumbnailList"
 		Layout.fillWidth: true
 		Layout.preferredHeight: visible ? 64 : 0
-		visible: root.renderActive && root.mediaItems.length > 1
+		visible: (root.renderActive || root.warmStaticActive)
+			&& root.mediaItems.length > 1
+		enabled: root.renderActive
 		orientation: ListView.Horizontal
 		spacing: Theme.space2
 		clip: true
@@ -345,15 +656,21 @@ ColumnLayout {
 			readonly property bool inThumbnailViewport:
 				x + width > thumbnailList.contentX
 				&& x < thumbnailList.contentX + thumbnailList.width
+			readonly property int thumbnailStatus: thumbnailImage.status
 			objectName: "embedDocumentMediaThumbnail_" + index
 
 			width: 82
 			height: 56
-			hoverEnabled: true
+			hoverEnabled: root.renderActive
 			Accessible.name: qsTr("Show media %1 of %2")
 				.arg(index + 1).arg(root.mediaItems.length)
-			Accessible.ignored: !inThumbnailViewport
+			Accessible.ignored: !root.renderActive || !inThumbnailViewport
 			onClicked: root.selectionRequested(index)
+			onInThumbnailViewportChanged: {
+				if (inThumbnailViewport)
+					root.rearmWarmThumbnailScan()
+			}
+			Component.onCompleted: root.rearmWarmThumbnailScan()
 
 			background: Rectangle {
 				radius: Theme.innerRadius
@@ -365,28 +682,33 @@ ColumnLayout {
 
 			contentItem: Item {
 				Image {
+					id: thumbnailImage
 					objectName: "embedDocumentMediaThumbnailImage_" + thumbnailButton.index
 					anchors.fill: parent
 					anchors.margins: 2
 					source: {
-						if (!root.renderActive || !thumbnailButton.inThumbnailViewport)
+						if (!thumbnailButton.inThumbnailViewport)
 							return ""
-						const kind = thumbnailButton.modelData.managedAnimated
-							? "animated-image" : String(thumbnailButton.modelData.kind || "")
-						if (kind === "image" || kind === "animated-image")
-							return String(thumbnailButton.modelData.thumbnailUrl
-								|| thumbnailButton.modelData.thumbnail
-								|| thumbnailButton.modelData.url || "")
-						return String(thumbnailButton.modelData.posterUrl
-							|| thumbnailButton.modelData.poster
-							|| thumbnailButton.modelData.thumbnailUrl
-							|| thumbnailButton.modelData.thumbnail || "")
+						const key = String(thumbnailButton.index)
+						if (!root.renderActive) {
+							if (root.warmThumbnailAdmissions[key] !== true
+									|| root.warmThumbnailExpiredAdmissions[key] === true)
+								return ""
+							if (root.warmThumbnailIdentities[key]
+									!== root.warmThumbnailIdentity(
+										thumbnailButton.modelData, thumbnailButton.index))
+								return ""
+							return String(root.warmThumbnailSources[key] || "")
+						}
+						return root.renderedThumbnailSource(thumbnailButton.modelData)
 					}
 					asynchronous: true
 					cache: true
 					sourceSize: Qt.size(Math.ceil(width * Screen.devicePixelRatio),
 						Math.ceil(height * Screen.devicePixelRatio))
 					fillMode: Image.PreserveAspectCrop
+					onStatusChanged: root.updateWarmThumbnailStatus(
+						thumbnailButton.index, status)
 				}
 				ModernIcon {
 					anchors.centerIn: parent
@@ -408,6 +730,14 @@ ColumnLayout {
 			function onSelectedIndexChanged() {
 				thumbnailList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
 			}
+		}
+		onContentXChanged: {
+			root.warmThumbnailNoCandidateScans = 0
+			root.scheduleWarmThumbnailAdmission()
+		}
+		onWidthChanged: {
+			root.warmThumbnailNoCandidateScans = 0
+			root.scheduleWarmThumbnailAdmission()
 		}
 	}
 }

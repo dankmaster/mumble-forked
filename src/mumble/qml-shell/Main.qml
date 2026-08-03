@@ -3571,6 +3571,20 @@ ApplicationWindow {
 					property var stationaryThumbWarmPins: ({})
 					readonly property int stationaryThumbWarmPinCount:
 						Object.keys(stationaryThumbWarmPins).length
+					readonly property int stationaryThumbWarmCurrentDwellPinCount: {
+						let count = 0
+						const keys = Object.keys(stationaryThumbWarmPins)
+						for (let index = 0; index < keys.length; ++index) {
+							const pin = stationaryThumbWarmPins[keys[index]]
+							if (pin
+									&& Number(pin.pressEpoch)
+										=== Number(stationaryThumbWarmGate.pressEpoch)
+									&& Number(pin.dwellGeneration)
+										=== Number(stationaryThumbWarmGate.dwellGeneration))
+								++count
+						}
+						return count
+					}
 					function stationaryThumbWarmPin(stableId) {
 						return stationaryThumbWarmPins[String(stableId || "")] || null
 					}
@@ -3611,8 +3625,12 @@ ApplicationWindow {
 							return false
 						if (!deferred && item.stationaryThumbWarmEligible !== true)
 							return false
+						// Pins from earlier stops retain only their captured geometry. They
+						// must not consume the warming budget for the viewport currently
+						// parked under the physical thumb.
 						return !!stationaryThumbWarmPin(key)
-							|| stationaryThumbWarmPinCount < 2
+							|| stationaryThumbWarmCurrentDwellPinCount
+								< stationaryThumbWarmGate.maximumAdmissionsPerDwell
 					}
 					function installStationaryThumbWarmPin(stableId, pressEpoch,
 							dwellGeneration) {
@@ -8182,7 +8200,6 @@ ApplicationWindow {
 									const statusValue = String(value.status || "").toLowerCase()
 									return active && !deferredPresentation && inVisibleViewport
 										&& Object.keys(value).length > 0
-										&& state !== "loading" && value.loading !== true
 										&& state !== "error" && state !== "failed"
 										&& statusValue !== "error" && statusValue !== "failed"
 										&& value.failed !== true && !previewLoaderFailed
@@ -8342,6 +8359,8 @@ ApplicationWindow {
 									? item.previewPresentationReady : false
 								readonly property bool previewPrewarmVisualReady: item
 									? item.previewPrewarmVisualReady : false
+								readonly property int previewPrewarmProgressRevision: item
+									? Number(item.previewPrewarmProgressRevision || 0) : 0
 								readonly property bool richResourcesRequired: item
 									? item.richResourcesRequired : false
 								property bool inVisibleViewport: false
@@ -8734,8 +8753,16 @@ ApplicationWindow {
 										return
 									if (paintedTerminal)
 										timeline.finishStationaryThumbWarm(stableId, "terminal")
-									else if (paintedSurface)
-										timeline.finishStationaryThumbWarm(stableId, "painted")
+									else if (paintedSurface && item
+											&& item.previewPrewarmVisualReady === true)
+											timeline.finishStationaryThumbWarm(stableId, "painted")
+								}
+								function noteStationaryThumbWarmProgress() {
+									const pin = stationaryThumbWarmPin
+									if (!stationaryThumbWarmOwned || !pin)
+										return false
+									return stationaryThumbWarmGate.noteAdmissionProgress(stableId,
+										Number(pin.pressEpoch), Number(pin.dwellGeneration))
 								}
 								onStationaryThumbWarmOwnedChanged: {
 									if (stationaryThumbWarmOwned)
@@ -8750,9 +8777,18 @@ ApplicationWindow {
 									refreshStationaryThumbWarmState()
 								}
 								onPaintedSummaryChanged: refreshStationaryThumbWarmState()
-								onPaintedSurfaceChanged: refreshStationaryThumbWarmState()
+								onPaintedSurfaceChanged: {
+									noteStationaryThumbWarmProgress()
+									refreshStationaryThumbWarmState()
+								}
 								onPaintedLoadingChanged: refreshStationaryThumbWarmState()
 								onPaintedTerminalChanged: refreshStationaryThumbWarmState()
+								onPreviewPrewarmVisualReadyChanged:
+									refreshStationaryThumbWarmState()
+								onPreviewPrewarmProgressRevisionChanged: {
+									noteStationaryThumbWarmProgress()
+									refreshStationaryThumbWarmState()
+								}
 								onInVisibleViewportChanged: refreshStationaryThumbWarmState()
 								function cancelNearViewportPrefetchForScroll() {
 									const ownedStableId = resumeOwnedStableId
@@ -9028,6 +9064,9 @@ ApplicationWindow {
 						// provider stages, so do not enqueue the same message again while
 						// that pipeline is already in flight.
 						property bool backendHydrationRequested: false
+						property string stationaryThumbHydrationStableId: ""
+						property int stationaryThumbHydrationPressEpoch: 0
+						property int stationaryThumbHydrationDwellGeneration: 0
 						property bool previewBackendErrorEpochActive: false
 						property string previewBackendErrorStableId: ""
 						// A pooled rich-card tree is expensive to retarget while a
@@ -9194,6 +9233,9 @@ ApplicationWindow {
 								// in-flight latch and release only preview ownership so a
 								// mixed attachment/inline row keeps its shared resource token.
 								backendHydrationRequested = false
+								stationaryThumbHydrationStableId = ""
+								stationaryThumbHydrationPressEpoch = 0
+								stationaryThumbHydrationDwellGeneration = 0
 								previewMaterializationAdmitted = false
 								previewLoaderTerminalErrorIdentity = ""
 								nearViewportPrefetchTerminalIdentity = ""
@@ -9265,8 +9307,12 @@ ApplicationWindow {
 							return "none"
 						}
 						function recoverPreviewBackendGeneration(recoveryAction) {
-							if (recoveryAction !== "hydrate")
+							if (recoveryAction !== "hydrate") {
 								backendHydrationRequested = false
+								stationaryThumbHydrationStableId = ""
+								stationaryThumbHydrationPressEpoch = 0
+								stationaryThumbHydrationDwellGeneration = 0
+							}
 							previewMaterializationAdmitted = false
 							previewLoaderTerminalErrorIdentity = ""
 							nearViewportPrefetchTerminalIdentity = ""
@@ -9533,6 +9579,58 @@ ApplicationWindow {
 										richContentViewportEligible))
 								chatModel.requestBodyHydration(stableId)
 						}
+						function requestStationaryThumbHydration(pressEpoch,
+								dwellGeneration) {
+							const pin = asyncMessageDelegate.stationaryThumbWarmPin
+							if (!stationaryThumbWarmOwned || !pin
+									|| Number(pin.pressEpoch) !== Number(pressEpoch)
+									|| Number(pin.dwellGeneration) !== Number(dwellGeneration)
+									|| !stationaryThumbWarmGate.owns(stableId,
+										Number(pressEpoch), Number(dwellGeneration))
+									|| !previewNeedsHydration || accessibilityPooled
+									|| !inVisibleViewport || timeline.scopePresentationPending
+									|| timeline.prependAnchorActive || chatModel.prependPending)
+								return false
+							// Attach this stationary generation to an existing single-flight
+							// request, or enqueue exactly one backend hydration. A late result may
+							// update the model, but only the still-owned generation may reveal it.
+							if (!backendHydrationRequested
+									&& !root.queuePreviewHydration(stableId, true))
+								return false
+							backendHydrationRequested = true
+							stationaryThumbHydrationStableId = String(stableId || "")
+							stationaryThumbHydrationPressEpoch = Number(pressEpoch)
+							stationaryThumbHydrationDwellGeneration = Number(dwellGeneration)
+							return true
+						}
+						function resumeStationaryThumbWarmAfterHydration() {
+							const pin = asyncMessageDelegate.stationaryThumbWarmPin
+							if (!pin || stationaryThumbHydrationStableId
+										!== String(stableId || "")
+									|| Number(pin.pressEpoch)
+										!== stationaryThumbHydrationPressEpoch
+									|| Number(pin.dwellGeneration)
+										!== stationaryThumbHydrationDwellGeneration)
+								return false
+							let resumed = false
+							if (stationaryThumbWarmOwned
+									&& stationaryThumbWarmGate.owns(stableId,
+										Number(pin.pressEpoch), Number(pin.dwellGeneration))) {
+								resumed = admitStationaryThumbWarm(
+									Number(pin.pressEpoch), Number(pin.dwellGeneration))
+								if (resumed)
+									stationaryThumbWarmGate.noteAdmissionProgress(stableId,
+										Number(pin.pressEpoch), Number(pin.dwellGeneration))
+							} else
+								resumed = stationaryThumbWarmGate.reopenAdmission(stableId,
+									Number(pin.pressEpoch), Number(pin.dwellGeneration))
+							if (resumed) {
+								stationaryThumbHydrationStableId = ""
+								stationaryThumbHydrationPressEpoch = 0
+								stationaryThumbHydrationDwellGeneration = 0
+							}
+							return resumed
+						}
 						function resumeRichContentAfterScroll(allowDuringFinalization,
 								admitPreviewMaterialization) {
 							const pendingAllowed = allowDuringFinalization === true
@@ -9579,13 +9677,16 @@ ApplicationWindow {
 									|| Number(pin.pressEpoch) !== Number(pressEpoch)
 									|| Number(pin.dwellGeneration) !== Number(dwellGeneration)
 									|| accessibilityPooled || !inVisibleViewport
-									|| !hasPreviewContent || previewNeedsHydration
+									|| !hasPreviewContent
 									|| previewTerminalUnavailable)
 								return false
 							// This path intentionally bypasses only the row/static-still
 							// suspension. Provider resources, animation and playback remain
 							// owned by richResourcesActive, which stays false during scroll.
 							messageRowMaterialized = true
+							if (previewNeedsHydration)
+								return requestStationaryThumbHydration(
+									pressEpoch, dwellGeneration)
 							previewMaterializationAdmitted = true
 							return true
 						}
@@ -9661,6 +9762,9 @@ ApplicationWindow {
 							richResourceActivationQueued = false
 							previewMaterializationAdmitted = false
 							backendHydrationRequested = false
+							stationaryThumbHydrationStableId = ""
+							stationaryThumbHydrationPressEpoch = 0
+							stationaryThumbHydrationDwellGeneration = 0
 							previewBackendErrorEpochActive = false
 							previewBackendErrorStableId = ""
 							updateRichResourceActivity()
@@ -9702,9 +9806,15 @@ ApplicationWindow {
 								suspendRichResourcesForScroll()
 								resetPreviewLoaderIncubationWatchdog(true)
 								previewMaterializationAdmitted = false
-								requestPreviewHydrationIfNeeded()
+								const pin = asyncMessageDelegate.stationaryThumbWarmPin
+								if (stationaryThumbWarmOwned && pin)
+									admitStationaryThumbWarm(Number(pin.pressEpoch),
+										Number(pin.dwellGeneration))
+								else
+									requestPreviewHydrationIfNeeded()
 							} else {
-								timeline.scheduleRichContentResume()
+								if (!resumeStationaryThumbWarmAfterHydration())
+									timeline.scheduleRichContentResume()
 							}
 						}
 						onPreviewLoaderIncubationIdentityChanged: {
@@ -9775,6 +9885,9 @@ ApplicationWindow {
 							richResourceActivationQueued = false
 							previewMaterializationAdmitted = false
 							backendHydrationRequested = false
+							stationaryThumbHydrationStableId = ""
+							stationaryThumbHydrationPressEpoch = 0
+							stationaryThumbHydrationDwellGeneration = 0
 							previewBackendErrorEpochActive = false
 							previewBackendErrorStableId = ""
 							messagePresentationReadyLatched = false
@@ -9851,6 +9964,11 @@ ApplicationWindow {
 								&& previewPresentationLoader.status === Loader.Ready
 								&& !!previewPresentationLoader.item
 								&& previewPresentationLoader.item.prewarmVisualReady === true)
+						readonly property int previewPrewarmProgressRevision:
+							previewPresentationLoader
+								&& previewPresentationLoader.status === Loader.Ready
+								&& previewPresentationLoader.item
+							? Number(previewPresentationLoader.item.prewarmProgressRevision || 0) : 0
 						readonly property bool previewPaintPending: hasPreviewContent
 							&& !previewTerminalUnavailable
 							&& (previewNeedsHydration || !previewMaterializationAdmitted
