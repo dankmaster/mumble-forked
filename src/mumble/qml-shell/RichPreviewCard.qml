@@ -149,7 +149,8 @@ Rectangle {
 	readonly property bool paintedSurface: opacity > 0
 		&& !typedGalleryWithoutManagedPaintableSource && (paintedTerminal
 		|| performanceEmbedSurfaceState === "poster"
-		|| performanceEmbedSurfaceState === "ready")
+		|| performanceEmbedSurfaceState === "ready"
+		|| performanceEmbedSurfaceState === "not-required")
 	readonly property bool prewarmVisualReady: paintedSurface && !paintedLoading
 	readonly property var embedDocument: preview && preview.document ? preview.document : ({})
 	readonly property bool typedDocumentActive: Number(embedDocument.schemaVersion || 0) === 1

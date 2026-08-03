@@ -1013,6 +1013,12 @@ TestCase {
             "url": "https://example.com/card",
             "previewSize": "compact"
         }
+		wait(0)
+		compare(card.performanceEmbedSurfaceState, "not-required")
+		compare(card.paintedLoading, false)
+		compare(card.paintedTerminal, false)
+		compare(card.paintedSurface, true)
+		compare(card.prewarmVisualReady, true)
         verify(card.compact)
         card.userExpanded = true
 		verify(card.expanded)
