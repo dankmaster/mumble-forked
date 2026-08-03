@@ -4913,6 +4913,7 @@ namespace {
 			documentPlaybackPrompt && documentPlaybackPrompt->property("visible").toBool());
 
 		QVariantList visibleThumbnailSlots;
+		int visibleThumbnailImageCount = 0;
 		const int mediaItemCount = state.value(QStringLiteral("mediaItemCount")).toInt();
 		for (int index = 0; documentThumbnailList && index < mediaItemCount; ++index) {
 			QQuickItem *thumbnailImage = qobject_cast< QQuickItem * >(
@@ -4921,27 +4922,38 @@ namespace {
 			QQuickItem *thumbnailButton = qobject_cast< QQuickItem * >(
 				automationFindQuickItemByObjectName(documentThumbnailList,
 					QStringLiteral("embedDocumentMediaThumbnail_%1").arg(index)));
-			if (!thumbnailImage || !thumbnailButton
-				|| !thumbnailButton->property("inThumbnailViewport").toBool()) {
+			if (!thumbnailButton || !thumbnailButton->property("inThumbnailViewport").toBool()) {
 				continue;
 			}
 			QRectF sceneRect;
 			QRectF visibleSceneRect;
-			if (!automationEffectiveImageRects(
-					thumbnailImage, cardItem, &sceneRect, &visibleSceneRect)) {
-				continue;
+			bool geometryPresent = thumbnailImage && automationEffectiveImageRects(
+				thumbnailImage, cardItem, &sceneRect, &visibleSceneRect);
+			if (!geometryPresent) {
+				geometryPresent = automationEffectiveImageRects(
+					thumbnailButton, cardItem, &sceneRect, &visibleSceneRect);
 			}
-			const int status = thumbnailImage->property("status").toInt();
+			const bool imagePresent = thumbnailImage != nullptr;
+			if (imagePresent) {
+				++visibleThumbnailImageCount;
+			}
+			const int status = imagePresent ? thumbnailImage->property("status").toInt() : -1;
 			visibleThumbnailSlots.push_back(QVariantMap {
 				{ QStringLiteral("index"), index },
-				{ QStringLiteral("source"), thumbnailImage->property("source").toString() },
+				{ QStringLiteral("imagePresent"), imagePresent },
+				{ QStringLiteral("geometryPresent"), geometryPresent },
+				{ QStringLiteral("source"), imagePresent
+						? thumbnailImage->property("source").toString() : QString() },
 				{ QStringLiteral("status"), status },
-				{ QStringLiteral("statusName"), automationImageStatusName(status) },
+				{ QStringLiteral("statusName"), imagePresent
+						? automationImageStatusName(status) : QStringLiteral("missing") },
 				{ QStringLiteral("sceneRect"), automationSceneRectState(sceneRect) },
 				{ QStringLiteral("visibleSceneRect"), automationSceneRectState(visibleSceneRect) }
 			});
 		}
 		state.insert(QStringLiteral("visibleThumbnailSlots"), visibleThumbnailSlots);
+		state.insert(QStringLiteral("visibleThumbnailButtonCount"), visibleThumbnailSlots.size());
+		state.insert(QStringLiteral("visibleThumbnailImageCount"), visibleThumbnailImageCount);
 
 		bool focused = false;
 		if (window) {

@@ -3528,12 +3528,18 @@ void TestModernDialogControllers::stationaryGalleryAutomationIsStagedAndObservab
 	for (const QString &field : { QStringLiteral("warmStaticActive"), QStringLiteral("mediaItemCount"),
 			 QStringLiteral("selectedMediaIndex"), QStringLiteral("documentGalleryCurrentVisualStatus"),
 			 QStringLiteral("documentGalleryPaintedSurface"), QStringLiteral("documentGallerySurfaceState"),
-			 QStringLiteral("visibleThumbnailSlots") }) {
+			 QStringLiteral("visibleThumbnailSlots"), QStringLiteral("visibleThumbnailButtonCount"),
+			 QStringLiteral("visibleThumbnailImageCount") }) {
 		QVERIFY2(cardState.contains(field),
 			qPrintable(QStringLiteral("Missing gallery observation field: %1").arg(field)));
 	}
 	QVERIFY(cardState.contains(QStringLiteral("thumbnailImage->property(\"source\").toString()")));
 	QVERIFY(cardState.contains(QStringLiteral("thumbnailImage->property(\"status\").toInt()")));
+	QVERIFY(cardState.contains(QStringLiteral("QStringLiteral(\"imagePresent\")")));
+	QVERIFY(cardState.contains(QStringLiteral("QStringLiteral(\"missing\")")));
+	QVERIFY(cardState.contains(QStringLiteral(
+		"if (!thumbnailButton || !thumbnailButton->property(\"inThumbnailViewport\").toBool())")));
+	QVERIFY(!cardState.contains(QStringLiteral("if (!thumbnailImage || !thumbnailButton")));
 	QVERIFY(!cardState.contains(QStringLiteral(
 		"thumbnailImage->property(\"source\").toString().isEmpty()")));
 
