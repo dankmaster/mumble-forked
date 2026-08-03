@@ -1482,8 +1482,18 @@ TestCase {
 		verify(/accessibilitySuppressed:[\s\S]*timeline\.scopePresentationPending\s*\|\|\s*previewOnlyPaintPending[\s\S]*hoverEffectsEnabled:[\s\S]*!previewOnlyPaintPending/.test(mainSource))
 		verify(/TapHandler\s*\{[\s\S]*enabled:\s*!messageDelegate\.logEntry[\s\S]*!messageDelegate\.previewOnlyPaintPending[\s\S]*id:\s*messageRow[\s\S]*enabled:\s*!messageDelegate\.previewOnlyPaintPending[\s\S]*Accessible\.ignored:\s*messageDelegate\.previewOnlyPaintPending/.test(mainSource))
 		verify(/id:\s*compactMessageActionTray[\s\S]*visible:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*!messageDelegate\.previewOnlyPaintPending/.test(mainSource))
-		verify(/id:\s*deferredHistoryRow[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*color:\s*richPresentationReserved\s*\?\s*"transparent"[\s\S]*Accessible\.ignored:\s*richPresentationReserved/.test(mainSource))
-		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible[\s\S]*!richPresentationReserved\s*\?\s*1\s*:\s*0[\s\S]*visible:\s*!deferredInlineMessageDelegate\.richPresentationReserved/.test(mainSource))
+		verify(/id:\s*deferredHistoryRow[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*color:\s*richPresentationReserved\s*\?\s*Theme\.withAlpha[\s\S]*Label\s*{[\s\S]*visible:\s*true/.test(
+			deferredHistorySource))
+		const paintedDeferredInlineStart = mainSource.indexOf(
+			"id: deferredInlineMessageDelegate")
+		const paintedDeferredInlineEnd = mainSource.indexOf("DelegateChoice {",
+			paintedDeferredInlineStart + 1)
+		verify(paintedDeferredInlineStart >= 0
+			&& paintedDeferredInlineEnd > paintedDeferredInlineStart)
+		const paintedDeferredInlineSource = mainSource.slice(
+			paintedDeferredInlineStart, paintedDeferredInlineEnd)
+		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible\s*\?\s*1\s*:\s*0[\s\S]*RowLayout\s*{[\s\S]*visible:\s*true/.test(
+			paintedDeferredInlineSource))
 		verify(/id:\s*asyncMessageDelegate[\s\S]*previewOnlyAtomicHandoff:[\s\S]*messageBodyIsPreviewSourceOnly\(bodySegments\s*\|\|\s*\[\],[\s\S]*normalizedModelList\(attachments\)\.length\s*===\s*0[\s\S]*objectName:\s*"asyncRichHandoffSummary"[\s\S]*visible:\s*!asyncMessageDelegate\.previewOnlyAtomicHandoff/.test(mainSource))
 		const cachedStaticHandoffStart = mainSource.indexOf(
 			"readonly property string cachedStaticHandoffSource:")
@@ -1633,5 +1643,116 @@ TestCase {
 		verify(/function\s+timelineDelegateDiagnostics\(\)[\s\S]*"materialized"[\s\S]*"previewItems"[\s\S]*"attachmentItems"[\s\S]*"pooledEvents"[\s\S]*"reusedEvents"[\s\S]*"visibleFullMessageCount"[\s\S]*"visibleBlankPresentationCount"/.test(mainSource))
 		verify(/function\s+performanceChatFixtureState\(\)[\s\S]*"delegateDiagnostics":\s*timelineDelegateDiagnostics\(\)/.test(mainSource))
 		verify(/function\s+performanceChatScrollState\(\)[\s\S]*"delegateDiagnosticsDelta"[\s\S]*"previewsLoaded"[\s\S]*"attachmentsLoaded"/.test(mainSource))
+	}
+
+	function test_stationary_thumb_warm_lane_is_bounded_identity_safe_and_static_only() {
+		const gateStart = mainSource.indexOf("StationaryScrollWarmGate {")
+		const cacheStart = mainSource.indexOf("readonly property real baseCacheBuffer", gateStart)
+		verify(gateStart >= 0 && cacheStart > gateStart)
+		const gateBinding = mainSource.slice(gateStart, cacheStart)
+		verify(/pressed:\s*timelineScrollBar\.pressed[\s\S]*dragActive:\s*timeline\.scrollbarDragActive[\s\S]*releasePending:\s*timeline\.scrollbarReleasePending[\s\S]*performanceScrolling:[\s\S]*scopeBlocked:[\s\S]*prependBlocked:[\s\S]*membershipBlocked:/.test(
+			gateBinding))
+		verify(/visibleStableIdProvider:[\s\S]*stationaryThumbVisibleStableIds\(\)[\s\S]*canAdmitStableId:[\s\S]*stationaryThumbWarmCanAdmit[\s\S]*revalidateActiveStableId:[\s\S]*revalidateStationaryThumbWarmAdmission/.test(
+			gateBinding))
+
+		const visibleStart = mainSource.indexOf("function stationaryThumbVisibleStableIds")
+		const visibleEnd = mainSource.indexOf(
+			"function stationaryThumbWarmCanAdmit", visibleStart)
+		const updateStart = mainSource.indexOf("function updateStationaryThumbWarmPin", visibleStart)
+		verify(visibleStart >= 0 && visibleEnd > visibleStart
+			&& updateStart > visibleEnd)
+		const visibleSource = mainSource.slice(visibleStart, visibleEnd)
+		const admissionSource = mainSource.slice(visibleStart, updateStart)
+		verify(/stationaryThumbDelegateActuallyVisible[\s\S]*contentItem\s*\?\s*contentItem\.children[\s\S]*candidates\.sort/.test(
+			visibleSource))
+		verify(!/lightweightDeferredPresentation\s*===\s*true/.test(visibleSource))
+		const installStart = admissionSource.indexOf("function installStationaryThumbWarmPin")
+		const revalidateStart = admissionSource.indexOf(
+			"function revalidateStationaryThumbWarmAdmission")
+		verify(installStart >= 0 && revalidateStart > installStart)
+		const installSource = admissionSource.slice(installStart, revalidateStart)
+		verify(/stationaryThumbWarmPins\s*=\s*nextPins[\s\S]*if\s*\(deferred\s*&&\s*chatModel\.materializeDeferredMessage\(key\)\)[\s\S]*pauseActiveForMembershipRevision/.test(
+			installSource), "geometry pin must publish before deferred role materialization")
+		verify(/rolledBackPins[\s\S]*delete\s+rolledBackPins\[key\][\s\S]*stationaryThumbWarmPins\s*=\s*rolledBackPins/.test(
+			installSource))
+		const revalidateSource = admissionSource.slice(revalidateStart)
+		verify(/pressEpoch[\s\S]*dwellGeneration[\s\S]*stationaryThumbDelegateActuallyVisible\(item\)[\s\S]*lightweightDeferredPresentation\s*===\s*true[\s\S]*materializationRevalidated":\s*true/.test(
+			revalidateSource))
+
+		const ownerStart = mainSource.indexOf(
+			"readonly property bool stationaryThumbWarmOwned:")
+		const ownerEnd = mainSource.indexOf(
+			"readonly property bool stationaryThumbWarmEligible:", ownerStart)
+		verify(ownerStart >= 0 && ownerEnd > ownerStart)
+		const ownerSource = mainSource.slice(ownerStart, ownerEnd)
+		verify(/paintedSurface\s*===\s*true[\s\S]*terminal\s*===\s*true[\s\S]*stationaryThumbWarmGate\.retains[\s\S]*stationaryThumbWarmGate\.owns/.test(
+			ownerSource), "pending/loading ownership must require exact owns; only painted/terminal may retain")
+
+		const reconcileStart = mainSource.indexOf(
+			"function reconcileStationaryThumbWarmPins")
+		const queueStart = mainSource.indexOf("property var richLoaderResumeQueue", reconcileStart)
+		verify(reconcileStart >= 0 && queueStart > reconcileStart)
+		const reconcileSource = mainSource.slice(reconcileStart, queueStart)
+		verify(/stationaryThumbWarmReconcileBlocked\(\)[\s\S]*return[\s\S]*\+\+stationaryThumbWarmReconcilePass/.test(
+			reconcileSource), "blocked time must not consume the bounded reconciliation passes")
+		verify(/!modelGeometry\.available[\s\S]*clearStationaryThumbWarmPin\(key\)/.test(
+			reconcileSource))
+		verify(/Math\.abs\(Number\(pin\.outerHeight\)[\s\S]*<=\s*0\.5[\s\S]*Math\.abs\(Number\(pin\.probeHeight\)[\s\S]*<=\s*0\.5/.test(
+			reconcileSource))
+		verify(/chatModel\.materializeDeferredMessage\(key\)[\s\S]*rearmStationaryThumbWarmReconcile/.test(
+			reconcileSource))
+
+		const preheatStart = mainSource.indexOf("function pauseStaticPreviewPreheatForThumb")
+		const sweepStart = mainSource.indexOf("function staticPreviewSweepAllowed", preheatStart)
+		verify(preheatStart >= 0 && sweepStart > preheatStart)
+		const preheatPause = mainSource.slice(preheatStart, sweepStart)
+		verify(/staticPreviewLookaheadTimer\.stop\(\)[\s\S]*staticPreviewSweepTimer\.stop\(\)[\s\S]*staticPreviewPreheatActiveSource\s*=\s*""[\s\S]*staticPreviewPreheatQueue\s*=\s*\[\]/.test(
+			preheatPause))
+		verify(/function activateStaticPreviewPreheat\(entry\)[\s\S]{0,220}staticPreviewThumbBlocked/.test(
+			mainSource))
+		verify(/function refillStaticPreviewLookahead\(\)[\s\S]{0,120}staticPreviewThumbBlocked/.test(
+			mainSource))
+		verify(/function scheduleStaticPreviewLookahead\(\)[\s\S]{0,160}!staticPreviewThumbBlocked/.test(
+			mainSource))
+
+		const previewLoaderStart = mainSource.indexOf("id: messagePreviewLoader")
+		const attachmentLoaderStart = mainSource.indexOf("id: messageAttachmentLoader")
+		verify(previewLoaderStart >= 0 && attachmentLoaderStart >= 0)
+		const previewLoaderSource = mainSource.slice(previewLoaderStart,
+			mainSource.indexOf("sourceComponent:", previewLoaderStart) + 180)
+		verify(/stationaryThumbWarmOwned/.test(previewLoaderSource))
+		const attachmentLoaderSource = mainSource.slice(attachmentLoaderStart,
+			mainSource.indexOf("sourceComponent:", attachmentLoaderStart) + 180)
+		verify(!/stationaryThumbWarmOwned/.test(attachmentLoaderSource),
+			"static warm ownership must never activate sibling attachment resources")
+
+		verify(/"stationaryThumbWarmPinnedIds":\s*[\s\S]*Object\.keys\(timeline\.stationaryThumbWarmPins\)[\s\S]*"stationaryThumbWarmPins":\s*timeline\.stationaryThumbWarmPins/.test(
+			mainSource))
+		const diagnosticsStart = mainSource.indexOf(
+			"function visiblePresentationDiagnostics()")
+		const readyStart = mainSource.indexOf(
+			"function visiblePresentationReady(diagnostics)", diagnosticsStart)
+		const readyEnd = mainSource.indexOf(
+			"function visiblePresentationHeightConvergencePending()", readyStart)
+		verify(diagnosticsStart >= 0 && readyStart > diagnosticsStart
+			&& readyEnd > readyStart)
+		const paintedDiagnosticsSource = mainSource.slice(diagnosticsStart,
+			readyStart)
+		const paintedReadySource = mainSource.slice(readyStart, readyEnd)
+		verify(/"paintedSummaryCount"[\s\S]*"paintedSurfaceCount"[\s\S]*"paintedCompleteCount"[\s\S]*"paintedLoadingCount"[\s\S]*"paintedTerminalCount"/.test(
+			paintedDiagnosticsSource))
+		verify(/const\s+paintedComplete\s*=\s*paintedSurface\s*\|\|\s*paintedTerminal[\s\S]*paintedCompleteCount[\s\S]*messageRowReady\s*===\s*true\s*&&\s*paintedComplete/.test(
+			paintedDiagnosticsSource))
+		verify(/function\s+visiblePresentationReady\(diagnostics\)[\s\S]*paintedCompleteCount\s*===\s*diagnostics\.visibleCount/.test(
+			paintedReadySource))
+		const timelineStateStart = mainSource.indexOf(
+			"function timelinePresentationState()")
+		const timelineStateEnd = mainSource.indexOf(
+			"function prepareHistoryLoadPerformanceProbe()", timelineStateStart)
+		verify(timelineStateStart >= 0 && timelineStateEnd > timelineStateStart)
+		const timelineStateSource = mainSource.slice(timelineStateStart,
+			timelineStateEnd)
+		verify(/"settled":[\s\S]*stationaryThumbWarmPinCount\s*===\s*0[\s\S]*paintedCompleteCount[\s\S]*paintedLoadingCount\s*===\s*0[\s\S]*pendingVisibleHydrationCount\s*===\s*0/.test(
+			timelineStateSource))
 	}
 }

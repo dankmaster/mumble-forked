@@ -12,6 +12,10 @@ ColumnLayout {
 	property int selectedIndex: 0
 	property bool expanded: false
 	property bool renderActive: true
+	// A stationary pressed scrollbar may warm only this selected still. The
+	// animated loader, playback prompt actions and thumbnail rail remain owned
+	// by renderActive.
+	property bool warmStaticActive: false
 	// Retain only the selected still artwork while the owning rich card is
 	// outside the viewport. AnimatedImage and every playable/provider resource
 	// continue to follow renderActive strictly.
@@ -43,9 +47,25 @@ ColumnLayout {
 	readonly property bool currentVisualLoading: currentKind === "animated-image"
 		? animatedImageLoader.active && currentVisualStatus === Image.Loading
 		: currentVisualStatus === Image.Loading
-	readonly property bool staticVisualPending: retainStaticVisual
+	readonly property bool retainedStaticVisualReady: retainStaticVisual
+		&& currentKind !== "animated-image" && currentVisualReady
+	readonly property bool managedPaintableSourceAvailable:
+		currentImageSource.length > 0
+	readonly property bool staticVisualPending: (retainStaticVisual || warmStaticActive)
 		&& currentKind !== "animated-image" && currentImageSource.length > 0
 		&& (currentVisualStatus === Image.Null || currentVisualStatus === Image.Loading)
+	readonly property bool paintedLoading: viewportVisible && !mediaRequiresReveal
+		&& currentKind !== "animated-image" && currentImageSource.length > 0
+		&& String(stillImage.source).length > 0
+		&& (stillImage.status === Image.Null || stillImage.status === Image.Loading)
+	readonly property bool paintedTerminal: viewportVisible && !mediaRequiresReveal
+		&& managedPaintableSourceAvailable && currentVisualStatus === Image.Error
+	readonly property bool paintedActionableFallback: viewportVisible
+		&& !mediaRequiresReveal && !managedPaintableSourceAvailable
+		&& mediaItems.length > 0
+	readonly property bool paintedSurface: viewportVisible && !mediaRequiresReveal
+		&& managedPaintableSourceAvailable
+		&& (currentVisualReady || paintedTerminal)
 	readonly property string performanceMediaSurfaceState: !viewportVisible
 		? "not-required" : mediaRequiresReveal ? "reveal"
 		: currentVisualReady ? "poster"
@@ -118,7 +138,9 @@ ColumnLayout {
 			id: stillImage
 			objectName: "embedDocumentMediaImage"
 			anchors.fill: parent
-			source: (root.renderActive || root.retainStaticVisual) && !root.mediaRequiresReveal
+			source: (root.renderActive || root.retainStaticVisual
+				|| root.warmStaticActive)
+				&& !root.mediaRequiresReveal
 				&& root.currentKind !== "animated-image" ? root.currentImageSource : ""
 			asynchronous: true
 			cache: true
@@ -301,7 +323,7 @@ ColumnLayout {
 		objectName: "embedDocumentMediaThumbnailList"
 		Layout.fillWidth: true
 		Layout.preferredHeight: visible ? 64 : 0
-		visible: root.mediaItems.length > 1
+		visible: root.renderActive && root.mediaItems.length > 1
 		orientation: ListView.Horizontal
 		spacing: Theme.space2
 		clip: true

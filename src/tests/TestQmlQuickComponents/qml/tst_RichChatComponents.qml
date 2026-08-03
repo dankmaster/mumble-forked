@@ -56,9 +56,275 @@ TestCase {
 	}
 
 	Component {
+		id: stationaryThumbWarmInputFixtureComponent
+
+		Item {
+			id: warmFixture
+			width: 640
+			height: 420
+			property var visibleStableIds: ["warm-visible"]
+			property var admissibleStableIds: ["warm-visible"]
+			property bool syntheticCandidates: false
+			property bool rejectActiveRevalidation: false
+			property bool releasePending: false
+			property int admissionCount: 0
+			property int cancellationCount: 0
+			property int finishCount: 0
+			property int snapshotCount: 0
+			property bool richLoaderSuspended: true
+			property int attachmentSentinelCreatedCount: 0
+			property bool geometryPinActive: false
+			property real capturedOuterHeight: 0
+			property real capturedProbeHeight: 0
+			property real capturedContentHeight: 0
+			property real parkedContentY: 0
+			property real parkedOuterHeight: 0
+			property real parkedProbeHeight: 0
+			property real parkedContentHeight: 0
+			property bool admissionPressedObserved: false
+			property bool admissionMovingObserved: false
+			property bool admissionDraggingObserved: false
+			property bool admissionFlickingObserved: false
+			property string lastStableId: ""
+			property int lastPressEpoch: 0
+			property int lastDwellGeneration: 0
+			property var previewValue: ({})
+			property alias flickable: warmFlickable
+			property alias scrollBar: warmScrollBar
+			readonly property var gate: warmGateLoader.item
+			readonly property var card: warmCardLoader.item
+			readonly property bool cardLoaderActive: warmCardLoader.active
+			readonly property alias attachmentSentinel: warmAttachmentSentinel
+			readonly property real pinnedOuterHeight: capturedOuterHeight
+			readonly property real pinnedProbeHeight: capturedProbeHeight
+			readonly property real actualOuterHeight: warmCardRow.height
+			readonly property real actualProbeHeight: warmCardRow.probeHeight
+			readonly property bool actualRowClip: warmCardRow.clip
+
+			function actualVisibleStableIds() {
+				if (syntheticCandidates)
+					return visibleStableIds
+				const point = warmCardRow.mapToItem(warmFlickable, 0, 0)
+				return point.y + warmCardRow.height > 0.5
+					&& point.y < warmFlickable.height - 0.5
+					? [warmCardRow.stableId] : []
+			}
+
+			function configureCard(preview) {
+				previewValue = preview
+				warmCardLoader.active = false
+				warmCardLoader.setSource("qrc:/qml-shell/RichPreviewCard.qml", {
+					"preview": previewValue,
+					"renderActive": false,
+					"warmStaticActive": false,
+					"animationsEnabled": false,
+					"hoverEffectsEnabled": false
+				})
+			}
+
+			function finishActive(outcome) {
+				return gate && gate.finishAdmission(lastStableId, lastPressEpoch,
+					lastDwellGeneration, outcome)
+			}
+
+			Flickable {
+				id: warmFlickable
+				width: parent.width
+				height: 300
+				contentWidth: width
+				contentHeight: warmCardRow.y + warmCardRow.height + 400
+				boundsBehavior: Flickable.StopAtBounds
+
+				Rectangle {
+					width: warmFlickable.width
+					height: warmFlickable.contentHeight
+					color: Theme.surfaceBase
+				}
+
+				Item {
+					id: warmCardRow
+					property string stableId: "warm-visible"
+					readonly property real naturalHeight: Math.max(320,
+						warmCardLoader.item ? warmCardLoader.item.implicitHeight : 0)
+					property real probeHeight: warmFixture.geometryPinActive
+						? warmFixture.capturedProbeHeight : height
+					x: 0
+					y: 390
+					width: warmFlickable.width - warmScrollBar.width
+					height: warmFixture.geometryPinActive
+						? warmFixture.capturedOuterHeight : naturalHeight
+					clip: warmFixture.geometryPinActive
+
+					Loader {
+						id: warmCardLoader
+						width: parent.width
+						height: item ? item.implicitHeight : 0
+						active: false
+						onLoaded: Qt.callLater(function() {
+							if (warmCardLoader.item
+									&& warmCardLoader.item.paintedSurface)
+								warmFixture.finishActive("painted")
+						})
+					}
+				}
+
+				ScrollBar.vertical: ScrollBar {
+					id: warmScrollBar
+					objectName: "stationaryWarmFixtureScrollBar"
+					policy: ScrollBar.AlwaysOn
+					onPressedChanged: {
+						if (pressed)
+							warmFixture.releasePending = false
+						else
+							warmFixture.releasePending = true
+					}
+				}
+			}
+
+			Loader {
+				id: warmGateLoader
+				source: "qrc:/qml-shell/StationaryScrollWarmGate.qml"
+				onLoaded: {
+					item.visibleStableIdProvider = function() {
+						++warmFixture.snapshotCount
+						return warmFixture.actualVisibleStableIds()
+					}
+					item.canAdmitStableId = function(stableId) {
+						return warmFixture.actualVisibleStableIds().indexOf(stableId) >= 0
+							&& warmFixture.admissibleStableIds.indexOf(stableId) >= 0
+					}
+					item.revalidateActiveStableId = function(stableId) {
+						if (warmFixture.rejectActiveRevalidation)
+							return false
+						return warmFixture.actualVisibleStableIds().indexOf(stableId) >= 0
+							&& warmFixture.admissibleStableIds.indexOf(stableId) >= 0
+					}
+				}
+			}
+
+			Binding {
+				target: warmFixture.gate
+				property: "pressed"
+				value: warmScrollBar.pressed
+				when: !!warmFixture.gate
+			}
+			Binding {
+				target: warmFixture.gate
+				property: "dragActive"
+				value: warmScrollBar.pressed
+				when: !!warmFixture.gate
+			}
+			Binding {
+				target: warmFixture.gate
+				property: "releasePending"
+				value: warmFixture.releasePending
+				when: !!warmFixture.gate
+			}
+			Binding {
+				target: warmFixture.gate
+				property: "position"
+				value: warmFlickable.contentY
+				when: !!warmFixture.gate
+			}
+			Binding {
+				target: warmFixture.gate
+				property: "moving"
+				value: warmFlickable.moving
+				when: !!warmFixture.gate
+			}
+			Binding {
+				target: warmFixture.gate
+				property: "dragging"
+				value: warmFlickable.dragging
+				when: !!warmFixture.gate
+			}
+			Binding {
+				target: warmFixture.gate
+				property: "flicking"
+				value: warmFlickable.flicking
+				when: !!warmFixture.gate
+			}
+
+			Loader {
+				id: warmAttachmentSentinel
+				active: !warmFixture.richLoaderSuspended
+				sourceComponent: Item {
+					Component.onCompleted:
+						++warmFixture.attachmentSentinelCreatedCount
+				}
+			}
+
+			Connections {
+				target: warmFixture.gate
+				function onAdmissionRequested(stableId, pressEpoch, dwellGeneration) {
+					++warmFixture.admissionCount
+					warmFixture.admissionPressedObserved = warmScrollBar.pressed
+					warmFixture.admissionMovingObserved = warmFlickable.moving
+					warmFixture.admissionDraggingObserved = warmFlickable.dragging
+					warmFixture.admissionFlickingObserved = warmFlickable.flicking
+					warmFixture.capturedOuterHeight = warmCardRow.height
+					warmFixture.capturedProbeHeight = warmCardRow.probeHeight
+					warmFixture.capturedContentHeight = warmFlickable.contentHeight
+					warmFixture.geometryPinActive = true
+					warmFixture.lastStableId = stableId
+					warmFixture.lastPressEpoch = pressEpoch
+					warmFixture.lastDwellGeneration = dwellGeneration
+				}
+				function onAdmissionCancelled() { ++warmFixture.cancellationCount }
+				function onAdmissionFinished() { ++warmFixture.finishCount }
+			}
+
+			Binding {
+				target: warmFixture.card
+				property: "warmStaticActive"
+				value: !!warmFixture.gate && (warmFixture.gate.owns(
+					warmFixture.lastStableId, warmFixture.lastPressEpoch,
+					warmFixture.lastDwellGeneration)
+					|| (warmFixture.card && (warmFixture.card.paintedSurface
+							|| warmFixture.card.paintedTerminal)
+						&& warmFixture.gate.retains(warmFixture.lastStableId,
+							warmFixture.lastPressEpoch,
+							warmFixture.lastDwellGeneration)))
+				when: !!warmFixture.card
+			}
+			Binding {
+				target: warmCardLoader
+				property: "active"
+				value: !!warmFixture.gate && (warmFixture.gate.owns(
+					warmFixture.lastStableId, warmFixture.lastPressEpoch,
+					warmFixture.lastDwellGeneration)
+					|| (warmFixture.card && (warmFixture.card.paintedSurface
+							|| warmFixture.card.paintedTerminal)
+						&& warmFixture.gate.retains(warmFixture.lastStableId,
+							warmFixture.lastPressEpoch,
+							warmFixture.lastDwellGeneration)))
+			}
+
+			Connections {
+				target: warmFixture.card
+				function onPaintedSurfaceChanged() {
+					if (warmFixture.card.paintedSurface)
+						warmFixture.finishActive("painted")
+				}
+			}
+		}
+	}
+
+	Component {
 		id: materializationSignalSpyComponent
 
 		SignalSpy {}
+	}
+
+	Component {
+		id: controlledImageComponent
+
+		Image {
+			width: 320
+			height: 180
+			asynchronous: true
+			cache: false
+		}
 	}
 
     Loader {
@@ -773,11 +1039,11 @@ TestCase {
 		const inlineLoader = findChild(card, "previewInlineMediaLoader")
 		verify(panel !== null && busy !== null && inlineLoader !== null)
 		verify(card.implicitHeight > 180)
-		compare(card.opacity, 0)
+		compare(card.opacity, 1)
 		compare(card.enabled, false)
 		compare(card.Accessible.ignored, true)
-		compare(card.border.width, 0)
-		compare(panel.opacity, 0)
+		compare(card.border.width, 1)
+		compare(panel.opacity, 1)
 		compare(busy.visible, false)
 		compare(inlineLoader.active, false)
 
@@ -800,8 +1066,8 @@ TestCase {
 			verify(card.staticEmbedPosterRevealPending)
 			verify(card.visualPresentationPending)
 			compare(card.prewarmVisualReady, false)
-			compare(card.opacity, 0)
-			compare(panel.opacity, 0)
+			compare(card.opacity, 1)
+			compare(panel.opacity, 1)
 			compare(card.performanceEmbedSurfaceState, "loading")
 		}
 		compare(card.staticPreviewCacheActive, true)
@@ -1847,7 +2113,7 @@ TestCase {
 		}
 		card.previewIdentity = "message:loading-embed"
 		tryCompare(panel, "visible", true)
-		compare(card.opacity, 0)
+		compare(card.opacity, 1)
 		tryCompare(busyIndicator, "visible", false)
 		tryCompare(card, "performanceEmbedSurfaceState", "loading")
 		tryCompare(originalButton, "visible", true)
@@ -4572,7 +4838,492 @@ TestCase {
 		compare(compactAction.Accessible.ignored, true)
 	}
 
-    function test_attachment_is_keyboard_and_pointer_actionable() {
+	function controlledStationaryPreview(primarySource, railSource) {
+		return {
+			"state": "ready",
+			"title": "Stationary scrollbar preview",
+			"url": "https://store.steampowered.com/app/fixture",
+			"metadata": { "provider": "steam", "previewKind": "store" },
+			"document": {
+				"schemaVersion": 1,
+				"commonPresentation": true,
+				"presentation": "media",
+				"provider": { "id": "steam", "label": "Steam", "host": "steampowered.com" },
+				"source": { "url": "https://store.steampowered.com/app/fixture" },
+				"content": { "type": "store", "title": "Stationary scrollbar preview" },
+				"thread": {},
+				"facts": [],
+				"media": [
+					{ "id": "media:0", "kind": "image", "url": primarySource,
+						"thumbnailUrl": primarySource, "title": "Selected still" },
+					{ "id": "media:1", "kind": "image", "url": railSource,
+						"thumbnailUrl": railSource, "title": "Rail still" }
+				],
+				"playback": { "mode": "none", "provider": "steam" },
+				"state": { "status": "ready" }
+			}
+		}
+	}
+
+	function pressAndParkWarmThumb(fixture) {
+		tryVerify(function() {
+			return fixture.gate !== null && fixture.scrollBar.size > 0
+				&& fixture.scrollBar.size < 1
+		})
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		const parkedY = Math.min(bar.height - 4, thumbCenter + 96)
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		verify(bar.pressed)
+		mouseMove(bar, bar.width / 2, parkedY, 20)
+		tryVerify(function() {
+			return fixture.actualVisibleStableIds().indexOf("warm-visible") >= 0
+		})
+		fixture.parkedContentY = fixture.flickable.contentY
+		fixture.parkedOuterHeight = fixture.pinnedOuterHeight > 0
+			? fixture.pinnedOuterHeight : 320
+		fixture.parkedProbeHeight = fixture.pinnedProbeHeight > 0
+			? fixture.pinnedProbeHeight : 320
+		fixture.parkedContentHeight = fixture.flickable.contentHeight
+		wait(60)
+		return parkedY
+	}
+
+	function movePressedWarmThumb(fixture, currentY) {
+		const bar = fixture.scrollBar
+		const delta = currentY + 12 < bar.height - 4 ? 12 : -12
+		const nextY = currentY + delta
+		const beforeContentY = fixture.flickable.contentY
+		mouseMove(bar, bar.width / 2, nextY, 20)
+		verify(bar.pressed)
+		tryVerify(function() {
+			return Math.abs(fixture.flickable.contentY - beforeContentY) > 0.5
+		})
+		tryVerify(function() {
+			return fixture.actualVisibleStableIds().indexOf("warm-visible") >= 0
+		})
+		return nextY
+	}
+
+	function test_stationary_thumb_warms_one_exact_still_before_mouse_up() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-" + Math.floor(Math.random() * 100000)
+		const primaryId = "controlled-steam-visible-" + suffix
+		const railId = "controlled-steam-rail-" + suffix
+		const primarySource = "image://mumble/" + primaryId
+		const railSource = "image://mumble/" + railId
+		fixture.configureCard(controlledStationaryPreview(primarySource, railSource))
+		compare(fixture.card, null)
+
+		const releaseY = pressAndParkWarmThumb(fixture)
+		tryCompare(fixture, "admissionCount", 1)
+		compare(fixture.admissionPressedObserved, true)
+		compare(fixture.admissionMovingObserved, false)
+		compare(fixture.admissionDraggingObserved, false)
+		compare(fixture.admissionFlickingObserved, false)
+		tryVerify(function() { return fixture.card !== null })
+		const card = fixture.card
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const image = findChild(card, "embedDocumentMediaImage")
+		const compactImage = findChild(card, "previewCompactImage")
+		const thumbnailRail = findChild(card, "embedDocumentMediaThumbnailList")
+		const animatedLoader = findChild(card, "embedDocumentAnimatedImageLoader")
+		const inlineLoader = findChild(card, "previewInlineMediaLoader")
+		verify(gallery !== null && image !== null && compactImage !== null)
+		verify(thumbnailRail !== null && animatedLoader !== null && inlineLoader !== null)
+		compare(card.renderActive, false)
+		compare(card.warmStaticActive, true)
+		compare(image.source.toString(), primarySource)
+		tryCompare(image, "status", Image.Loading)
+		const sameImage = image
+		const sameSource = image.source.toString()
+		let receipt = controlledImageProvider.receipt(primaryId)
+		compare(receipt.requestedCount, 1)
+		compare(receipt.pendingCount, 1)
+		compare(receipt.cancelledCount, 0)
+		compare(controlledImageProvider.receipt(railId).requestedCount, 0)
+		compare(thumbnailRail.visible, false)
+		compare(thumbnailRail.height, 0)
+		compare(animatedLoader.active, false)
+		compare(compactImage.source.toString(), "")
+		compare(compactImage.status, Image.Null)
+		compare(card.paintedLoading, true)
+		compare(card.paintedSurface, false)
+		compare(card.prewarmVisualReady, false)
+		compare(card.inlinePlaybackActive, false)
+		compare(inlineLoader.active, false)
+		compare(card.clip, true)
+		fuzzyCompare(fixture.flickable.contentY, fixture.parkedContentY, 0.5)
+		fuzzyCompare(fixture.actualOuterHeight, fixture.parkedOuterHeight, 0.5)
+		fuzzyCompare(fixture.actualProbeHeight, fixture.parkedProbeHeight, 0.5)
+		compare(fixture.actualRowClip, true)
+		fuzzyCompare(fixture.flickable.contentHeight,
+			fixture.parkedContentHeight, 0.5)
+		compare(fixture.attachmentSentinel.active, false)
+		compare(fixture.attachmentSentinel.item, null)
+		compare(fixture.attachmentSentinelCreatedCount, 0)
+
+		compare(controlledImageProvider.release(primaryId), 1)
+		tryCompare(image, "status", Image.Ready)
+		verify(findChild(card, "embedDocumentMediaImage") === sameImage)
+		compare(image.source.toString(), sameSource)
+		tryCompare(card, "paintedSurface", true)
+		tryCompare(card, "prewarmVisualReady", true)
+		tryCompare(fixture, "finishCount", 1)
+		verify(fixture.scrollBar.pressed)
+		verify(fixture.gate.retains(fixture.lastStableId,
+			fixture.lastPressEpoch, fixture.lastDwellGeneration))
+		compare(fixture.attachmentSentinelCreatedCount, 0)
+		receipt = controlledImageProvider.receipt(primaryId)
+		compare(receipt.requestedCount, 1)
+		compare(receipt.finishedCount, 1)
+		compare(receipt.cancelledCount, 0)
+		compare(controlledImageProvider.receipt(railId).requestedCount, 0)
+		fuzzyCompare(fixture.flickable.contentY, fixture.parkedContentY, 0.5)
+		fuzzyCompare(fixture.actualOuterHeight, fixture.parkedOuterHeight, 0.5)
+		fuzzyCompare(fixture.actualProbeHeight, fixture.parkedProbeHeight, 0.5)
+		compare(fixture.actualRowClip, true)
+		fuzzyCompare(fixture.flickable.contentHeight,
+			fixture.parkedContentHeight, 0.5)
+
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+		tryCompare(fixture.scrollBar, "pressed", false)
+		tryCompare(fixture, "card", null)
+		compare(fixture.cardLoaderActive, false)
+		fuzzyCompare(fixture.actualOuterHeight, fixture.parkedOuterHeight, 0.5)
+		fuzzyCompare(fixture.actualProbeHeight, fixture.parkedProbeHeight, 0.5)
+		compare(fixture.actualRowClip, true)
+		fuzzyCompare(fixture.flickable.contentHeight,
+			fixture.parkedContentHeight, 0.5)
+		compare(fixture.gate.retains(fixture.lastStableId,
+			fixture.lastPressEpoch, fixture.lastDwellGeneration), false)
+		wait(96)
+		compare(fixture.admissionCount, 1)
+		compare(controlledImageProvider.receipt(primaryId).requestedCount, 1)
+		compare(controlledImageProvider.receipt(railId).requestedCount, 0)
+		compare(fixture.attachmentSentinelCreatedCount, 0)
+	}
+
+	function test_stationary_gate_membership_pause_budget_and_empty_scan_bound() {
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": ["one", "two", "three"],
+				"admissibleStableIds": ["one", "two", "three"] })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		wait(60)
+		tryCompare(fixture, "admissionCount", 1)
+		const activeId = fixture.gate.activeStableId
+		fixture.gate.membershipBlocked = true
+		compare(fixture.gate.activeStableId, activeId)
+		compare(fixture.gate.owns(activeId, fixture.lastPressEpoch,
+			fixture.lastDwellGeneration), false)
+		compare(fixture.cancellationCount, 0)
+		fixture.gate.membershipBlocked = false
+		tryVerify(function() {
+			return fixture.gate.owns(activeId, fixture.lastPressEpoch,
+				fixture.lastDwellGeneration)
+		})
+		verify(fixture.finishActive("painted"))
+		tryCompare(fixture, "admissionCount", 2)
+		verify(fixture.finishActive("painted"))
+		wait(120)
+		compare(fixture.admissionCount, 2)
+		compare(fixture.gate.admittedCount, 2)
+		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+
+		const emptyFixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": [], "admissibleStableIds": [] })
+		verify(emptyFixture !== null)
+		const emptyBar = emptyFixture.scrollBar
+		const emptyThumb = emptyBar.position * emptyBar.height
+			+ emptyBar.size * emptyBar.height / 2
+		mousePress(emptyBar, emptyBar.width / 2, emptyThumb, Qt.LeftButton)
+		wait(180)
+		compare(emptyFixture.admissionCount, 0)
+		verify(emptyFixture.snapshotCount > 0)
+		verify(emptyFixture.snapshotCount
+			<= emptyFixture.gate.maximumNoCandidateScansPerGeneration)
+		const stoppedCount = emptyFixture.snapshotCount
+		wait(160)
+		compare(emptyFixture.snapshotCount, stoppedCount)
+		mouseRelease(emptyBar, emptyBar.width / 2, emptyThumb, Qt.LeftButton)
+	}
+
+	function test_stationary_failed_membership_revalidation_clears_exact_retention() {
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": ["one", "two", "three"],
+				"admissibleStableIds": ["one", "two", "three"] })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		wait(fixture.gate.dwellIntervalMs + 24)
+		tryCompare(fixture, "admissionCount", 1)
+		const retiredId = fixture.lastStableId
+		const retiredEpoch = fixture.lastPressEpoch
+		const retiredGeneration = fixture.lastDwellGeneration
+		fixture.gate.membershipBlocked = true
+		fixture.rejectActiveRevalidation = true
+		fixture.gate.membershipBlocked = false
+		tryCompare(fixture, "cancellationCount", 1)
+		fixture.rejectActiveRevalidation = false
+		compare(fixture.gate.retains(retiredId, retiredEpoch,
+			retiredGeneration), false)
+		compare(fixture.gate.finishAdmission(retiredId, retiredEpoch,
+			retiredGeneration, "painted"), false)
+		tryCompare(fixture, "admissionCount", 2)
+		compare(fixture.lastStableId, retiredId)
+		verify(fixture.finishActive("painted"))
+		wait(fixture.gate.dwellIntervalMs + fixture.gate.serialIntervalMs + 64)
+		compare(fixture.admissionCount, 2)
+		compare(fixture.gate.admittedCount, 2)
+		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+	}
+
+	function test_stationary_move_cancels_loading_and_stale_completion_cannot_revive() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-move"
+		const providerId = "controlled-steam-visible-" + suffix
+		fixture.configureCard(controlledStationaryPreview(
+			"image://mumble/" + providerId,
+			"image://mumble/controlled-steam-unused-" + suffix))
+		let releaseY = pressAndParkWarmThumb(fixture)
+		tryCompare(fixture, "admissionCount", 1)
+		tryVerify(function() { return fixture.card !== null })
+		const image = findChild(fixture.card, "embedDocumentMediaImage")
+		verify(image !== null)
+		tryCompare(image, "status", Image.Loading)
+		const oldEpoch = fixture.lastPressEpoch
+		const oldGeneration = fixture.lastDwellGeneration
+		const oldContentHeight = fixture.flickable.contentHeight
+		releaseY = movePressedWarmThumb(fixture, releaseY)
+		tryCompare(fixture, "cancellationCount", 1)
+		tryCompare(fixture, "card", null)
+		verify(fixture.gate.dwellGeneration > oldGeneration)
+		compare(fixture.gate.finishAdmission("warm-visible", oldEpoch,
+			oldGeneration, "painted"), false)
+		compare(controlledImageProvider.receipt(providerId).cancelledCount, 1)
+		fuzzyCompare(fixture.flickable.contentHeight, oldContentHeight, 0.5)
+		compare(fixture.geometryPinActive, true)
+		tryCompare(fixture, "admissionCount", 2)
+		tryVerify(function() { return fixture.card !== null })
+		compare(controlledImageProvider.receipt(providerId).requestedCount, 2)
+		compare(fixture.gate.admittedCount, 2)
+		compare(fixture.gate.finishAdmission("warm-visible", oldEpoch,
+			oldGeneration, "painted"), false)
+		verify(fixture.gate.activeStableId.length > 0)
+		releaseY = movePressedWarmThumb(fixture, releaseY)
+		tryCompare(fixture, "cancellationCount", 2)
+		tryCompare(fixture, "card", null)
+		wait(96)
+		compare(fixture.admissionCount, 2)
+		compare(controlledImageProvider.release(providerId), 0)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+	}
+
+	function test_stationary_painted_retention_reopens_one_bounded_same_id_admission() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-painted-move"
+		const providerId = "controlled-steam-visible-" + suffix
+		const primarySource = "image://mumble/" + providerId
+		fixture.configureCard(controlledStationaryPreview(primarySource,
+			"image://mumble/controlled-steam-rail-" + suffix))
+		let releaseY = pressAndParkWarmThumb(fixture)
+		tryCompare(fixture, "admissionCount", 1)
+		tryVerify(function() { return fixture.card !== null })
+		const firstImage = findChild(fixture.card, "embedDocumentMediaImage")
+		verify(firstImage !== null)
+		tryCompare(firstImage, "status", Image.Loading)
+		compare(controlledImageProvider.release(providerId), 1)
+		tryCompare(firstImage, "status", Image.Ready)
+		tryCompare(fixture, "finishCount", 1)
+		verify(fixture.gate.retains(fixture.lastStableId,
+			fixture.lastPressEpoch, fixture.lastDwellGeneration))
+		compare(fixture.gate.admittedCount, 1)
+		compare(controlledImageProvider.receipt(providerId).requestedCount, 1)
+
+		releaseY = movePressedWarmThumb(fixture, releaseY)
+		tryCompare(fixture, "card", null)
+		tryCompare(fixture, "admissionCount", 2)
+		tryVerify(function() { return fixture.card !== null })
+		const secondImage = findChild(fixture.card, "embedDocumentMediaImage")
+		verify(secondImage !== null)
+		compare(secondImage.source.toString(), primarySource)
+		tryCompare(secondImage, "status", Image.Ready)
+		tryCompare(fixture, "finishCount", 2)
+		compare(fixture.gate.admittedCount, 2)
+		// The second gate request reuses the exact cacheable Image source; it
+		// must not create a second controlled-provider request.
+		compare(controlledImageProvider.receipt(providerId).requestedCount, 1)
+
+		releaseY = movePressedWarmThumb(fixture, releaseY)
+		tryCompare(fixture, "card", null)
+		wait(fixture.gate.dwellIntervalMs + 96)
+		compare(fixture.admissionCount, 2)
+		compare(fixture.gate.admittedCount, 2)
+		compare(controlledImageProvider.receipt(providerId).requestedCount, 1)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+		tryCompare(fixture.scrollBar, "pressed", false)
+	}
+
+	function test_stationary_mouse_up_before_release_cancels_exact_request() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-mouseup"
+		const providerId = "controlled-steam-visible-" + suffix
+		fixture.configureCard(controlledStationaryPreview(
+			"image://mumble/" + providerId,
+			"image://mumble/controlled-steam-unused-" + suffix))
+		const releaseY = pressAndParkWarmThumb(fixture)
+		tryCompare(fixture, "admissionCount", 1)
+		tryVerify(function() { return fixture.card !== null })
+		const image = findChild(fixture.card, "embedDocumentMediaImage")
+		verify(image !== null)
+		tryCompare(image, "status", Image.Loading)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+		tryCompare(fixture.scrollBar, "pressed", false)
+		tryCompare(fixture, "card", null)
+		compare(controlledImageProvider.receipt(providerId).cancelledCount, 1)
+		compare(controlledImageProvider.release(providerId), 0)
+		wait(48)
+		compare(controlledImageProvider.receipt(providerId).finishedCount, 0)
+	}
+
+	function test_stationary_watchdog_retires_unpainted_source_and_stale_release() {
+		controlledImageProvider.reset()
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		const suffix = Date.now() + "-watchdog"
+		const providerId = "controlled-steam-visible-" + suffix
+		const source = "image://mumble/" + providerId
+		fixture.configureCard(controlledStationaryPreview(source,
+			"image://mumble/controlled-steam-unused-" + suffix))
+		const releaseY = pressAndParkWarmThumb(fixture)
+		tryCompare(fixture, "admissionCount", 1)
+		tryVerify(function() { return fixture.card !== null })
+		const image = findChild(fixture.card, "embedDocumentMediaImage")
+		verify(image !== null)
+		tryCompare(image, "status", Image.Loading)
+		wait(fixture.gate.activeWatchdogMs + 80)
+		compare(fixture.gate.activeStableId, "")
+		compare(fixture.gate.retains(fixture.lastStableId,
+			fixture.lastPressEpoch, fixture.lastDwellGeneration), false)
+		tryCompare(fixture, "card", null)
+		let receipt = controlledImageProvider.receipt(providerId)
+		compare(receipt.finishedCount, 0)
+		compare(receipt.cancelledCount, 1)
+		compare(controlledImageProvider.release(providerId), 0)
+		wait(40)
+		receipt = controlledImageProvider.receipt(providerId)
+		compare(receipt.finishedCount, 0)
+		mouseRelease(fixture.scrollBar, fixture.scrollBar.width / 2,
+			releaseY, Qt.LeftButton)
+	}
+
+	function test_controlled_provider_release_then_reset_cannot_publish_old_ready() {
+		controlledImageProvider.reset()
+		const firstId = "controlled-steam-reset-old-" + Date.now()
+		const image = createTemporaryObject(controlledImageComponent, testCase,
+			{ "source": "image://mumble/" + firstId })
+		verify(image !== null)
+		tryCompare(image, "status", Image.Loading)
+		compare(controlledImageProvider.receipt(firstId).requestedCount, 1)
+		compare(controlledImageProvider.release(firstId), 1)
+		controlledImageProvider.reset()
+		wait(80)
+		verify(image.status !== Image.Ready)
+
+		const secondId = "controlled-steam-reset-new-" + Date.now()
+		image.source = "image://mumble/" + secondId
+		tryCompare(image, "status", Image.Loading)
+		compare(controlledImageProvider.release(secondId), 1)
+		tryCompare(image, "status", Image.Ready)
+		compare(controlledImageProvider.receipt(secondId).finishedCount, 1)
+	}
+
+	function test_retained_static_loading_request_is_not_cancelled_offscreen() {
+		controlledImageProvider.reset()
+		const providerId = "controlled-steam-retained-" + Date.now()
+		const source = "image://mumble/" + providerId
+		const card = previewLoader.item
+		card.renderActive = false
+		card.warmStaticActive = false
+		card.preview = controlledStationaryPreview(source,
+			"image://mumble/fixture-retained-secondary")
+		card.previewIdentity = "message:retained-loading"
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		const image = findChild(card, "embedDocumentMediaImage")
+		verify(gallery !== null && image !== null)
+		tryCompare(image, "status", Image.Loading)
+		compare(gallery.retainStaticVisual, true)
+		compare(image.source.toString(), source)
+		card.renderActive = true
+		card.renderActive = false
+		wait(32)
+		compare(image.source.toString(), source)
+		compare(controlledImageProvider.receipt(providerId).requestedCount, 1)
+		compare(controlledImageProvider.receipt(providerId).cancelledCount, 0)
+		compare(controlledImageProvider.release(providerId), 1)
+		tryCompare(image, "status", Image.Ready)
+		compare(controlledImageProvider.receipt(providerId).finishedCount, 1)
+	}
+
+	function test_external_only_typed_media_is_terminal_complete_without_managed_ready() {
+		const card = previewLoader.item
+		card.renderActive = false
+		card.preview = {
+			"state": "ready", "title": "External-only clip",
+			"url": "https://example.com/external-only",
+			"document": {
+				"schemaVersion": 1, "commonPresentation": true,
+				"presentation": "media",
+				"provider": { "id": "external", "label": "External" },
+				"source": { "url": "https://example.com/external-only" },
+				"content": { "type": "video", "title": "External-only clip" },
+				"thread": {}, "facts": [],
+				"media": [{ "id": "external:0", "kind": "video",
+					"url": "https://example.com/external-only.mp4",
+					"directPlayable": true }],
+				"playback": { "mode": "external" },
+				"state": { "status": "ready" }
+			}
+		}
+		card.previewIdentity = "message:external-only-nonpaintable"
+		wait(0)
+		const gallery = findChild(card, "previewDocumentMediaGallery")
+		verify(gallery !== null && gallery.visible)
+		compare(gallery.managedPaintableSourceAvailable, false)
+		compare(gallery.paintedActionableFallback, true)
+		compare(gallery.paintedSurface, false)
+		compare(card.paintedTerminal, true)
+		compare(card.paintedSurface, false)
+		compare(card.paintedLoading, false)
+		compare(card.paintedSurface || card.paintedTerminal, true)
+		compare(card.prewarmVisualReady, false)
+	}
+
+	function test_attachment_is_keyboard_and_pointer_actionable() {
         const action = findChild(attachmentLoader.item, "attachmentAction_asset:1")
         verify(action !== null)
         const tile = findChild(attachmentLoader.item, "attachment_asset:1")

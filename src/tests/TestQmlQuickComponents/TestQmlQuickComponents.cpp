@@ -3,8 +3,11 @@
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
 #include <QtCore/QFile>
+#include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QMutex>
+#include <QtCore/QMutexLocker>
 #include <QtCore/QUrl>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
@@ -17,29 +20,238 @@
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQml/qqml.h>
-#include <QtQuick/QQuickImageProvider>
+#include <QtQuick/QQuickAsyncImageProvider>
+#include <QtQuick/QQuickTextureFactory>
 #include <QtTest/qtestwheel.h>
 #include <QtQuickTest/quicktest.h>
 
+#include <utility>
+
 namespace {
-class FixtureImageProvider final : public QQuickImageProvider {
+class ControlledImageProviderController;
+
+class ControlledImageResponse final : public QQuickImageResponse {
 public:
-	FixtureImageProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
+	ControlledImageResponse(ControlledImageProviderController *controller,
+			quint64 token, quint64 generation, QString id,
+			const QSize &requestedSize, bool controlled);
+	~ControlledImageResponse() override;
 
-	QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize) override {
-		const QSize naturalSize(96, 64);
-		const bool usableRequestedSize = requestedSize.width() > 0 && requestedSize.height() > 0;
-		const QSize imageSize = usableRequestedSize
-			? requestedSize.boundedTo(QSize(512, 512)) : naturalSize;
-		if (size) {
-			*size = naturalSize;
-		}
+	QQuickTextureFactory *textureFactory() const override;
+	void cancel() override;
+	void complete();
 
-		QImage image(imageSize, QImage::Format_RGBA8888_Premultiplied);
-		image.fill(id.contains(QLatin1String("screen")) ? qRgba(65, 92, 122, 255)
-												 : qRgba(65, 160, 137, 255));
-		return image;
+private:
+	QPointer< ControlledImageProviderController > m_controller;
+	quint64 m_token = 0;
+	quint64 m_generation = 0;
+	QString m_id;
+	QSize m_requestedSize;
+	bool m_controlled = false;
+	mutable QMutex m_mutex;
+	QImage m_image;
+	bool m_finished = false;
+	bool m_cancelled = false;
+};
+
+class ControlledImageProviderController final : public QObject {
+	Q_OBJECT
+
+public:
+	using QObject::QObject;
+
+	struct RequestIdentity {
+		quint64 token = 0;
+		quint64 generation = 0;
+	};
+
+	RequestIdentity registerRequest(const QString &id) {
+		QMutexLocker locker(&m_mutex);
+		const RequestIdentity identity{ ++m_nextToken, m_generation };
+		m_records.insert(identity.token, RequestRecord{ id, identity.generation });
+		m_lastId = id;
+		return identity;
 	}
+
+	bool claimCompletion(const quint64 token, const quint64 generation,
+			const QString &id) {
+		QMutexLocker locker(&m_mutex);
+		auto iterator = m_records.find(token);
+		if (generation != m_generation || iterator == m_records.end()
+				|| iterator->generation != generation || iterator->id != id
+				|| !iterator->released || iterator->finished || iterator->cancelled)
+			return false;
+		iterator->finished = true;
+		return true;
+	}
+
+	void noteCancelled(const quint64 token, const quint64 generation) {
+		QMutexLocker locker(&m_mutex);
+		auto iterator = m_records.find(token);
+		if (generation != m_generation || iterator == m_records.end()
+				|| iterator->generation != generation || iterator->finished)
+			return;
+		iterator->cancelled = true;
+	}
+
+	Q_INVOKABLE void reset() {
+		quint64 resetGeneration = 0;
+		{
+			QMutexLocker locker(&m_mutex);
+			resetGeneration = ++m_generation;
+			m_records.clear();
+			m_lastId.clear();
+		}
+		emit resetRequested(resetGeneration);
+	}
+
+	Q_INVOKABLE int release(const QString &id = QString()) {
+		quint64 releaseGeneration = 0;
+		int releaseCount = 0;
+		{
+			QMutexLocker locker(&m_mutex);
+			releaseGeneration = m_generation;
+			for (auto iterator = m_records.begin(); iterator != m_records.end(); ++iterator) {
+				if (iterator->generation != m_generation || iterator->released
+						|| iterator->finished || iterator->cancelled
+						|| (!id.isEmpty() && iterator->id != id))
+					continue;
+				iterator->released = true;
+				++releaseCount;
+			}
+		}
+		if (releaseCount > 0)
+			emit releaseRequested(id, releaseGeneration);
+		return releaseCount;
+	}
+
+	Q_INVOKABLE QVariantMap receipt(const QString &id = QString()) const {
+		QMutexLocker locker(&m_mutex);
+		int requestedCount = 0;
+		int pendingCount = 0;
+		int releasedCount = 0;
+		int finishedCount = 0;
+		int cancelledCount = 0;
+		for (auto iterator = m_records.constBegin(); iterator != m_records.constEnd(); ++iterator) {
+			if (iterator->generation != m_generation
+					|| (!id.isEmpty() && iterator->id != id))
+				continue;
+			++requestedCount;
+			if (!iterator->finished && !iterator->cancelled) ++pendingCount;
+			if (iterator->released) ++releasedCount;
+			if (iterator->finished) ++finishedCount;
+			if (iterator->cancelled) ++cancelledCount;
+		}
+		return {
+			{QStringLiteral("requestedCount"), requestedCount},
+			{QStringLiteral("pendingCount"), pendingCount},
+			{QStringLiteral("releasedCount"), releasedCount},
+			{QStringLiteral("finishedCount"), finishedCount},
+			{QStringLiteral("cancelledCount"), cancelledCount},
+			{QStringLiteral("lastId"), m_lastId}
+		};
+	}
+
+signals:
+	void releaseRequested(const QString &id, quint64 generation);
+	void resetRequested(quint64 generation);
+
+private:
+	struct RequestRecord {
+		QString id;
+		quint64 generation = 0;
+		bool released = false;
+		bool finished = false;
+		bool cancelled = false;
+	};
+
+	mutable QMutex m_mutex;
+	QHash< quint64, RequestRecord > m_records;
+	quint64 m_generation = 1;
+	quint64 m_nextToken = 0;
+	QString m_lastId;
+};
+
+ControlledImageResponse::ControlledImageResponse(ControlledImageProviderController *controller,
+		const quint64 token, const quint64 generation, QString id,
+		const QSize &requestedSize, const bool controlled)
+	: m_controller(controller), m_token(token), m_generation(generation),
+	  m_id(std::move(id)), m_requestedSize(requestedSize), m_controlled(controlled) {
+	if (m_controlled && m_controller) {
+		QObject::connect(m_controller, &ControlledImageProviderController::releaseRequested,
+			this, [this](const QString &id, const quint64 generation) {
+				if (generation == m_generation && (id.isEmpty() || id == m_id)) complete();
+			}, Qt::QueuedConnection);
+		QObject::connect(m_controller, &ControlledImageProviderController::resetRequested,
+			this, [this](const quint64 generation) {
+				if (generation > m_generation) cancel();
+			}, Qt::QueuedConnection);
+	} else {
+		QMetaObject::invokeMethod(this, [this]() { complete(); }, Qt::QueuedConnection);
+	}
+}
+
+ControlledImageResponse::~ControlledImageResponse() {
+	cancel();
+}
+
+QQuickTextureFactory *ControlledImageResponse::textureFactory() const {
+	QMutexLocker locker(&m_mutex);
+	return m_image.isNull() ? nullptr : QQuickTextureFactory::textureFactoryForImage(m_image);
+}
+
+void ControlledImageResponse::cancel() {
+	{
+		QMutexLocker locker(&m_mutex);
+		if (m_finished || m_cancelled) return;
+		m_cancelled = true;
+	}
+	if (m_controlled && m_controller)
+		m_controller->noteCancelled(m_token, m_generation);
+}
+
+void ControlledImageResponse::complete() {
+	const QSize naturalSize(m_controlled ? QSize(320, 180) : QSize(96, 64));
+	const bool usableRequestedSize = m_requestedSize.width() > 0
+		&& m_requestedSize.height() > 0;
+	const QSize imageSize = usableRequestedSize
+		? m_requestedSize.boundedTo(m_controlled ? QSize(640, 360) : QSize(512, 512))
+		: naturalSize;
+	{
+		QMutexLocker locker(&m_mutex);
+		if (m_finished || m_cancelled) return;
+		if (m_controlled
+				&& (!m_controller
+					|| !m_controller->claimCompletion(m_token, m_generation, m_id))) {
+			m_cancelled = true;
+			return;
+		}
+		m_image = QImage(imageSize, QImage::Format_RGBA8888_Premultiplied);
+		m_image.fill(m_controlled ? qRgba(72, 116, 164, 255)
+			: m_id.contains(QLatin1String("screen")) ? qRgba(65, 92, 122, 255)
+				: qRgba(65, 160, 137, 255));
+		m_finished = true;
+	}
+	emit finished();
+}
+
+class FixtureAsyncImageProvider final : public QQuickAsyncImageProvider {
+public:
+	explicit FixtureAsyncImageProvider(ControlledImageProviderController *controller)
+		: m_controller(controller) {}
+
+	QQuickImageResponse *requestImageResponse(const QString &id,
+			const QSize &requestedSize) override {
+		const bool controlled = id.startsWith(QLatin1String("controlled-steam-"));
+		ControlledImageProviderController::RequestIdentity identity;
+		if (controlled && m_controller)
+			identity = m_controller->registerRequest(id);
+		return new ControlledImageResponse(m_controller, identity.token,
+			identity.generation, id, requestedSize, controlled);
+	}
+
+private:
+	QPointer< ControlledImageProviderController > m_controller;
 };
 
 QString ensureManagedGifFixture() {
@@ -758,7 +970,11 @@ public slots:
 			QUrl(QStringLiteral("qrc:/qml-shell/ProviderPresentation.qml")),
 			"Mumble.ProviderPresentation", 1, 0, "ProviderPresentation");
 		Q_UNUSED(providerPresentationType)
-		engine->addImageProvider(QStringLiteral("mumble"), new FixtureImageProvider());
+		auto *controlledImageProvider = new ControlledImageProviderController(engine);
+		engine->addImageProvider(QStringLiteral("mumble"),
+				new FixtureAsyncImageProvider(controlledImageProvider));
+		engine->rootContext()->setContextProperty(
+			QStringLiteral("controlledImageProvider"), controlledImageProvider);
 		engine->rootContext()->setContextProperty(QStringLiteral("uiTheme"), QVariant::fromValue< QObject * >(nullptr));
 		engine->rootContext()->setContextProperty(QStringLiteral("managedGifUrl"), ensureManagedGifFixture());
 		QFile mainQmlSource(QStringLiteral(":/qml-shell/Main.qml"));

@@ -28,10 +28,13 @@ Rectangle {
 		inlineMediaLoader.item
 			? Number(inlineMediaLoader.item.providerDocumentLoadTimeoutMs || 0) : 0
 	property bool renderActive: true
+	// The pressed-thumb warm lane is deliberately static-only. It never grants
+	// provider/player ownership and is ignored by every animated resource path.
+	property bool warmStaticActive: false
 	property bool animationsEnabled: true
 	property bool hoverEffectsEnabled: true
-	readonly property bool materializationSettled: !providerDetails.visible
-		|| providerDetails.presentationReady
+	readonly property bool materializationSettled: !visualPresentationPending
+		&& (!providerDetails.visible || providerDetails.presentationReady)
 	// Automation observes the same already-instantiated presentation layers that
 	// the user sees. Loading remains a truthful diagnostic state even though the
 	// reserved geometry is deliberately not painted until its static visual is
@@ -106,7 +109,11 @@ Rectangle {
 	readonly property bool staticEmbedPosterCacheActive: previewState === "ready"
 		&& !mediaRequiresReveal && inlineMediaStageVisible
 		&& effectiveEmbedPosterSource.length > 0 && !currentMediaManagedAnimated
+	readonly property bool compactImagePresentationActive:
+		(!typedDocumentActive || previewState !== "ready")
+		&& (!providerDetails.ownsHeader || previewState !== "ready")
 	readonly property bool staticCompactImageCacheActive: previewState === "ready"
+		&& compactImagePresentationActive
 		&& !mediaRequiresReveal && !inlineMediaStageVisible
 		&& imageSource.length > 0 && !currentMediaManagedAnimated
 	readonly property bool staticTypedMediaCacheActive: previewState === "ready"
@@ -133,7 +140,19 @@ Rectangle {
 	readonly property bool visualPresentationPending: compactLoadingPresentation
 		|| staticEmbedPosterRevealPending || staticCompactImageRevealPending
 		|| staticTypedMediaRevealPending
-	readonly property bool prewarmVisualReady: !visualPresentationPending
+	readonly property bool paintedLoading: visualPresentationPending && opacity > 0
+	readonly property bool paintedSummary: opacity > 0
+	readonly property bool paintedTerminal: opacity > 0 && (previewState === "error"
+		|| mediaRequiresReveal || performanceEmbedSurfaceState === "fallback")
+	readonly property bool typedGalleryWithoutManagedPaintableSource:
+		embedDocumentMediaGallery.visible
+		&& embedDocumentMediaGallery.viewportVisible
+		&& !embedDocumentMediaGallery.managedPaintableSourceAvailable
+	readonly property bool paintedSurface: opacity > 0
+		&& !typedGalleryWithoutManagedPaintableSource && (paintedTerminal
+		|| performanceEmbedSurfaceState === "poster"
+		|| performanceEmbedSurfaceState === "ready")
+	readonly property bool prewarmVisualReady: paintedSurface && !paintedLoading
 	readonly property var embedDocument: preview && preview.document ? preview.document : ({})
 	readonly property bool typedDocumentActive: Number(embedDocument.schemaVersion || 0) === 1
 		&& embedDocument.commonPresentation === true
@@ -446,21 +465,20 @@ Rectangle {
 
 	implicitHeight: content.implicitHeight + contentTopInset + contentBottomInset
 	clip: true
-	// Preserve the delegate's measured height while making backend hydration
-	// completely invisible. This also bypasses any in-flight color transition
-	// from a pooled delegate until the static preview DTO is ready.
-	opacity: visualPresentationPending ? 0 : 1
+	// Geometry remains fixed while the selected static surface loads. Paint the
+	// real card shell instead of exposing a transparent media-sized hole.
+	opacity: 1
 	enabled: !visualPresentationPending
 	radius: Theme.innerRadius
-	color: visualPresentationPending ? "transparent" : effectiveHovered
+	color: visualPresentationPending ? Theme.previewCardBackground : effectiveHovered
 		? Theme.mixColors(Theme.previewCardHover, providerDetails.providerAccent, 0.055)
 		: Theme.mixColors(Theme.previewCardBackground, providerDetails.providerAccent, 0.03)
-	border.color: visualPresentationPending ? "transparent"
+	border.color: visualPresentationPending ? Theme.embedBorder
 		: root.previewState === "error" ? root.withAlpha(Theme.danger, 0.65)
 		: root.mediaRequiresReveal ? root.withAlpha(Theme.warning, 0.65)
 		: effectiveHovered ? root.withAlpha(providerDetails.providerAccent, 0.46)
 		: root.withAlpha(providerDetails.providerAccent, 0.24)
-	border.width: visualPresentationPending ? 0 : 1
+	border.width: 1
 	Behavior on color {
 		enabled: !root.visualPresentationPending
 		ColorAnimation { duration: root.animationDuration }
@@ -1385,9 +1403,8 @@ Rectangle {
 			// a frame (and longer in a height-constrained delegate).
 			height: root.embedPanelHeight
 			visible: embedMediaSlot.visible
-			// Loading geometry remains reserved for scroll stability, but its
-			// media-sized surface is not painted until cached metadata is ready.
-			opacity: root.visualPresentationPending ? 0 : 1
+			// Keep the fixed media shell painted during the static image request.
+			opacity: 1
 			enabled: opacity > 0
 			Accessible.ignored: opacity <= 0
 			radius: Theme.innerRadius
@@ -1862,6 +1879,7 @@ Rectangle {
 				selectedIndex: root.selectedMediaIndex
 				expanded: root.expanded
 				renderActive: root.renderActive
+				warmStaticActive: root.warmStaticActive
 				retainStaticVisual: root.staticTypedMediaCacheActive
 				animationsEnabled: root.animationsEnabled
 				mediaRequiresReveal: root.mediaRequiresReveal
@@ -1916,7 +1934,8 @@ Rectangle {
                     id: previewImage
 					objectName: "previewCompactImage"
                     anchors.fill: parent
-					source: (root.renderActive || root.staticCompactImageCacheActive)
+					source: root.compactImagePresentationActive
+						&& (root.renderActive || root.staticCompactImageCacheActive)
 						&& !root.mediaRequiresReveal ? root.imageSource : ""
                     asynchronous: true
                     cache: true

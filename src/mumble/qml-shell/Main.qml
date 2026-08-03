@@ -2005,6 +2005,8 @@ ApplicationWindow {
 				timeline.originY + timeline.contentHeight - timeline.height)
 			const firstVisible = timeline.firstVisibleMessageDelegate()
 			const visiblePresentation = timeline.visiblePresentationDiagnostics()
+			const pendingVisibleHydrationCount =
+				timeline.pendingVisibleHydrationCount()
 			const pendingVisibleRichRecoveryCount =
 				timeline.pendingVisibleRichRecoveryCount()
 			const completedAt = timeline.scopePresentationCompletedAt > 0
@@ -2048,8 +2050,7 @@ ApplicationWindow {
 				"exposedTailCorrectionCount": timeline.scopePresentationExposedTailCorrectionCount,
 				"exposedTailTravel": timeline.scopePresentationExposedTailTravel,
 				"pendingHydrationCount": timeline.pendingScopeHydrationCount(),
-				"pendingVisibleHydrationCount":
-					timeline.pendingVisibleHydrationCount(),
+				"pendingVisibleHydrationCount": pendingVisibleHydrationCount,
 				"pendingVisibleRichRecoveryCount":
 					pendingVisibleRichRecoveryCount,
 				"prependAnchorActive": timeline.prependAnchorActive,
@@ -2134,6 +2135,25 @@ ApplicationWindow {
 				"visiblePreviewReadyCount": visiblePresentation.previewReadyCount,
 				"visibleBlankPreviewSurfaceCount":
 					visiblePresentation.blankPreviewSurfaceCount,
+				"visiblePaintedSummaryCount":
+					visiblePresentation.paintedSummaryCount,
+				"visiblePaintedSurfaceCount":
+					visiblePresentation.paintedSurfaceCount,
+				"visiblePaintedCompleteCount":
+					visiblePresentation.paintedCompleteCount,
+				"visiblePaintedLoadingCount":
+					visiblePresentation.paintedLoadingCount,
+				"visiblePaintedTerminalCount":
+					visiblePresentation.paintedTerminalCount,
+				"stationaryThumbWarmPressEpoch": stationaryThumbWarmGate.pressEpoch,
+				"stationaryThumbWarmDwellGeneration":
+					stationaryThumbWarmGate.dwellGeneration,
+				"stationaryThumbWarmAdmittedCount":
+					stationaryThumbWarmGate.admittedCount,
+				"stationaryThumbWarmActiveId": stationaryThumbWarmGate.activeStableId,
+				"stationaryThumbWarmPinnedIds":
+					Object.keys(timeline.stationaryThumbWarmPins),
+				"stationaryThumbWarmPins": timeline.stationaryThumbWarmPins,
 				"visibleInactiveRichResourceCount":
 					visiblePresentation.inactiveRichResourceCount,
 				"visiblePresentationHeightPendingCount":
@@ -2164,11 +2184,19 @@ ApplicationWindow {
 					&& !viewportMembershipTimer.running
 					&& !timeline.viewportMembershipUpdatePending
 					&& !chatModel.appendPending && !chatModel.prependPending
+					&& timeline.stationaryThumbWarmPinCount === 0
 					&& (chatModel.count === 0
 						|| (visiblePresentation.visibleCount > 0
+							&& visiblePresentation.fullMessageCount
+								=== visiblePresentation.visibleCount
+							&& visiblePresentation.paintedCompleteCount
+								=== visiblePresentation.visibleCount
+							&& visiblePresentation.paintedLoadingCount === 0
+							&& visiblePresentation.deferredSummaryCount === 0
 							&& visiblePresentation.blankCount === 0
 							&& visiblePresentation.inactiveRichResourceCount === 0
 							&& visiblePresentation.presentationHeightPendingCount === 0
+							&& pendingVisibleHydrationCount === 0
 							&& pendingVisibleRichRecoveryCount === 0))
 			}
 		} catch (error) {
@@ -3377,6 +3405,7 @@ ApplicationWindow {
 								timeline.beginScrollbarDrag()
 							else {
 								timeline.finishScrollbarDrag()
+								timeline.scheduleStationaryThumbWarmReconcile()
 							}
 						}
 					}
@@ -3439,6 +3468,57 @@ ApplicationWindow {
 					onWheelInputExpired: distance =>
 						root.timelineWheelExpiredDistance += distance
 					}
+					StationaryScrollWarmGate {
+						id: stationaryThumbWarmGate
+						objectName: "stationaryScrollWarmGate"
+						pressed: timelineScrollBar.pressed
+						dragActive: timeline.scrollbarDragActive
+						releasePending: timeline.scrollbarReleasePending
+						moving: timeline.moving
+						dragging: timeline.dragging
+						flicking: timeline.flicking
+						customScrolling: timelineScrollHandler.scrolling
+						performanceScrolling: root.performanceChatScrollRunning
+						scopeBlocked: timeline.scopePresentationPending
+							|| timeline.scopePresentationFinalizing
+							|| timeline.scopeResetPending
+							|| timeline.scopePresentationObservationActive
+						prependBlocked: timeline.prependAnchorActive
+							|| timeline.prependMutationInProgress
+							|| timeline.deferredPrependAnchorActive
+							|| chatModel.prependPending
+						membershipBlocked: timeline.viewportMembershipUpdatePending
+							|| viewportMembershipTimer.running
+						position: timeline.contentY
+						visibleStableIdProvider: function() {
+							return timeline.stationaryThumbVisibleStableIds()
+						}
+						canAdmitStableId: function(stableId) {
+							return timeline.stationaryThumbWarmCanAdmit(stableId)
+						}
+						revalidateActiveStableId: function(stableId, pressEpoch,
+								dwellGeneration) {
+							return timeline.revalidateStationaryThumbWarmAdmission(
+								stableId, pressEpoch, dwellGeneration)
+						}
+						onAdmissionCancelled: timeline.scheduleStationaryThumbWarmReconcile()
+						onAdmissionFinished: timeline.scheduleStationaryThumbWarmReconcile()
+						onRetentionsCleared: timeline.scheduleStationaryThumbWarmReconcile()
+						onMembershipRevisionDrained:
+							timeline.scheduleStationaryThumbWarmReconcile()
+						onAdmissionRequested: (stableId, pressEpoch, dwellGeneration) => {
+							if (!timeline.installStationaryThumbWarmPin(stableId,
+									pressEpoch, dwellGeneration))
+								stationaryThumbWarmGate.finishAdmission(stableId,
+									pressEpoch, dwellGeneration, "terminal")
+						}
+					}
+					Timer {
+						id: stationaryThumbWarmReconcileTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.reconcileStationaryThumbWarmPins()
+					}
 					// Keep less than one extra viewport of delegates warm. Rich preview
 					// loaders incubate asynchronously, so a multi-viewport cache only makes
 					// scope entry and history insertion construct invisible card trees.
@@ -3476,6 +3556,270 @@ ApplicationWindow {
 						|| timelineScrollBar.pressed
 						|| scrollbarReleasePending
 						|| root.performanceChatScrollRunning
+					// Stationary thumb warming pins geometry at the timeline level so a
+					// delegate reuse or preview-identity update cannot transfer or discard
+					// the selected viewport reservation.
+					property var stationaryThumbWarmPins: ({})
+					readonly property int stationaryThumbWarmPinCount:
+						Object.keys(stationaryThumbWarmPins).length
+					function stationaryThumbWarmPin(stableId) {
+						return stationaryThumbWarmPins[String(stableId || "")] || null
+					}
+					function stationaryThumbDelegateActuallyVisible(item) {
+						if (!item || item.performanceTimelineDelegate !== true
+								|| item.accessibilityPooled === true || !item.visible)
+							return false
+						const point = item.mapToItem(timeline, 0, 0)
+						return point.y + Number(item.height || 0) > 0.5
+							&& point.y < height - 0.5
+					}
+					function stationaryThumbVisibleStableIds() {
+						const candidates = []
+						const children = contentItem ? contentItem.children : []
+						for (let index = 0; index < children.length; ++index) {
+							const item = children[index]
+							if (!stationaryThumbDelegateActuallyVisible(item))
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y + item.height <= 0.5 || point.y >= height - 0.5)
+								continue
+							const key = String(item.stableId || "")
+							if (key.length > 0)
+								candidates.push({ "id": key, "viewportY": point.y })
+						}
+						candidates.sort(function(left, right) {
+							return left.viewportY - right.viewportY
+						})
+						return candidates.map(function(candidate) { return candidate.id })
+					}
+					function stationaryThumbWarmCanAdmit(stableId) {
+						const key = String(stableId || "")
+						const item = timelineDelegateForStableId(key)
+						if (key.length === 0 || !stationaryThumbDelegateActuallyVisible(item))
+							return false
+						const deferred = item.lightweightDeferredPresentation === true
+						if (deferred && item.richPresentationReserved !== true)
+							return false
+						if (!deferred && item.stationaryThumbWarmEligible !== true)
+							return false
+						return !!stationaryThumbWarmPin(key)
+							|| stationaryThumbWarmPinCount < 2
+					}
+					function installStationaryThumbWarmPin(stableId, pressEpoch,
+							dwellGeneration) {
+						const key = String(stableId || "")
+						const item = timelineDelegateForStableId(key)
+						if (!stationaryThumbWarmCanAdmit(key) || !item)
+							return false
+						const existing = stationaryThumbWarmPin(key)
+						const deferred = item.lightweightDeferredPresentation === true
+						const nextPins = Object.assign({}, stationaryThumbWarmPins)
+						nextPins[key] = {
+							"id": key,
+							"outerHeight": existing
+								? Number(existing.outerHeight || item.height)
+								: Number(item.height || deferredMessageRowHeight),
+							"probeHeight": existing
+								? Number(existing.probeHeight || item.viewportProbeHeight)
+								: Number(item.viewportProbeHeight || item.height
+									|| deferredMessageRowHeight),
+							"pressEpoch": Number(pressEpoch),
+							"dwellGeneration": Number(dwellGeneration),
+							"materializationPending": deferred,
+							"materializationRevalidated": !deferred,
+							"paintedSummary": false,
+							"paintedSurface": false,
+							"loading": true,
+							"terminal": false
+						}
+						stationaryThumbWarmPins = nextPins
+						if (deferred && chatModel.materializeDeferredMessage(key)) {
+							stationaryThumbWarmGate.pauseActiveForMembershipRevision()
+							scheduleStationaryThumbWarmReconcile()
+							return true
+						}
+						if (!deferred && item.admitStationaryThumbWarm(
+								pressEpoch, dwellGeneration))
+							return true
+						const rolledBackPins = Object.assign({}, stationaryThumbWarmPins)
+						if (existing)
+							rolledBackPins[key] = existing
+						else
+							delete rolledBackPins[key]
+						stationaryThumbWarmPins = rolledBackPins
+						return false
+					}
+					function revalidateStationaryThumbWarmAdmission(stableId, pressEpoch,
+							dwellGeneration) {
+						const key = String(stableId || "")
+						const pin = stationaryThumbWarmPin(key)
+						const item = timelineDelegateForStableId(key)
+						if (!pin || Number(pin.pressEpoch) !== Number(pressEpoch)
+								|| Number(pin.dwellGeneration) !== Number(dwellGeneration)
+								|| !stationaryThumbDelegateActuallyVisible(item)
+								|| item.lightweightDeferredPresentation === true
+								|| item.stationaryThumbWarmEligible !== true)
+							return false
+						const nextPins = Object.assign({}, stationaryThumbWarmPins)
+						nextPins[key] = Object.assign({}, pin, {
+							"materializationPending": false,
+							"materializationRevalidated": true
+						})
+						stationaryThumbWarmPins = nextPins
+						return true
+					}
+					function updateStationaryThumbWarmPin(stableId, paintedSummary,
+							paintedSurface, loading, terminal) {
+						const key = String(stableId || "")
+						const pin = stationaryThumbWarmPin(key)
+						if (!pin)
+							return false
+						const nextPins = Object.assign({}, stationaryThumbWarmPins)
+						nextPins[key] = Object.assign({}, pin, {
+							"paintedSummary": paintedSummary === true,
+							"paintedSurface": paintedSurface === true,
+							"loading": loading === true,
+							"terminal": terminal === true
+						})
+						stationaryThumbWarmPins = nextPins
+						return true
+					}
+					function finishStationaryThumbWarm(stableId, outcome) {
+						const pin = stationaryThumbWarmPin(stableId)
+						if (!pin)
+							return false
+						return stationaryThumbWarmGate.finishAdmission(stableId,
+							Number(pin.pressEpoch), Number(pin.dwellGeneration), outcome)
+					}
+					function clearStationaryThumbWarmPin(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0 || !stationaryThumbWarmPin(key))
+							return false
+						const nextPins = Object.assign({}, stationaryThumbWarmPins)
+						delete nextPins[key]
+						stationaryThumbWarmPins = nextPins
+						return true
+					}
+					function clearStationaryThumbWarmPins() {
+						stationaryThumbWarmPins = ({})
+					}
+					function clearStationaryThumbWarmPinForCommit(stableId,
+							outerHeight, probeHeight) {
+						const pin = stationaryThumbWarmPin(stableId)
+						if (!pin || !isFinite(outerHeight) || !isFinite(probeHeight)
+								|| outerHeight <= 0 || probeHeight <= 0)
+							return false
+						return clearStationaryThumbWarmPin(stableId)
+					}
+					function clearEqualStationaryThumbWarmTerminal(stableId,
+							outerHeight, probeHeight, rowVisible, terminal) {
+						const pin = stationaryThumbWarmPin(stableId)
+						if (!pin || rowVisible === true || terminal !== true)
+							return false
+						if (Math.abs(Number(pin.outerHeight) - Number(outerHeight)) > 0.5
+								|| Math.abs(Number(pin.probeHeight) - Number(probeHeight)) > 0.5)
+							return false
+						return clearStationaryThumbWarmPin(stableId)
+					}
+					property int stationaryThumbWarmReconcilePass: 0
+					readonly property int maximumStationaryThumbWarmReconcilePasses: 32
+					function stationaryThumbWarmModelGeometry(stableId) {
+						const key = String(stableId || "")
+						const rowIndex = key.length > 0
+							? chatModel.rowForStableId(key) : -1
+						if (rowIndex < 0)
+							return { "available": false, "outerHeight": 0, "probeHeight": 0 }
+						const row = chatModel.get(rowIndex) || ({})
+						const estimatedHeight = Math.max(deferredMessageRowHeight,
+							Number(row.deferredPresentationHeight || 0))
+						return {
+							"available": isFinite(estimatedHeight) && estimatedHeight > 0,
+							"outerHeight": estimatedHeight,
+							"probeHeight": estimatedHeight
+						}
+					}
+					function stationaryThumbWarmReconcileBlocked() {
+						return timelineScrollBar.pressed || scrollbarDragActive
+							|| scrollbarReleasePending || moving || dragging || flicking
+							|| timelineScrollHandler.scrolling
+							|| root.performanceChatScrollRunning
+							|| scopePresentationPending || scopePresentationFinalizing
+							|| scopeResetPending || prependAnchorActive
+							|| prependMutationInProgress || viewportMembershipUpdatePending
+							|| viewportMembershipTimer.running
+					}
+					function scheduleStationaryThumbWarmReconcile() {
+						if (stationaryThumbWarmPinCount === 0)
+							return
+						stationaryThumbWarmReconcilePass = 0
+						stationaryThumbWarmReconcileTimer.restart()
+					}
+					function rearmStationaryThumbWarmReconcile() {
+						if (stationaryThumbWarmPinCount > 0
+								&& stationaryThumbWarmReconcilePass
+									< maximumStationaryThumbWarmReconcilePasses)
+							stationaryThumbWarmReconcileTimer.restart()
+					}
+					function reconcileStationaryThumbWarmPins() {
+						if (stationaryThumbWarmPinCount === 0)
+							return
+						if (stationaryThumbWarmReconcileBlocked())
+							return
+						++stationaryThumbWarmReconcilePass
+						let retryNeeded = false
+						const pinnedIds = Object.keys(stationaryThumbWarmPins)
+						for (let index = 0; index < pinnedIds.length; ++index) {
+							const key = pinnedIds[index]
+							const pin = stationaryThumbWarmPin(key)
+							if (!pin)
+								continue
+							const item = timelineDelegateForStableId(key)
+							if (item && item.lightweightDeferredPresentation !== true) {
+								const wouldBeOuterHeight =
+									item.stationaryThumbWouldBeOuterHeight()
+								const wouldBeProbeHeight =
+									item.stationaryThumbWouldBeProbeHeight()
+								const retained = stationaryThumbWarmGate.retains(key,
+									Number(pin.pressEpoch), Number(pin.dwellGeneration))
+								if (!stationaryThumbDelegateActuallyVisible(item) && !retained
+										&& Math.abs(Number(pin.outerHeight)
+											- wouldBeOuterHeight) <= 0.5
+										&& Math.abs(Number(pin.probeHeight)
+											- wouldBeProbeHeight) <= 0.5) {
+									clearStationaryThumbWarmPin(key)
+									continue
+								}
+								if (typeof item.schedulePresentationHeightObservation === "function")
+									item.schedulePresentationHeightObservation()
+								if (!stationaryThumbDelegateActuallyVisible(item)
+										&& item.paintedTerminal === true
+										&& clearEqualStationaryThumbWarmTerminal(key,
+											wouldBeOuterHeight,
+											wouldBeProbeHeight, false, true))
+									continue
+								retryNeeded = true
+								continue
+							}
+							const modelGeometry = stationaryThumbWarmModelGeometry(key)
+							if (!modelGeometry.available) {
+								clearStationaryThumbWarmPin(key)
+								continue
+							}
+							if (modelGeometry.available
+									&& Math.abs(Number(pin.outerHeight)
+										- modelGeometry.outerHeight) <= 0.5
+									&& Math.abs(Number(pin.probeHeight)
+										- modelGeometry.probeHeight) <= 0.5) {
+								clearStationaryThumbWarmPin(key)
+								continue
+							}
+							if (modelGeometry.available)
+								chatModel.materializeDeferredMessage(key)
+							retryNeeded = true
+						}
+						if (retryNeeded)
+							rearmStationaryThumbWarmReconcile()
+					}
 					property var richLoaderResumeQueue: []
 					// Asynchronous Loader incubation can span several polish turns. Do
 					// not activate another complete message tree until the previous one
@@ -3512,6 +3856,9 @@ ApplicationWindow {
 					property int staticPreviewPreheatDirection: -1
 					property real staticPreviewPreheatLastContentY: 0
 					property bool staticPreviewPreheatTeleportPending: false
+					readonly property bool staticPreviewThumbBlocked:
+						timelineScrollBar.pressed || scrollbarDragActive
+						|| scrollbarReleasePending
 					property int staticPreviewSweepIndex: -1
 					property bool staticPreviewSweepStarted: false
 					property bool staticPreviewSweepCompleted: false
@@ -3678,6 +4025,7 @@ ApplicationWindow {
 						scrollbarReleaseGuardTimer.stop()
 						scrollbarReleasePending = false
 						scrollbarDragActive = true
+						pauseStaticPreviewPreheatForThumb()
 						// Publish thumb ownership before cancelFlick(), which can emit
 						// movementEnded synchronously for native precision-wheel kinetics.
 						timelineScrollHandler.cancelNavigationForOwnershipLoss()
@@ -3744,6 +4092,7 @@ ApplicationWindow {
 						// Publish the scope owner before cancelFlick(): Qt may synchronously
 						// emit movementEnded while retiring a native precision-wheel flick.
 						scopePresentationPending = true
+						clearStationaryThumbWarmPins()
 						timelineScrollHandler.cancelNavigationForOwnershipLoss()
 						richScrollRetentionRampTimer.stop()
 						viewportMembershipTimer.stop()
@@ -4198,6 +4547,12 @@ ApplicationWindow {
 							"rowLoaderReadyCount": 0,
 							"previewReadyCount": 0,
 							"blankPreviewSurfaceCount": 0,
+							"paintedSummaryCount": 0,
+							"paintedSurfaceCount": 0,
+							"paintedCompleteCount": 0,
+							"paintedLoadingCount": 0,
+							"paintedTerminalCount": 0,
+							"pinnedCount": 0,
 							"inactiveRichResourceCount": 0,
 							"presentationHeightPendingCount": 0,
 							"presentationHeightMismatchCount": 0,
@@ -4215,6 +4570,24 @@ ApplicationWindow {
 							++diagnostics.visibleCount
 							const preview = item.preview || ({})
 							const previewKeyCount = Object.keys(preview).length
+							const paintedSummary = item.paintedSummary === true
+							const paintedSurface = item.paintedSurface === true
+							const paintedLoading = item.paintedLoading === true
+							const paintedTerminal = item.paintedTerminal === true
+							const paintedComplete = paintedSurface || paintedTerminal
+							const warmPin = stationaryThumbWarmPin(item.stableId)
+							if (paintedSummary)
+								++diagnostics.paintedSummaryCount
+							if (paintedSurface)
+								++diagnostics.paintedSurfaceCount
+							if (paintedComplete)
+								++diagnostics.paintedCompleteCount
+							if (paintedLoading)
+								++diagnostics.paintedLoadingCount
+							if (paintedTerminal)
+								++diagnostics.paintedTerminalCount
+							if (warmPin)
+								++diagnostics.pinnedCount
 							const previewSurfaceState = previewKeyCount === 0
 								? "not-required"
 								: item.item
@@ -4225,6 +4598,7 @@ ApplicationWindow {
 								item.lightweightDeferredPresentation !== true
 								&& item.messageRowReady === true
 								&& previewKeyCount > 0
+								&& !paintedLoading
 								&& previewSurfaceState === "blank"
 							if (blankPreviewSurface)
 								++diagnostics.blankPreviewSurfaceCount
@@ -4268,6 +4642,25 @@ ApplicationWindow {
 									? loadedImplicitHeight : 0,
 								"viewportY": Number(point.y || 0),
 								"viewportProbeHeight": Number(item.viewportProbeHeight || 0),
+								"effectiveViewportProbeHeight": Number(
+									item.effectiveViewportProbeHeight
+										|| item.viewportProbeHeight || 0),
+								"paintedSummary": paintedSummary,
+								"paintedSurface": paintedSurface,
+								"paintedComplete": paintedComplete,
+								"paintedLoading": paintedLoading,
+								"paintedTerminal": paintedTerminal,
+								"stationaryThumbPinned": !!warmPin,
+								"stationaryThumbPinId": warmPin
+									? String(warmPin.id || "") : "",
+								"stationaryThumbPinOuterHeight": warmPin
+									? Number(warmPin.outerHeight || 0) : 0,
+								"stationaryThumbPinProbeHeight": warmPin
+									? Number(warmPin.probeHeight || 0) : 0,
+								"stationaryThumbPinPressEpoch": warmPin
+									? Number(warmPin.pressEpoch || 0) : 0,
+								"stationaryThumbPinDwellGeneration": warmPin
+									? Number(warmPin.dwellGeneration || 0) : 0,
 								"richGeometrySettling": item.richGeometrySettling === true,
 								"reservedExcess": hasLoadedImplicitHeight
 									? Math.max(0, Number(item.height || 0)
@@ -4319,9 +4712,8 @@ ApplicationWindow {
 								"blankPreviewSurface": blankPreviewSurface
 							})
 							if (item.lightweightDeferredPresentation === true) {
-								if (String(item.presentationSummary || "").trim().length > 0) {
+								if (paintedSummary) {
 									++diagnostics.deferredSummaryCount
-									++diagnostics.readyCount
 								} else {
 									++diagnostics.blankCount
 								}
@@ -4335,10 +4727,11 @@ ApplicationWindow {
 								++diagnostics.rowLoaderReadyCount
 							if (item.previewPresentationReady === true)
 								++diagnostics.previewReadyCount
-							if (item.messageRowReady === true) {
+							if (item.messageRowReady === true && paintedComplete
+									&& !paintedLoading) {
 								++diagnostics.fullMessageCount
 								++diagnostics.readyCount
-							} else {
+							} else if (!paintedSummary) {
 								++diagnostics.blankCount
 							}
 						}
@@ -4361,6 +4754,8 @@ ApplicationWindow {
 						return diagnostics.visibleCount > 0
 							&& diagnostics.readyCount === diagnostics.visibleCount
 							&& diagnostics.fullMessageCount === diagnostics.visibleCount
+							&& diagnostics.paintedCompleteCount === diagnostics.visibleCount
+							&& diagnostics.paintedLoadingCount === 0
 							&& diagnostics.deferredSummaryCount === 0
 							&& diagnostics.blankCount === 0
 							&& diagnostics.inactiveRichResourceCount === 0
@@ -5010,7 +5405,8 @@ ApplicationWindow {
 					}
 
 					function activateStaticPreviewPreheat(entry) {
-						if (!entry || staticPreviewPreheatActiveSource.length > 0)
+						if (!entry || staticPreviewThumbBlocked
+								|| staticPreviewPreheatActiveSource.length > 0)
 							return false
 						const source = String(entry.source || "")
 						if (source.length === 0 || staticPreviewSourceRetainedOrCooling(source))
@@ -5056,7 +5452,8 @@ ApplicationWindow {
 					}
 
 					function activateQueuedStaticPreviewPreheat() {
-						if (staticPreviewPreheatActiveSource.length > 0
+						if (staticPreviewThumbBlocked
+								|| staticPreviewPreheatActiveSource.length > 0
 								|| staticPreviewPreheatQueue.length === 0)
 							return false
 						const entry = staticPreviewPreheatQueue[0]
@@ -5148,6 +5545,8 @@ ApplicationWindow {
 					}
 
 					function refillStaticPreviewLookahead() {
+						if (staticPreviewThumbBlocked)
+							return
 						const candidates = staticPreviewLookaheadCandidates()
 						if (staticPreviewPreheatTeleportPending && candidates.length > 0
 								&& candidates[0].visible === true
@@ -5196,8 +5595,20 @@ ApplicationWindow {
 					}
 
 					function scheduleStaticPreviewLookahead() {
-						if (!staticPreviewLookaheadTimer.running)
+						if (!staticPreviewThumbBlocked
+								&& !staticPreviewLookaheadTimer.running)
 							staticPreviewLookaheadTimer.start()
+					}
+
+					function pauseStaticPreviewPreheatForThumb() {
+						staticPreviewLookaheadTimer.stop()
+						staticPreviewSweepTimer.stop()
+						staticPreviewPreheatActiveSource = ""
+						staticPreviewPreheatActiveId = ""
+						staticPreviewPreheatActiveOrigin = ""
+						staticPreviewPreheatActiveSweepIndex = -1
+						staticPreviewPreheatQueue = []
+						staticPreviewPreheatTeleportPending = false
 					}
 
 					function staticPreviewSweepAllowed() {
@@ -5223,7 +5634,8 @@ ApplicationWindow {
 					}
 
 					function scheduleStaticPreviewSweep() {
-						if (!staticPreviewSweepAllowed() || chatModel.count <= 0
+						if (staticPreviewThumbBlocked || !staticPreviewSweepAllowed()
+								|| chatModel.count <= 0
 								|| staticPreviewSweepCompleted
 								|| staticPreviewSweepRemainingAttempts <= 0
 								|| staticPreviewSweepTimer.running)
@@ -6463,6 +6875,7 @@ ApplicationWindow {
 						}
 					}
 					onMovementEnded: {
+						scheduleStationaryThumbWarmReconcile()
 						const explicitNavigation = explicitNavigationMovement
 						explicitNavigationMovement = false
 						if (timelineScrollHandler.navigationTransitionActive
@@ -6859,6 +7272,9 @@ ApplicationWindow {
 							timeline.scheduleViewportMembershipUpdate()
 							timeline.scheduleRichContentResume()
 							timeline.requestBottomFollow()
+							timeline.scheduleStaticPreviewLookahead()
+							timeline.scheduleStaticPreviewSweep()
+							timeline.scheduleStationaryThumbWarmReconcile()
 						}
 					}
 
@@ -7027,6 +7443,7 @@ ApplicationWindow {
 						}
 						function onModelReset() {
 							timeline.scheduleViewportMembershipUpdate()
+							timeline.clearStationaryThumbWarmPins()
 							timeline.releasePrependAnchor()
 							timeline.releaseViewportAnchor()
 							timeline.releaseTopAnchor()
@@ -7046,6 +7463,7 @@ ApplicationWindow {
 								timeline.scheduleScopePresentationFastPath()
 							}
 							if (timeline.count === 0) {
+								timeline.clearStationaryThumbWarmPins()
 								timeline.releasePrependAnchor()
 								timeline.releaseViewportAnchor()
 								timeline.releaseTopAnchor()
@@ -7117,21 +7535,26 @@ ApplicationWindow {
 									}).join("  ·  ")
 								readonly property string presentationSummary: summaryText
 								readonly property bool messageRowReady: false
+								readonly property bool paintedSummary: summaryText.length > 0
+								readonly property bool paintedSurface: false
+								readonly property bool paintedLoading: richPresentationReserved
+								readonly property bool paintedTerminal: false
 								readonly property bool richPresentationReserved:
 									deferredPresentationHeight > 180
 								property bool accessibilityPooled: false
 								width: timelineHeader.width
 								height: timeline.deferredMessageRowHeight
 								radius: richPresentationReserved ? 0 : Theme.innerRadius
-								color: richPresentationReserved ? "transparent" : Theme.surfaceRaised
-								border.width: richPresentationReserved ? 0 : 1
-								border.color: richPresentationReserved ? "transparent" : Theme.divider
+								color: richPresentationReserved ? Theme.withAlpha(
+									Theme.surfaceRaised, 0.64) : Theme.surfaceRaised
+								border.width: 1
+								border.color: Theme.divider
 								Accessible.role: Accessible.ListItem
 								Accessible.name: summaryText
 								Accessible.ignored: richPresentationReserved
 
 								Label {
-									visible: !deferredHistoryRow.richPresentationReserved
+									visible: true
 									anchors.fill: parent
 									anchors.leftMargin: Theme.space3
 									anchors.rightMargin: Theme.space3
@@ -7171,6 +7594,11 @@ ApplicationWindow {
 								readonly property bool lightweightDeferredPresentation: true
 								readonly property bool contentNeedsHydration: true
 								readonly property bool messageRowReady: false
+								readonly property bool paintedSummary:
+									presentationSummary.length > 0
+								readonly property bool paintedSurface: false
+								readonly property bool paintedLoading: richPresentationReserved
+								readonly property bool paintedTerminal: false
 								readonly property bool richPresentationReserved:
 									deferredPresentationHeight > 180
 								readonly property string presentationSummary: [title, subtitle, timestamp]
@@ -7186,8 +7614,7 @@ ApplicationWindow {
 								radius: 0
 								color: "transparent"
 								border.width: 0
-								opacity: timeline.scopePresentationContentVisible
-									&& !richPresentationReserved ? 1 : 0
+								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								Accessible.role: Accessible.ListItem
 								Accessible.name: presentationSummary
 								Accessible.ignored: richPresentationReserved
@@ -7196,7 +7623,7 @@ ApplicationWindow {
 								ListView.onReused: accessibilityPooled = false
 
 								RowLayout {
-									visible: !deferredInlineMessageDelegate.richPresentationReserved
+									visible: true
 									anchors.left: parent.left
 									anchors.right: parent.right
 									anchors.top: parent.top
@@ -7398,16 +7825,22 @@ ApplicationWindow {
 						timeline.stickToBottom = true
 					}
 					presentationHeightSettledIdentity = identity
-									presentationHeightSettledHeight =
-										presentationHeightCommitValue(measuredHeight)
+					const committedOuterHeight =
+						presentationHeightCommitValue(measuredHeight)
+					const committedProbeHeight = Math.max(
+						timeline.deferredMessageRowHeight, committedOuterHeight)
+									presentationHeightSettledHeight = committedOuterHeight
 									presentationHeightReleased = true
 									presentationHeightReleasePending = false
 									presentationHeightObservedHeight = measuredHeight
 									presentationHeightQuietPolishObservations = 0
 									viewportProbeStableId = String(stableId || "")
-					viewportProbeHeight = Math.max(
-						timeline.deferredMessageRowHeight,
-						presentationHeightSettledHeight)
+					viewportProbeHeight = committedProbeHeight
+					// Clear the pin in the same measured outer+probe commit while the
+					// non-tail anchor or exact-tail intent still owns correction. Only
+					// the existing restore/bottom-follow path runs after this cohort.
+					timeline.clearStationaryThumbWarmPinForCommit(stableId,
+						committedOuterHeight, committedProbeHeight)
 					if (presentationHeightTailIntent)
 						timeline.requestBottomFollow()
 					else if (timeline.viewportAnchorActive)
@@ -7448,7 +7881,8 @@ ApplicationWindow {
 									if (presentationHeightReleased
 										&& presentationHeightSettledIdentity === identity
 										&& Math.abs(presentationHeightSettledHeight - committedHeight)
-											<= 0.5) {
+											<= 0.5
+										&& !stationaryThumbWarmPinned) {
 										presentationHeightQuietPolishObservations = 0
 										return
 									}
@@ -7674,6 +8108,48 @@ ApplicationWindow {
 								property real viewportProbeHeight: Math.max(
 									timeline.deferredMessageRowHeight,
 									deferredPresentationHeight)
+								readonly property var stationaryThumbWarmPin:
+									timeline.stationaryThumbWarmPin(stableId)
+								readonly property bool stationaryThumbWarmPinned:
+									!!stationaryThumbWarmPin
+								readonly property real stationaryThumbPinnedOuterHeight:
+									stationaryThumbWarmPinned
+										? Number(stationaryThumbWarmPin.outerHeight || 0) : 0
+								readonly property real stationaryThumbPinnedProbeHeight:
+									stationaryThumbWarmPinned
+										? Number(stationaryThumbWarmPin.probeHeight || 0) : 0
+								readonly property real effectiveViewportProbeHeight:
+									stationaryThumbWarmPinned
+										? stationaryThumbPinnedProbeHeight : viewportProbeHeight
+								readonly property bool stationaryThumbWarmOwned:
+									stationaryThumbWarmPinned
+									&& ((stationaryThumbWarmPin.paintedSurface === true
+											|| stationaryThumbWarmPin.terminal === true)
+										? stationaryThumbWarmGate.retains(stableId,
+											Number(stationaryThumbWarmPin.pressEpoch),
+											Number(stationaryThumbWarmPin.dwellGeneration))
+										: stationaryThumbWarmGate.owns(stableId,
+											Number(stationaryThumbWarmPin.pressEpoch),
+											Number(stationaryThumbWarmPin.dwellGeneration)))
+								readonly property bool stationaryThumbWarmEligible: {
+									const value = preview || ({})
+									const state = String(value.state || "").toLowerCase()
+									const statusValue = String(value.status || "").toLowerCase()
+									return active && !deferredPresentation && inVisibleViewport
+										&& Object.keys(value).length > 0
+										&& state !== "loading" && value.loading !== true
+										&& state !== "error" && state !== "failed"
+										&& statusValue !== "error" && statusValue !== "failed"
+										&& value.failed !== true && !previewLoaderFailed
+								}
+								readonly property bool paintedSummary: !accessibilityPooled
+									&& active && (!item || item.paintedSummary === true)
+								readonly property bool paintedSurface: !!item
+									&& item.paintedSurface === true
+								readonly property bool paintedLoading: stationaryThumbWarmPinned
+									&& (!item || item.paintedLoading === true)
+								readonly property bool paintedTerminal: !!item
+									&& item.paintedTerminal === true
 								property bool viewportMembershipUpdating: false
 								readonly property real presentationHeightCommittedHeight:
 									presentationHeightReleased
@@ -7717,7 +8193,7 @@ ApplicationWindow {
 								function updateViewportMembership() {
 									const rowTop = Number(y || 0)
 									const extent = Math.max(0,
-										Number(viewportProbeHeight || 0))
+										Number(effectiveViewportProbeHeight || 0))
 									const viewportTop = Number(timeline.contentY || 0)
 									const viewportBottom = viewportTop
 										+ Number(timeline.height || 0)
@@ -7774,6 +8250,8 @@ ApplicationWindow {
 									schedulePresentationHeightObservation()
 								}
 								onViewportProbeHeightChanged:
+									timeline.scheduleViewportMembershipUpdate()
+								onEffectiveViewportProbeHeightChanged:
 									timeline.scheduleViewportMembershipUpdate()
 								onYChanged: timeline.scheduleViewportMembershipUpdate()
 								readonly property bool contentNeedsHydration: item
@@ -7902,7 +8380,9 @@ ApplicationWindow {
 								// expose both placeholder and provider heights. Keep that
 								// reservation until the two-observation latch commits a
 								// measured height; after that, use only the cached height.
-								height: presentationHeightCommittedHeight > 0
+								height: stationaryThumbWarmPinned
+									? stationaryThumbPinnedOuterHeight
+									: presentationHeightCommittedHeight > 0
 									? presentationHeightCommittedHeight
 									: Math.max(timeline.deferredMessageRowHeight,
 										deferredPresentationHeight,
@@ -7913,7 +8393,7 @@ ApplicationWindow {
 										schedulePresentationHeightObservation()
 									}
 								}
-								clip: richGeometrySettling || (item
+								clip: stationaryThumbWarmPinned || richGeometrySettling || (item
 									&& presentationHeightMeasuredHeight > height + 0.5)
 								opacity: timeline.scopePresentationContentVisible ? 1 : 0
 								asynchronous: true
@@ -7968,7 +8448,9 @@ ApplicationWindow {
 
 									RowLayout {
 										objectName: "asyncRichHandoffSummary"
-										visible: !asyncMessageDelegate.previewOnlyAtomicHandoff
+										// Preview-only rows must still paint their real fixed-height
+										// loading summary instead of a transparent reserved gap.
+										visible: true
 										anchors.left: parent.left
 										anchors.right: parent.right
 										anchors.top: parent.top
@@ -8164,6 +8646,69 @@ ApplicationWindow {
 									if (item)
 										item.suspendRichResourcesForScroll()
 								}
+								function admitStationaryThumbWarm(pressEpoch,
+										dwellGeneration) {
+									if (!stationaryThumbWarmEligible
+											|| !stationaryThumbWarmPinned
+											|| Number(stationaryThumbWarmPin.pressEpoch)
+												!== Number(pressEpoch)
+											|| Number(stationaryThumbWarmPin.dwellGeneration)
+												!== Number(dwellGeneration)
+											|| !stationaryThumbWarmOwned)
+										return false
+									if (item)
+										return item.admitStationaryThumbWarm(
+											pressEpoch, dwellGeneration)
+									return active
+								}
+								function stationaryThumbWouldBeOuterHeight() {
+									if (presentationHeightCommittedHeight > 0)
+										return presentationHeightCommittedHeight
+									return Math.max(timeline.deferredMessageRowHeight,
+										Number(deferredPresentationHeight || 0),
+										item ? Number(item.lightweightMessageRowHeight || 0) : 0)
+								}
+								function stationaryThumbWouldBeProbeHeight() {
+									return presentationHeightCommittedHeight > 0
+										? presentationHeightCommittedHeight
+										: Number(viewportProbeHeight || 0)
+								}
+								function refreshStationaryThumbWarmState() {
+									if (!stationaryThumbWarmPinned)
+										return
+									timeline.updateStationaryThumbWarmPin(stableId,
+										paintedSummary, paintedSurface,
+										paintedLoading, paintedTerminal)
+									if (!inVisibleViewport && paintedTerminal) {
+										timeline.clearEqualStationaryThumbWarmTerminal(stableId,
+											stationaryThumbWouldBeOuterHeight(),
+											stationaryThumbWouldBeProbeHeight(), false, true)
+										return
+									}
+									if (!stationaryThumbWarmOwned)
+										return
+									if (paintedTerminal)
+										timeline.finishStationaryThumbWarm(stableId, "terminal")
+									else if (paintedSurface)
+										timeline.finishStationaryThumbWarm(stableId, "painted")
+								}
+								onStationaryThumbWarmOwnedChanged: {
+									if (stationaryThumbWarmOwned)
+										admitStationaryThumbWarm(
+											Number(stationaryThumbWarmPin.pressEpoch),
+											Number(stationaryThumbWarmPin.dwellGeneration))
+									refreshStationaryThumbWarmState()
+								}
+								onStationaryThumbWarmPinnedChanged: {
+									if (!stationaryThumbWarmPinned)
+										schedulePresentationHeightObservation()
+									refreshStationaryThumbWarmState()
+								}
+								onPaintedSummaryChanged: refreshStationaryThumbWarmState()
+								onPaintedSurfaceChanged: refreshStationaryThumbWarmState()
+								onPaintedLoadingChanged: refreshStationaryThumbWarmState()
+								onPaintedTerminalChanged: refreshStationaryThumbWarmState()
+								onInVisibleViewportChanged: refreshStationaryThumbWarmState()
 								function cancelNearViewportPrefetchForScroll() {
 									const ownedStableId = resumeOwnedStableId
 									resumeRequested = false
@@ -8363,10 +8908,15 @@ ApplicationWindow {
 										reevaluatePresentationHeightIdentity()
 									if (identityChanged)
 										resetViewportProbeHeight()
-									if (item)
+									if (item) {
 										schedulePresentationHeightObservation()
-									else
+										if (stationaryThumbWarmOwned)
+											admitStationaryThumbWarm(
+												Number(stationaryThumbWarmPin.pressEpoch),
+												Number(stationaryThumbWarmPin.dwellGeneration))
+									} else
 										stopPresentationHeightObservation()
+									refreshStationaryThumbWarmState()
 								}
 
 								sourceComponent: Component {
@@ -8813,6 +9363,8 @@ ApplicationWindow {
 							asyncMessageDelegate.inVisibleViewport
 						readonly property bool richContentViewportEligible:
 							asyncMessageDelegate.richContentViewportEligible
+						readonly property bool stationaryThumbWarmOwned:
+							asyncMessageDelegate.stationaryThumbWarmOwned
 						property bool richResourcesActive: false
 						onRichResourcesActiveChanged: {
 							const retainedId = String(stableId || "")
@@ -8975,6 +9527,22 @@ ApplicationWindow {
 								timeline.scheduleRichContentResume()
 							return (logEntry || messageRowMaterialized)
 								&& previewAdmissionAccepted
+						}
+						function admitStationaryThumbWarm(pressEpoch, dwellGeneration) {
+							const pin = asyncMessageDelegate.stationaryThumbWarmPin
+							if (!stationaryThumbWarmOwned || !pin
+									|| Number(pin.pressEpoch) !== Number(pressEpoch)
+									|| Number(pin.dwellGeneration) !== Number(dwellGeneration)
+									|| accessibilityPooled || !inVisibleViewport
+									|| !hasPreviewContent || previewNeedsHydration
+									|| previewTerminalUnavailable)
+								return false
+							// This path intentionally bypasses only the row/static-still
+							// suspension. Provider resources, animation and playback remain
+							// owned by richResourcesActive, which stays false during scroll.
+							messageRowMaterialized = true
+							previewMaterializationAdmitted = true
+							return true
 						}
 						Timer {
 							id: previewLoaderIncubationWatchdogTimer
@@ -9248,6 +9816,26 @@ ApplicationWindow {
 							bodySegments || [], preview || ({}))
 						readonly property bool previewOnlyPaintPending: previewPaintPending
 							&& previewSourceOnly && !hasAttachmentContent && !hasReplyContent
+						readonly property bool paintedSummary: !accessibilityPooled
+							&& (messageRowMaterialized || asyncMessageDelegate.active)
+						readonly property bool paintedLoading: hasPreviewContent
+							&& !previewTerminalUnavailable
+							&& (!previewPresentationLoader
+								|| previewPresentationLoader.status !== Loader.Ready
+								|| !previewPresentationLoader.item
+								|| previewPresentationLoader.item.paintedLoading === true)
+						readonly property bool paintedTerminal: hasPreviewContent
+							&& (previewTerminalUnavailable
+								|| (!!previewPresentationLoader
+									&& previewPresentationLoader.status === Loader.Ready
+									&& !!previewPresentationLoader.item
+									&& previewPresentationLoader.item.paintedTerminal === true))
+						readonly property bool paintedSurface: !hasPreviewContent
+							? messageRowReady
+							: !!previewPresentationLoader
+								&& previewPresentationLoader.status === Loader.Ready
+								&& !!previewPresentationLoader.item
+								&& previewPresentationLoader.item.paintedSurface === true
 						readonly property string previewOpenUrl: {
 							const value = preview || ({})
 							const candidates = [value.url, value.sourceUrl, value.embedUrl,
@@ -9944,9 +10532,10 @@ ApplicationWindow {
 									id: messagePreviewLoader
 									active: messageDelegate.hasPreviewContent
 										&& !messageDelegate.previewNeedsHydration
-										&& !messageDelegate.previewTerminalUnavailable
-										&& messageDelegate.previewMaterializationAdmitted
-										&& !messageDelegate.richLoaderSuspended
+									&& !messageDelegate.previewTerminalUnavailable
+									&& messageDelegate.previewMaterializationAdmitted
+									&& (!messageDelegate.richLoaderSuspended
+										|| messageDelegate.stationaryThumbWarmOwned)
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId,
 											messageDelegate.richContentViewportEligible)
@@ -10029,6 +10618,8 @@ ApplicationWindow {
 										? (messageDelegate.preview.url || messageDelegate.preview.embedUrl
 											|| messageDelegate.preview.mediaUrl || messageDelegate.preview.title || "") : "")
 									renderActive: messageDelegate.richResourcesActive
+									warmStaticActive:
+										messageDelegate.stationaryThumbWarmOwned
 									watchTogetherAvailable: !mediaSession.sharedAvailable
                                     onExternalOpenRequested: url => Qt.openUrlExternally(url)
 									onImageOpenRequested: (source, title) => root.openManagedPreviewImage(
