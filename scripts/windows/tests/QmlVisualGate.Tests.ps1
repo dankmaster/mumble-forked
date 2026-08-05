@@ -498,8 +498,16 @@ Describe "Qt Quick visual manifest validation" {
 		}
 		$controller | Should Match 'ComposerController \*composer = m_host->composerController\(\)'
 		$controller | Should Match 'chat->replaceMessages\(fixtureMessages\)'
-		$controller | Should Match 'm_host->chatModel\(\)->replaceMessages\(prependedMessages\)'
+		$controller | Should Match 'publishPersistentChatPrependVisualFixture'
+		$controller | Should Match 'prependPendingStarted'
+		$controller | Should Match 'prependPendingSettled'
+		$controller | Should Match 'frameSwappedSerial'
+		$controller | Should Match 'observedFrameSerial > prependStartFrameSerial'
+		$controller | Should Match 'observedFrameSerial > prependFirstCommittedFrameSerial'
+		$controller | Should Not Match 'm_host->chatModel\(\)->replaceMessages\(prependedMessages\)'
 		$controller | Should Match 'anchorAfterRow == anchorBeforeRow \+ VisualHistoryPrependMessageCount'
+		$controller | Should Match 'exactPrependMessageOrder'
+		$controller | Should Match 'visualHistoryMessageID\(fixtureGeneration, expectedSequence\)'
 		$controller | Should Match 'visualFixtureSurfaceVariant'
 		$controller | Should Match 'QStringLiteral\("chat_fixture_state"\)'
 		$worker | Should Match 'requiredChatStateProperties'
@@ -507,7 +515,14 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'composer_upload_progress_percent'
 		$worker | Should Match 'anchor_before_row\s*-ne\s*11'
 		$worker | Should Match 'anchor_after_row\s*-ne\s*17'
-		$worker | Should Match 'reportedOffsetDelta\s*-gt\s*1\.0'
+		$worker | Should Match 'reportedOffsetDelta\s*-gt\s*0\.5'
+		$worker | Should Match 'prepend_stable_duration_ms\s*-gt\s*300\.0'
+		$worker | Should Match 'prepend_history_loader_height'
+		$worker | Should Match 'prepend_composer_contiguous'
+		$worker | Should Match 'prepend_exact_message_order'
+		$worker | Should Match 'prepend_first_committed_frame_serial\s*-le'
+		$worker | Should Match 'prepend_second_committed_frame_serial\s*-le'
+		$worker | Should Match 'prepend_matching_committed_frame_count\s*-lt\s*2'
 		$worker | Should Match 'did not execute a stable six-row production prepend'
 		$worker | Should Match '"chat-history-prepend-anchor"\s*\{\s*@\('
 		$worker | Should Match 'command\s*=\s*"qmlTimelinePresentationState"'
@@ -664,9 +679,10 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match '\$expectedFixtureScopeToken\s*=\s*"0:\$\(\[long\]1000000\s*\+\s*\[long\]\$applied\.generation\)"'
 		$worker | Should Match '\$preApplyTimelineGeneration\s*=\s*\[long\]\$applied\.pre_apply_presentation_generation'
 		$worker | Should Match '\$expectedFixtureGeneration\s*=\s*\[long\]\$preApplyTimelineGeneration\s*\+\s*1'
-		$worker | Should Match '\$expectedIdSet\.Contains\(\$visibleId\)'
+		$worker | Should Match '\$expectedIndex\s*=\s*\[Array\]::IndexOf\(\$stableIds,\s*\$visibleId\)'
+		$worker | Should Match '\$modelIndex\s*-ge\s*0\s*-and\s*\$modelIndex\s*-ne\s*\$expectedIndex'
 		$worker | Should Match '\$seenIds\.Add\(\$visibleId\)'
-		$worker | Should Match '\$expectedFixtureStableIdPrefix\s*=\s*"fixture:\$\(\[long\]\$applied\.generation\):"'
+		$worker | Should Match '\$expectedFixtureStableIdPrefix\s*=\s*\[string\]\$applied\.fixture_message_id_prefix'
 	}
 
 	It "rejects stale or internally inconsistent timeline identity" -TestCases @(
@@ -707,11 +723,16 @@ Describe "Qt Quick visual manifest validation" {
 			Ids = @("fixture:7:1", "fixture:7:1"); Timeline = [pscustomobject]@{
 				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
 					[pscustomobject]@{ id = "fixture:7:1"; modelIndex = 0 }) } }
+		@{ Name = "reversed numeric prepend"; Expected = $false; Count = 3; Scope = "0:1000007"; Generation = 12
+			Ids = @("3910000001", "3910000002", "3910000003"); Prefix = ""; Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "3910000003"; modelIndex = 0 },
+					[pscustomobject]@{ id = "3910000002"; modelIndex = 1 }) } }
 		@{ Name = "empty exact"; Expected = $true; Count = 0; Scope = "0:1000007"; Generation = 12
 			Ids = @(); Timeline = [pscustomobject]@{
 				scopeToken = "0:1000007"; generation = 12; visibleRows = @() } }
 	) {
-		param($Name, $Expected, $Count, $Scope, $Generation, $Ids, $Timeline)
+		param($Name, $Expected, $Count, $Scope, $Generation, $Ids, $Timeline, $Prefix = "fixture:7:")
 		$tokens = $null
 		$parseErrors = $null
 		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -725,23 +746,102 @@ Describe "Qt Quick visual manifest validation" {
 		$functionAst | Should Not BeNullOrEmpty
 		Invoke-Expression $functionAst.Extent.Text
 		(Test-QmlTimelineFixtureIdentity -Timeline $Timeline -ExpectedScopeToken $Scope `
-			-ExpectedGeneration $Generation -ExpectedStableIdPrefix "fixture:7:" -ExpectedStableIds $Ids `
+			-ExpectedGeneration $Generation -ExpectedStableIdPrefix $Prefix -ExpectedStableIds $Ids `
 			-ExpectedMessageCount $Count) | Should Be $Expected
 	}
 
-	It "records and gates cached presentation timing without claiming uncached coverage" {
+	It "records and gates distinct presentation milestones without treating fixture RPC time as product latency" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		$worker | Should Match '\$applyTimer\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)'
-		$worker | Should Match '\$timelinePresentationBudgetMs\s*=\s*300\.0'
+		$worker | Should Match 'if \(\$ExtendedPresentationBudgetExercised\) \{ 1000\.0 \} else \{ 300\.0 \}'
+		$worker | Should Match '\$extendedPresentationBudgetExercised\s*=\s*\$false'
+		$worker | Should Not Match '\$isHeavyConversation'
 		$worker | Should Match '\$applyRpcBudgetMs\s*=\s*1000\.0'
-		$worker | Should Match '\$applyDurationMs\s*-gt\s*\$applyRpcBudgetMs'
-		$worker | Should Match 'visibleFrameDurationMs\s*-gt\s*\$timelinePresentationBudgetMs'
+		$worker | Should Not Match '\$applyDurationMs\s*-gt\s*\$applyRpcBudgetMs'
+		$worker | Should Match 'function Get-QmlPresentationBudgetFailures'
+		$worker | Should Match 'loadingFrameDurationMs\s*-gt\s*100\.0'
+		$worker | Should Match 'composerInteractiveDurationMs\s*-gt\s*500\.0'
+		$worker | Should Match 'PrependStableDurationMs\s*-gt\s*300\.0'
+		$worker | Should Match 'firstVisibleStableRowsDurationMs\s*-gt\s*\$visibleRowsBudgetMs'
 		$worker | Should Match 'cached_presentation_budget_ms'
 		$worker | Should Match 'uncached_presentation_budget_ms\s*=\s*1000\.0'
-		$worker | Should Match 'uncached_presentation_exercised\s*=\s*\$false'
+		$worker | Should Match 'uncached_presentation_exercised\s*=\s*\$extendedPresentationBudgetExercised'
+		$worker | Should Match 'provider_result_transition_exercised'
+		$worker | Should Match '\$expectsProviderResultReceipt\s*=\s*\$providerResultTransitionExercised'
+		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
+		$controller | Should Match 'QStringLiteral\("provider_result_transition_exercised"\), false'
+		$controller | Should Not Match 'QDateTime::currentMSecsSinceEpoch\(\)'
+		$controller | Should Not Match 'QStringLiteral\("providerResultSerial"\)'
 		$worker | Should Match 'visual_coherence_passed\s*=\s*\$true'
 		$worker | Should Match 'function Write-QmlPresentationTimingDiagnostic'
 		$worker | Should Match '\.presentation-timing\.json'
+	}
+
+	It "classifies exact readiness budget boundaries and named failures" {
+		$tokens = $null
+		$parseErrors = $null
+		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+			"$PSScriptRoot\..\invoke-qml-visual-gate.ps1", [ref]$tokens, [ref]$parseErrors)
+		$parseErrors.Count | Should Be 0
+		$functionAst = $ast.Find({
+			param($node)
+			$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+				$node.Name -eq "Get-QmlPresentationBudgetFailures"
+		}, $true)
+		$functionAst | Should Not BeNullOrEmpty
+		Invoke-Expression $functionAst.Extent.Text
+		$timeline = [pscustomobject]@{
+			startedAt = 1000.0; dataReadyAt = 1020.0; stableReadyAt = 1050.0
+			firstStableFrameCommittedAt = 1066.0
+			secondMatchingStableFrameCommittedAt = 1082.0
+			firstVisibleStableRowsCommittedAt = 1100.0
+			loadingFrameCommitted = $true; loadingFrameDurationMs = 100.0
+			stablePresentationReady = $true; stableReadyDurationMs = 300.0
+			firstVisibleStableRowsCommitted = $true; firstVisibleStableRowsDurationMs = 300.0
+			composerInteractive = $true; composerInteractiveDurationMs = 500.0
+			providerResultAppliedAt = 0.0; providerResultVisiblePaintAt = 0.0
+			providerResultToVisiblePaintMs = 0.0
+		}
+		@(Get-QmlPresentationBudgetFailures -Timeline $timeline -ExtendedPresentationBudgetExercised $false `
+			-RequireComposer $true -PrependStableDurationMs 300.0).Count | Should Be 0
+
+		$timeline.stableReadyDurationMs = 301.0
+		$timeline.firstVisibleStableRowsDurationMs = 301.0
+		$failures = @(Get-QmlPresentationBudgetFailures -Timeline $timeline `
+			-ExtendedPresentationBudgetExercised $false -RequireComposer $true)
+		($failures -contains "stable_presentation") | Should Be $true
+		($failures -contains "first_visible_stable_rows") | Should Be $true
+		$timeline.stableReadyDurationMs = 300.0
+		$timeline.firstVisibleStableRowsDurationMs = 300.0
+		$timeline.loadingFrameDurationMs = 101.0
+		$failures = @(Get-QmlPresentationBudgetFailures -Timeline $timeline `
+			-ExtendedPresentationBudgetExercised $false `
+			-RequireComposer $true -PrependStableDurationMs 300.0)
+		($failures -contains "loading_feedback") | Should Be $true
+		$timeline.loadingFrameDurationMs = 100.0
+		$timeline.stableReadyDurationMs = 1000.0
+		$timeline.firstVisibleStableRowsDurationMs = 1000.0
+		@(Get-QmlPresentationBudgetFailures -Timeline $timeline `
+			-ExtendedPresentationBudgetExercised $true -RequireComposer $true).Count | Should Be 0
+		$timeline.stableReadyDurationMs = 1001.0
+		$timeline.firstVisibleStableRowsDurationMs = 1001.0
+		$failures = @(Get-QmlPresentationBudgetFailures -Timeline $timeline `
+			-ExtendedPresentationBudgetExercised $true `
+			-RequireComposer $true -PrependStableDurationMs 301.0)
+		($failures -contains "stable_presentation") | Should Be $true
+		($failures -contains "first_visible_stable_rows") | Should Be $true
+		($failures -contains "stable_prepend") | Should Be $true
+		$timeline.stableReadyDurationMs = 300.0
+		$timeline.firstVisibleStableRowsDurationMs = 300.0
+		$timeline.composerInteractiveDurationMs = 501.0
+		$timeline.providerResultAppliedAt = 1200.0
+		$timeline.providerResultVisiblePaintAt = 1199.0
+		$timeline.providerResultToVisiblePaintMs = -1.0
+		$failures = @(Get-QmlPresentationBudgetFailures -Timeline $timeline `
+			-ExtendedPresentationBudgetExercised $false `
+			-RequireComposer $true)
+		($failures -contains "composer_interactive") | Should Be $true
+		($failures -contains "provider_result_visible_paint") | Should Be $true
 	}
 
 	It "covers model-backed profile text-room and chat-background menus" {

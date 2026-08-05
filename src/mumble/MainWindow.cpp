@@ -30681,6 +30681,63 @@ void MainWindow::publishPersistentChatSnapshot() {
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	const PersistentChatScopeStateSnapshot snapshot = m_persistentChatController->activeSnapshot();
+	publishPersistentChatSnapshotState(target, snapshot, true);
+}
+
+bool MainWindow::publishPersistentChatPrependVisualFixture(
+	MumbleProto::ChatScope scope, const unsigned int scopeID,
+	const std::vector< MumbleProto::ChatMessage > &existingMessages,
+	const std::vector< MumbleProto::ChatMessage > &olderMessages) {
+	if (!m_qmlShellHost || !m_qmlShellHost->window() || !m_qmlShellHost->visualFixtureOverrideActive()
+		|| existingMessages.empty() || olderMessages.empty()
+		|| m_qmlShellHost->chatModel()->rowCount() != static_cast< int >(existingMessages.size())
+		|| m_qmlShellHost->chatModel()->prependPending()
+		|| m_qmlShellHost->activeScopeController()->scopeToken()
+			!= modernShellScopeToken(static_cast< int >(scope), scopeID)) {
+		return false;
+	}
+
+	// Prime the exact publisher ownership that the already-presented fixture rows
+	// represent. The next snapshot then enters the same prepend decision, DTO build,
+	// queue, and drain used by a real ChatHistoryResponse without publishing the
+	// disconnected process' live scope over the fixture-owned conversation chrome.
+	m_persistentChatMessages.assign(existingMessages.cbegin(), existingMessages.cend());
+	m_persistentChatMessageIndexByKey.clear();
+	m_persistentChatMessageIndexValid = false;
+	m_visiblePersistentChatScope = scope;
+	m_visiblePersistentChatScopeID = scopeID;
+	if (m_visiblePersistentChatMessagesRevision == 0) {
+		m_visiblePersistentChatMessagesRevision = 1;
+	}
+	m_visiblePersistentChatHasMore = true;
+	m_visiblePersistentChatLoadingState = PersistentChatLoadingState::Idle;
+	m_persistentChatLoadingOlder = false;
+
+	PersistentChatScopeStateSnapshot snapshot;
+	snapshot.key = PersistentChatScopeKey::fromScope(scope, scopeID);
+	snapshot.messages.reserve(static_cast< qsizetype >(olderMessages.size() + existingMessages.size()));
+	for (const MumbleProto::ChatMessage &message : olderMessages) snapshot.messages.push_back(message);
+	for (const MumbleProto::ChatMessage &message : existingMessages) snapshot.messages.push_back(message);
+	snapshot.messagesRevision = m_visiblePersistentChatMessagesRevision + 1;
+	snapshot.prependedMessageCount = static_cast< qsizetype >(olderMessages.size());
+	snapshot.initialLoaded = true;
+	snapshot.hasOlder = true;
+	snapshot.oldestLoadedMessageId = olderMessages.front().message_id();
+	snapshot.loadingState = PersistentChatLoadingState::Idle;
+
+	PersistentChatTarget target;
+	target.valid = true;
+	target.readOnly = true;
+	target.scope = scope;
+	target.scopeID = scopeID;
+	target.label = tr("History fixture");
+	publishPersistentChatSnapshotState(target, snapshot, false);
+	return m_qmlShellHost->chatModel()->prependPending();
+}
+
+void MainWindow::publishPersistentChatSnapshotState(
+	const PersistentChatTarget &target, const PersistentChatScopeStateSnapshot &snapshot,
+	const bool publishActiveScopeState) {
 	const bool targetUsesPersistentHistory =
 		target.valid && !target.serverLog && !target.directMessage && !target.ephemeralTextPath;
 	// Selection changes and network replies are independent event streams. Never let a late reply for the
@@ -30717,7 +30774,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 		m_visiblePersistentChatHasMore           = snapshot.hasOlder;
 		m_visiblePersistentChatLoadingState      = snapshot.loadingState;
 		m_persistentChatLoadingOlder             = snapshot.loadingState == PersistentChatLoadingState::Older;
-		publishQmlActiveScopeState();
+		if (publishActiveScopeState) publishQmlActiveScopeState();
 		mumble::chatperf::recordValue("qml.chat.snapshot_unchanged.skipped", 1);
 		return;
 	}
@@ -30813,7 +30870,7 @@ void MainWindow::publishPersistentChatSnapshot() {
 	m_visiblePersistentChatLoadingState      = snapshot.loadingState;
 	m_persistentChatLoadingOlder             = snapshot.loadingState == PersistentChatLoadingState::Older;
 
-	publishQmlActiveScopeState();
+	if (publishActiveScopeState) publishQmlActiveScopeState();
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
 	if (!targetUsesPersistentHistory) return;
 

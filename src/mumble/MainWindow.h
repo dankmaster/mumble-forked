@@ -66,6 +66,7 @@ class PersistentChatController;
 class ChatAttachmentUploader;
 class ModernDialogController;
 class QmlShellHost;
+class QmlVisualFixtureController;
 class QmlSelectionState;
 class PluginCancellationGate;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -171,6 +172,7 @@ public:
 
 class MainWindow : public QObject {
 	friend class UserModel;
+	friend class QmlVisualFixtureController;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	friend class ModernUiAutomationServer;
 #	endif
@@ -329,6 +331,10 @@ public:
 	void positionServerNavigatorUserMenu();
 	void initializePersistentChatBackend();
 	void publishPersistentChatSnapshot();
+	bool publishPersistentChatPrependVisualFixture(
+		MumbleProto::ChatScope scope, unsigned int scopeID,
+		const std::vector< MumbleProto::ChatMessage > &existingMessages,
+		const std::vector< MumbleProto::ChatMessage > &olderMessages);
 	void syncPersistentChatGatewayHandler();
 	void warmupPersistentChatHistory();
 	QList< PersistentChatScopeKey > persistentChatWarmupScopes() const;
@@ -347,6 +353,9 @@ public:
 		QString description;
 		QString statusMessage;
 	};
+	void publishPersistentChatSnapshotState(
+		const PersistentChatTarget &target, const PersistentChatScopeStateSnapshot &snapshot,
+		bool publishActiveScopeState);
 
 	struct PersistentTextChannel {
 		unsigned int textChannelID = 0;

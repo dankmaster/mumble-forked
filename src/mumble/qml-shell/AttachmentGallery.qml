@@ -8,6 +8,7 @@ Item {
 
 	required property var attachments
 	property bool animationsEnabled: true
+	property bool hoverEffectsEnabled: true
 	// Pooled chat delegates keep their geometry so ListView scroll anchoring stays
 	// stable, but they must release decoded image resources until reused.
 	property bool resourceActive: true
@@ -253,18 +254,29 @@ Item {
 				Item {
 					objectName: "attachmentBusyIndicator_" + attachmentTile.stableId
                     anchors.centerIn: parent
+					z: 4
 					readonly property bool running: attachmentTile.previewLoading
 						|| (attachmentTile.imageAttachment && attachmentImage.status === Image.Loading)
-					implicitWidth: loadingIndicatorRow.implicitWidth
-					implicitHeight: loadingIndicatorRow.implicitHeight
+					implicitWidth: loadingIndicatorRow.implicitWidth + Theme.space2 * 2
+					implicitHeight: loadingIndicatorRow.implicitHeight + Theme.space1 * 2
 					width: implicitWidth
 					height: implicitHeight
                     visible: running
 					Accessible.name: qsTr("Loading %1").arg(attachmentTile.label)
 					Accessible.ignored: !attachmentTile.accessibilityExposed
 
+					Rectangle {
+						objectName: "attachmentLoadingSurface_" + attachmentTile.stableId
+						anchors.fill: parent
+						radius: Theme.innerRadius
+						color: Theme.panel
+						border.width: 1
+						border.color: Theme.surfaceBorder
+					}
+
 					Row {
 						id: loadingIndicatorRow
+						anchors.centerIn: parent
 						spacing: Theme.space2
 
 						Rectangle {
@@ -279,7 +291,7 @@ Item {
 							objectName: "attachmentLoadingLabel_" + attachmentTile.stableId
 							textFormat: Text.PlainText
 							text: qsTr("Loading preview")
-							color: Theme.textMuted
+							color: Theme.textStrong
 							font.pixelSize: Theme.fontLabel
 							Accessible.ignored: !attachmentTile.accessibilityExposed
 						}
@@ -391,7 +403,7 @@ Item {
 					color: !attachmentAction.enabled
 						? Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.68)
 						: attachmentAction.down ? Theme.accentSubtle
-						: attachmentAction.hovered
+						: root.hoverEffectsEnabled && attachmentAction.hovered
 							? Qt.rgba(Theme.surfaceHover.r, Theme.surfaceHover.g, Theme.surfaceHover.b, 0.32)
 							: "transparent"
 					Behavior on color { ColorAnimation { duration: Theme.motionFast } }
@@ -401,7 +413,7 @@ Item {
                     id: attachmentAction
 					objectName: "attachmentAction_" + attachmentTile.stableId
                     anchors.fill: parent
-                    hoverEnabled: true
+                    hoverEnabled: root.hoverEffectsEnabled
 					enabled: attachmentTile.primaryActionAvailable && (attachmentTile.modelData.enabled === undefined
 						? !attachmentTile.previewLoading
 						: !!attachmentTile.modelData.enabled && !attachmentTile.previewLoading)
@@ -416,7 +428,8 @@ Item {
 						.arg(attachmentTile.index + 1).arg(root.visibleAttachments.length)
 					Accessible.ignored: !attachmentTile.accessibilityExposed
 					activeFocusOnTab: attachmentTile.accessibilityExposed
-					ToolTip.visible: hovered && attachmentTile.accessibilityExposed
+					ToolTip.visible: root.hoverEffectsEnabled && hovered
+						&& attachmentTile.accessibilityExposed
 					ToolTip.text: qsTr("%1 %2").arg(actionVerb).arg(attachmentTile.label)
                     onClicked: root.attachmentRequested(attachmentTile.modelData)
                 }
@@ -438,7 +451,9 @@ Item {
 					Accessible.name: qsTr("Save original %1").arg(attachmentTile.label)
 					Accessible.ignored: !attachmentTile.accessibilityExposed
 					activeFocusOnTab: attachmentTile.accessibilityExposed
-					ToolTip.visible: hovered && attachmentTile.accessibilityExposed
+					hoverEnabled: root.hoverEffectsEnabled
+					ToolTip.visible: root.hoverEffectsEnabled && hovered
+						&& attachmentTile.accessibilityExposed
 					ToolTip.text: text
 					onClicked: root.attachmentDownloadRequested(attachmentTile.modelData)
 				}

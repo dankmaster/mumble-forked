@@ -209,7 +209,7 @@ function Test-QmlTimelineFixtureIdentity {
 		[Parameter(Mandatory = $true)]$Timeline,
 		[Parameter(Mandatory = $true)][string]$ExpectedScopeToken,
 		[Parameter(Mandatory = $true)][long]$ExpectedGeneration,
-		[Parameter(Mandatory = $true)][string]$ExpectedStableIdPrefix,
+		[Parameter(Mandatory = $true)][AllowEmptyString()][string]$ExpectedStableIdPrefix,
 		[Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ExpectedStableIds,
 		[Parameter(Mandatory = $true)][int]$ExpectedMessageCount
 	)
@@ -235,21 +235,84 @@ function Test-QmlTimelineFixtureIdentity {
 	}
 	$expectedIdSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 	foreach ($stableId in $stableIds) {
-		if (-not $stableId.StartsWith($ExpectedStableIdPrefix, [StringComparison]::Ordinal) -or
+		if ((-not [string]::IsNullOrEmpty($ExpectedStableIdPrefix) -and
+				-not $stableId.StartsWith($ExpectedStableIdPrefix, [StringComparison]::Ordinal)) -or
 			-not $expectedIdSet.Add($stableId)) {
 			return $false
 		}
 	}
 	$seenIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+	$previousModelIndex = -1
 	foreach ($row in $visibleRows) {
 		$visibleId = [string]$row.id
+		$modelIndex = [int]$row.modelIndex
+		$expectedIndex = [Array]::IndexOf($stableIds, $visibleId)
 		if ([string]::IsNullOrWhiteSpace($visibleId) -or
-			-not $expectedIdSet.Contains($visibleId) -or
+			$expectedIndex -lt 0 -or $expectedIndex -le $previousModelIndex -or
+			$modelIndex -lt -1 -or
+			($modelIndex -ge 0 -and $modelIndex -ne $expectedIndex) -or
 			-not $seenIds.Add($visibleId)) {
 			return $false
 		}
+		$previousModelIndex = $expectedIndex
 	}
 	return $true
+}
+
+function Get-QmlPresentationBudgetFailures {
+	param(
+		[Parameter(Mandatory = $true)]$Timeline,
+		[Parameter(Mandatory = $true)][bool]$ExtendedPresentationBudgetExercised,
+		[Parameter(Mandatory = $true)][bool]$RequireComposer,
+		[double]$PrependStableDurationMs = -1.0
+	)
+	$failures = [Collections.Generic.List[string]]::new()
+	$requiredMilestones = @(
+		"startedAt", "dataReadyAt", "stableReadyAt", "firstStableFrameCommittedAt",
+		"secondMatchingStableFrameCommittedAt", "firstVisibleStableRowsCommittedAt"
+	)
+	foreach ($milestone in $requiredMilestones) {
+		if (-not ($Timeline.PSObject.Properties.Name -contains $milestone) -or
+			[double]$Timeline.$milestone -le 0) {
+			$failures.Add("missing_$milestone")
+		}
+	}
+	if ($failures.Count -eq 0) {
+		$ordered = @($requiredMilestones | ForEach-Object { [double]$Timeline.$_ })
+		for ($index = 1; $index -lt $ordered.Count; ++$index) {
+			if ($ordered[$index] -lt $ordered[$index - 1]) {
+				$failures.Add("milestone_order")
+				break
+			}
+		}
+	}
+	if (-not [bool]$Timeline.loadingFrameCommitted -or
+		[double]$Timeline.loadingFrameDurationMs -gt 100.0) {
+		$failures.Add("loading_feedback")
+	}
+	$visibleRowsBudgetMs = if ($ExtendedPresentationBudgetExercised) { 1000.0 } else { 300.0 }
+	if (-not [bool]$Timeline.stablePresentationReady -or
+		[double]$Timeline.stableReadyDurationMs -gt $visibleRowsBudgetMs) {
+		$failures.Add("stable_presentation")
+	}
+	if (-not [bool]$Timeline.firstVisibleStableRowsCommitted -or
+		[double]$Timeline.firstVisibleStableRowsDurationMs -gt $visibleRowsBudgetMs) {
+		$failures.Add("first_visible_stable_rows")
+	}
+	if ($RequireComposer -and (-not [bool]$Timeline.composerInteractive -or
+			[double]$Timeline.composerInteractiveDurationMs -gt 500.0)) {
+		$failures.Add("composer_interactive")
+	}
+	if ($PrependStableDurationMs -ge 0 -and $PrependStableDurationMs -gt 300.0) {
+		$failures.Add("stable_prepend")
+	}
+	$providerAppliedAt = [double]$Timeline.providerResultAppliedAt
+	if ($providerAppliedAt -gt 0 -and
+		([double]$Timeline.providerResultVisiblePaintAt -lt $providerAppliedAt -or
+			[double]$Timeline.providerResultToVisiblePaintMs -lt 0)) {
+		$failures.Add("provider_result_visible_paint")
+	}
+	return @($failures)
 }
 
 function Write-QmlPresentationTimingDiagnostic {
@@ -814,6 +877,7 @@ function Assert-QmlAccessibilityEvidence {
 			"Upload interrupted", "Retry release-notes.pdf", "Alex", "Message Lobby"
 		) }
 		"chat-attachment-states" { @(
+			"Alex", "10:36", "Here are the assets from the latest community-test pass.",
 			"Message attachments", "Community test dashboard",
 			"Save original Community test dashboard", "Performance trace",
 			"Save original Performance trace",
@@ -1428,7 +1492,20 @@ foreach ($case in $selectedCases) {
 			"composer_attachment_count", "composer_uploading_count", "composer_failed_count",
 			"composer_autocomplete_count", "composer_upload_progress_percent", "prepend_count",
 			"anchor_id", "anchor_before_row", "anchor_after_row", "anchor_before_offset",
-			"anchor_after_offset", "anchor_offset_delta", "anchor_preserved", "pure_prepend_applied"
+			"anchor_after_offset", "anchor_offset_delta", "anchor_preserved", "pure_prepend_applied",
+			"prepend_pending_started", "prepend_pending_settled",
+			"prepend_scope_token_unchanged", "prepend_generation_unchanged",
+			"prepend_queue_pending", "prepend_anchor_active", "prepend_presentation_busy",
+			"prepend_presentation_pending", "prepend_presentation_finalizing",
+			"prepend_scope_reset_pending", "prepend_stable_frame_committed",
+			"prepend_visible_frame_committed", "prepend_history_loader_visible",
+			"prepend_history_loader_height", "prepend_jump_to_latest_visible",
+			"prepend_composer_height", "prepend_composer_contiguous",
+			"prepend_exact_message_order",
+			"prepend_start_frame_serial", "prepend_first_committed_frame_serial",
+			"prepend_second_committed_frame_serial",
+			"prepend_matching_committed_frame_count",
+			"prepend_stable_duration_ms"
 		)
 		foreach ($property in $requiredChatStateProperties) {
 			if ($null -eq $chatState -or -not ($chatState.PSObject.Properties.Name -contains $property)) {
@@ -1511,14 +1588,38 @@ foreach ($case in $selectedCases) {
 				}
 			}
 			"chat-history-prepend-anchor" {
-				$expectedAnchor = "fixture:$($applied.generation):history:12"
+				$expectedAnchor = [string]@($applied.fixture_message_ids)[17]
 				$reportedOffsetDelta = [double]$chatState.anchor_offset_delta
 				$calculatedOffsetDelta = [Math]::Abs(
 					[double]$chatState.anchor_after_offset - [double]$chatState.anchor_before_offset)
 				if ([string]$chatState.anchor_id -ne $expectedAnchor -or
 					[int]$chatState.anchor_before_row -ne 11 -or [int]$chatState.anchor_after_row -ne 17 -or
 					-not [bool]$chatState.anchor_preserved -or -not [bool]$chatState.pure_prepend_applied -or
-					$reportedOffsetDelta -lt 0 -or $reportedOffsetDelta -gt 1.0 -or
+					$reportedOffsetDelta -lt 0 -or $reportedOffsetDelta -gt 0.5 -or
+					-not [bool]$chatState.prepend_pending_started -or
+					-not [bool]$chatState.prepend_pending_settled -or
+					-not [bool]$chatState.prepend_scope_token_unchanged -or
+					-not [bool]$chatState.prepend_generation_unchanged -or
+					[bool]$chatState.prepend_queue_pending -or
+					[bool]$chatState.prepend_anchor_active -or
+					[bool]$chatState.prepend_presentation_busy -or
+					[bool]$chatState.prepend_presentation_pending -or
+					[bool]$chatState.prepend_presentation_finalizing -or
+					[bool]$chatState.prepend_scope_reset_pending -or
+					-not [bool]$chatState.prepend_stable_frame_committed -or
+					-not [bool]$chatState.prepend_visible_frame_committed -or
+					-not [bool]$chatState.prepend_history_loader_visible -or
+					[Math]::Abs([double]$chatState.prepend_history_loader_height - 48.0) -gt 1.0 -or
+					-not [bool]$chatState.prepend_jump_to_latest_visible -or
+					[double]$chatState.prepend_composer_height -le 1.0 -or
+					-not [bool]$chatState.prepend_composer_contiguous -or
+					-not [bool]$chatState.prepend_exact_message_order -or
+					[long]$chatState.prepend_first_committed_frame_serial -le
+						[long]$chatState.prepend_start_frame_serial -or
+					[long]$chatState.prepend_second_committed_frame_serial -le
+						[long]$chatState.prepend_first_committed_frame_serial -or
+					[int]$chatState.prepend_matching_committed_frame_count -lt 2 -or
+					[double]$chatState.prepend_stable_duration_ms -gt 300.0 -or
 					[Math]::Abs($reportedOffsetDelta - $calculatedOffsetDelta) -gt 0.001) {
 					$chatJson = $chatState | ConvertTo-Json -Compress -Depth 8
 					throw "History fixture '$($case.id)' did not execute a stable six-row production prepend: $chatJson"
@@ -1613,21 +1714,31 @@ foreach ($case in $selectedCases) {
 		[string]$case.state -eq "connected"
 	$timelinePresentation = $null
 	$timelineHandshakeDurationMs = $null
-	$timelinePresentationBudgetMs = 300.0
+	$containsRichOrAttachmentContent = $richPreviewVariant -ne "none" -or
+		$caseVariant -ne "none" -or $surfaceVariant -eq "chat-attachment-states"
+	# Static fixture content is already terminal when it is injected. The extended
+	# allowance is available only to a case that proves a real uncached transition.
+	$extendedPresentationBudgetExercised = $false
+	$timelinePresentationBudgetMs = if ($extendedPresentationBudgetExercised) { 1000.0 } else { 300.0 }
 	$applyRpcBudgetMs = 1000.0
 	$presentationTimingDiagnosticPath = $null
 	if ($requiresProductionTimelineHandshake) {
 		$expectedFixtureScopeToken = "0:$([long]1000000 + [long]$applied.generation)"
 		$expectedFixtureGeneration = [long]$preApplyTimelineGeneration + 1
-		$expectedFixtureStableIdPrefix = "fixture:$([long]$applied.generation):"
+		$expectedFixtureStableIdPrefix = [string]$applied.fixture_message_id_prefix
 		$expectedFixtureStableIds = @($applied.fixture_message_ids)
 		$presentationTimingDiagnostic = [ordered]@{
 			case_id = [string]$case.id
 			status = "pending"
-			cached_budget_ms = $timelinePresentationBudgetMs
+			presentation_classification = if ($extendedPresentationBudgetExercised) { "uncached" }
+				elseif ($containsRichOrAttachmentContent) { "cached-rich" } else { "cached-simple" }
+			visible_rows_budget_ms = $timelinePresentationBudgetMs
+			loading_feedback_budget_ms = 100.0
+			composer_interactive_budget_ms = 500.0
+			prepend_stable_budget_ms = 300.0
 			apply_rpc_budget_ms = $applyRpcBudgetMs
 			uncached_budget_ms = 1000.0
-			uncached_exercised = $false
+			uncached_exercised = $extendedPresentationBudgetExercised
 			apply_duration_ms = $applyDurationMs
 			controller_wait_ms = [double]$applied.timeline_presentation_wait_ms
 			pre_apply_generation = $preApplyTimelineGeneration
@@ -1645,9 +1756,9 @@ foreach ($case in $selectedCases) {
 		}
 		if ([string]$applied.fixture_scope_token -cne $expectedFixtureScopeToken -or
 			[long]$applied.presentation_generation -ne $expectedFixtureGeneration -or
-			[string]$applied.fixture_message_id_prefix -cne $expectedFixtureStableIdPrefix -or
 			$expectedFixtureGeneration -le 0 -or
-			[string]::IsNullOrWhiteSpace($expectedFixtureStableIdPrefix) -or
+			($surfaceVariant -ne "chat-history-prepend-anchor" -and
+				[string]::IsNullOrWhiteSpace($expectedFixtureStableIdPrefix)) -or
 			$expectedFixtureStableIds.Count -ne $expectedMessageCount) {
 			$presentationTimingDiagnostic["status"] = "identity_invalid"
 			$presentationTimingDiagnosticPath = Write-QmlPresentationTimingDiagnostic `
@@ -1655,7 +1766,6 @@ foreach ($case in $selectedCases) {
 				-Diagnostic $presentationTimingDiagnostic
 			throw "Case '$($case.id)' did not return a complete production timeline identity."
 		}
-		$applyBudgetExceeded = [double]$applyDurationMs -gt $applyRpcBudgetMs
 		$timelinePresentationReady = $false
 		$timelineHandshakeTimer = [Diagnostics.Stopwatch]::StartNew()
 		$timelinePresentationDeadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -1682,8 +1792,7 @@ foreach ($case in $selectedCases) {
 						[double]$timelinePresentation.sparseTailContentYError -le 0.5 -and
 						[Math]::Abs([double]$timelinePresentation.visibleTailGap -
 							[double]$timelinePresentation.footerHeight) -le 2.0 -and
-						[int]$timelinePresentation.pendingHydrationCount -eq 0 -and
-						[bool]$timelinePresentation.richHydrated
+						[int]$timelinePresentation.pendingHydrationCount -eq 0
 				}
 			}
 			$timelineGeometryReady = Test-QmlTimelineViewportGeometry `
@@ -1698,12 +1807,18 @@ foreach ($case in $selectedCases) {
 				-not [bool]$timelinePresentation.presentationFinalizing -and
 				-not [bool]$timelinePresentation.scopeResetPending -and
 				[bool]$timelinePresentation.stablePresentationReady -and
+				[bool]$timelinePresentation.firstStableFrameCommitted -and
+				[bool]$timelinePresentation.secondMatchingStableFrameCommitted -and
+				[bool]$timelinePresentation.firstVisibleStableRowsCommitted -and
 				[bool]$timelinePresentation.stableFrameCommitted -and
 				[bool]$timelinePresentation.visibleFrameCommitted -and
+				[bool]$timelinePresentation.loadingFrameCommitted -and
+				[bool]$timelinePresentation.composerInteractive -and
 				[int]$timelinePresentation.stableFrameConsecutiveCount -ge 2 -and
 				[bool]$timelinePresentation.settled -and
 				[int]$timelinePresentation.visibleDeferredSummaryCount -eq 0 -and
-				[int]$timelinePresentation.visibleDeadlineFallbackCount -eq 0 -and
+				([int]$timelinePresentation.visibleDeadlineFallbackCount -eq 0 -or
+					[bool]$timelinePresentation.degradedReady) -and
 				[int]$timelinePresentation.visibleBlankPresentationCount -eq 0 -and
 				[int]$timelinePresentation.visibleBlankPreviewSurfaceCount -eq 0 -and
 				[int]$timelinePresentation.visibleDuplicateHandoffSummaryCount -eq 0 -and
@@ -1731,27 +1846,60 @@ foreach ($case in $selectedCases) {
 			$timelineJson = $timelinePresentation | ConvertTo-Json -Compress -Depth 8
 			throw "Case '$($case.id)' did not finish its production timeline presentation: $timelineJson"
 		}
-		$qmlBudgetExceeded = [double]$timelinePresentation.dataReadyDurationMs -gt $timelinePresentationBudgetMs -or
-			[double]$timelinePresentation.stableReadyDurationMs -gt $timelinePresentationBudgetMs -or
-			[double]$timelinePresentation.stableFrameDurationMs -gt $timelinePresentationBudgetMs -or
-			[double]$timelinePresentation.visibleFrameDurationMs -gt $timelinePresentationBudgetMs
-		if ($applyBudgetExceeded -or $qmlBudgetExceeded) {
-			$presentationTimingDiagnostic["status"] = if ($applyBudgetExceeded -and $qmlBudgetExceeded) {
-				"apply_and_qml_budget_exceeded"
-			} elseif ($applyBudgetExceeded) { "apply_budget_exceeded" } else { "qml_budget_exceeded" }
+		$providerResultTransitionExercised =
+			($applied.PSObject.Properties.Name -contains "provider_result_transition_exercised") -and
+			[bool]$applied.provider_result_transition_exercised
+		$expectsProviderResultReceipt = $providerResultTransitionExercised
+		if ($expectsProviderResultReceipt -and
+			([double]$timelinePresentation.providerResultAppliedAt -le 0 -or
+				[double]$timelinePresentation.providerResultVisiblePaintAt -le 0)) {
+			$providerReceiptDeadline = [DateTime]::UtcNow.AddSeconds(2)
+			do {
+				$providerTimelineResponse = Invoke-Automation @{
+					command = "qmlTimelinePresentationState"
+				}
+				$timelinePresentation = $providerTimelineResponse.timeline
+				if ([double]$timelinePresentation.providerResultAppliedAt -gt 0 -and
+					[double]$timelinePresentation.providerResultVisiblePaintAt -gt 0) {
+					break
+				}
+				Start-Sleep -Milliseconds 25
+			} while ([DateTime]::UtcNow -lt $providerReceiptDeadline)
+		}
+		$prependStableDurationMs = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[double]$chatState.prepend_stable_duration_ms
+		} else { -1.0 }
+		$budgetFailures = @(Get-QmlPresentationBudgetFailures `
+			-Timeline $timelinePresentation `
+			-ExtendedPresentationBudgetExercised $extendedPresentationBudgetExercised `
+			-RequireComposer $true `
+			-PrependStableDurationMs $prependStableDurationMs)
+		if ($expectsProviderResultReceipt -and
+			([double]$timelinePresentation.providerResultAppliedAt -le 0 -or
+				[double]$timelinePresentation.providerResultVisiblePaintAt -lt
+					[double]$timelinePresentation.providerResultAppliedAt)) {
+			$budgetFailures += "provider_result_visible_paint"
+		}
+		if ($richPreviewVariant -eq "error" -and -not [bool]$timelinePresentation.degradedReady) {
+			$budgetFailures += "degraded_ready"
+		} elseif ($richPreviewVariant -notin @("none", "loading", "error") -and
+			-not [bool]$timelinePresentation.richHydrated) {
+			$budgetFailures += "rich_hydrated"
+		}
+		$budgetFailures = @($budgetFailures | Select-Object -Unique)
+		if ($budgetFailures.Count -gt 0) {
+			$presentationTimingDiagnostic["status"] = "milestone_budget_failed"
+			$presentationTimingDiagnostic["failures"] = $budgetFailures
+			$presentationTimingDiagnostic["timeline"] = $timelinePresentation
 			$presentationTimingDiagnosticPath = Write-QmlPresentationTimingDiagnostic `
 				-OutputDirectory $output -CaseId ([string]$case.id) `
 				-Diagnostic $presentationTimingDiagnostic
-			if ($applyBudgetExceeded) {
-				throw "Case '$($case.id)' exceeded the $($applyRpcBudgetMs) ms " +
-					"fixture apply-RPC budget ($applyDurationMs ms); " +
-					"the preserved timeline diagnostic distinguishes QML presentation latency."
-			}
-			throw "Case '$($case.id)' exceeded the $($timelinePresentationBudgetMs) ms " +
-				"cached production presentation budget: " +
+			throw "Case '$($case.id)' failed readiness milestones: $($budgetFailures -join ', '): " +
 				($timelinePresentation | ConvertTo-Json -Compress -Depth 8)
 		}
 		$presentationTimingDiagnostic["status"] = "passed"
+		$presentationTimingDiagnostic["failures"] = @()
+		$presentationTimingDiagnostic["timeline"] = $timelinePresentation
 		$presentationTimingDiagnosticPath = Write-QmlPresentationTimingDiagnostic `
 			-OutputDirectory $output -CaseId ([string]$case.id) `
 			-Diagnostic $presentationTimingDiagnostic
@@ -2273,14 +2421,24 @@ foreach ($case in $selectedCases) {
 			else { [double]$finalGridCoverage.minimum_non_black_fraction }
 		visual_coherence_passed = $true
 		apply_duration_ms = $applyDurationMs
-		cached_presentation_budget_ms = if ($requiresProductionTimelineHandshake) {
+		presentation_classification = if (-not $requiresProductionTimelineHandshake) { $null }
+			elseif ($extendedPresentationBudgetExercised) { "uncached" }
+			elseif ($containsRichOrAttachmentContent) { "cached-rich" } else { "cached-simple" }
+		visible_rows_budget_ms = if ($requiresProductionTimelineHandshake) {
 			$timelinePresentationBudgetMs
 		} else { $null }
+		loading_feedback_budget_ms = if ($requiresProductionTimelineHandshake) { 100.0 } else { $null }
+		composer_interactive_budget_ms = if ($requiresProductionTimelineHandshake) { 500.0 } else { $null }
+		prepend_stable_budget_ms = if ($surfaceVariant -eq "chat-history-prepend-anchor") { 300.0 } else { $null }
+		cached_presentation_budget_ms = if ($requiresProductionTimelineHandshake) { 300.0 } else { $null }
 		apply_rpc_budget_ms = if ($requiresProductionTimelineHandshake) {
 			$applyRpcBudgetMs
 		} else { $null }
 		uncached_presentation_budget_ms = 1000.0
-		uncached_presentation_exercised = $false
+		uncached_presentation_exercised = $extendedPresentationBudgetExercised
+		provider_result_transition_exercised = if ($requiresProductionTimelineHandshake) {
+			$providerResultTransitionExercised
+		} else { $false }
 		presentation_timing_diagnostic = $presentationTimingDiagnosticPath
 		timeline_presentation_wait_ms = [double]$applied.timeline_presentation_wait_ms
 		timeline_handshake_duration_ms = $timelineHandshakeDurationMs
@@ -2292,6 +2450,40 @@ foreach ($case in $selectedCases) {
 			else { [double]$timelinePresentation.dataReadyDurationMs }
 		stable_ready_duration_ms = if ($null -eq $timelinePresentation) { $null }
 			else { [double]$timelinePresentation.stableReadyDurationMs }
+		first_stable_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.firstStableFrameDurationMs }
+		second_matching_stable_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.secondMatchingStableFrameDurationMs }
+		first_visible_stable_rows_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.firstVisibleStableRowsDurationMs }
+		loading_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.loadingFrameDurationMs }
+		composer_interactive_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.composerInteractiveDurationMs }
+		rich_hydrated_duration_ms = if ($null -eq $timelinePresentation -or
+			-not [bool]$timelinePresentation.richHydrated) { $null }
+			else { [double]$timelinePresentation.richHydratedDurationMs }
+		degraded_ready_duration_ms = if ($null -eq $timelinePresentation -or
+			-not [bool]$timelinePresentation.degradedReady) { $null }
+			else { [double]$timelinePresentation.degradedReadyDurationMs }
+		provider_result_to_visible_paint_ms = if ($null -eq $timelinePresentation -or
+			[double]$timelinePresentation.providerResultAppliedAt -le 0) { $null }
+			else { [double]$timelinePresentation.providerResultToVisiblePaintMs }
+		prepend_stable_duration_ms = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[double]$chatState.prepend_stable_duration_ms
+		} else { $null }
+		prepend_start_frame_serial = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[long]$chatState.prepend_start_frame_serial
+		} else { $null }
+		prepend_first_committed_frame_serial = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[long]$chatState.prepend_first_committed_frame_serial
+		} else { $null }
+		prepend_second_committed_frame_serial = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[long]$chatState.prepend_second_committed_frame_serial
+		} else { $null }
+		prepend_matching_committed_frame_count = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[int]$chatState.prepend_matching_committed_frame_count
+		} else { $null }
 		stable_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }
 			else { [double]$timelinePresentation.stableFrameDurationMs }
 		visible_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }

@@ -7,6 +7,7 @@
 #include "GlobalShortcutTypes.h"
 #include "HostAddress.h"
 #include "Log.h"
+#include "MainWindow.h"
 #include "ModernConnectController.h"
 #include "ModernProductDialogStateFactory.h"
 #include "ModernRecorderController.h"
@@ -41,6 +42,7 @@
 
 #include <atomic>
 #include <memory>
+#include <vector>
 
 namespace {
 	QQuickItem *quickItemByObjectName(QQuickItem *root, const QString &objectName) {
@@ -348,8 +350,31 @@ namespace {
 		return 2;
 	}
 
+	unsigned int visualHistoryProtocolMessageID(const QString &generation, const int sequence) {
+		const quint64 generationValue = generation.toULongLong() % 1000000ULL;
+		return static_cast< unsigned int >(
+			100000000ULL + generationValue * 64ULL + static_cast< quint64 >(sequence + 16));
+	}
+
 	QString visualHistoryMessageID(const QString &generation, const int sequence) {
-		return QStringLiteral("fixture:%1:history:%2").arg(generation, QString::number(sequence));
+		return QString::number(visualHistoryProtocolMessageID(generation, sequence));
+	}
+
+	QString visualHistoryActor(const int sequence) {
+		if (sequence % 3 == 0) return QStringLiteral("Demo User");
+		return sequence % 2 == 0 ? QStringLiteral("Alex") : QStringLiteral("Kira");
+	}
+
+	QString visualHistoryBody(const int sequence) {
+		if (sequence == 12) {
+			return QStringLiteral("Anchor message 12 remains in place after older history loads.");
+		}
+		if (sequence <= 0) {
+			return QStringLiteral("Older history item %1 loaded incrementally.").arg(sequence + 7);
+		}
+		// Stay comfortably below every bubble-width threshold. This fixture
+		// verifies viewport anchoring, not text wrapping.
+		return QStringLiteral("History message %1.").arg(sequence);
 	}
 
 	QVariantList visualHistoryMessages(const QString &generation, const int firstSequence, const int count) {
@@ -358,28 +383,39 @@ namespace {
 		for (int offset = 0; offset < count; ++offset) {
 			const int sequence = firstSequence + offset;
 			const bool own = sequence % 3 == 0;
-			const QString actor = own ? QStringLiteral("Demo User")
-				: sequence % 2 == 0 ? QStringLiteral("Alex") : QStringLiteral("Kira");
-			QString body;
-			if (sequence == 12) {
-				body = QStringLiteral("Anchor message 12 remains in place after older history loads.");
-			} else if (sequence <= 0) {
-				body = QStringLiteral("Older history item %1 loaded incrementally.").arg(sequence + 7);
-			} else {
-				// Stay comfortably below every bubble-width threshold. This fixture
-				// verifies viewport anchoring, not text wrapping.
-				body = QStringLiteral("History message %1.").arg(sequence);
-			}
+			const QString actor = visualHistoryActor(sequence);
 			messages.push_back(QVariantMap {
-				{ QStringLiteral("messageKey"), visualHistoryMessageID(generation, sequence) },
+				{ QStringLiteral("messageId"), visualHistoryProtocolMessageID(generation, sequence) },
 				{ QStringLiteral("actor"), actor }, { QStringLiteral("actorKey"), actor.toLower() },
-				{ QStringLiteral("bodyText"), body },
+				{ QStringLiteral("bodyText"), visualHistoryBody(sequence) },
 				{ QStringLiteral("timeLabel"), QStringLiteral("09:%1").arg(qBound(0, sequence + 24, 59), 2, 10, QLatin1Char('0')) },
 				{ QStringLiteral("own"), own }, { QStringLiteral("canReply"), true },
 				{ QStringLiteral("canReact"), true }, { QStringLiteral("canDelete"), own },
 				{ QStringLiteral("preview"), QVariantMap() }, { QStringLiteral("attachments"), QVariantList() },
 				{ QStringLiteral("reactions"), QVariantList() }
 			});
+		}
+		return messages;
+	}
+
+	std::vector< MumbleProto::ChatMessage > visualHistoryProtocolMessages(
+		const QString &generation, const int firstSequence, const int count,
+		const unsigned int scopeID) {
+		std::vector< MumbleProto::ChatMessage > messages;
+		messages.reserve(static_cast< std::size_t >(count));
+		for (int offset = 0; offset < count; ++offset) {
+			const int sequence = firstSequence + offset;
+			MumbleProto::ChatMessage message;
+			message.set_scope(MumbleProto::Channel);
+			message.set_scope_id(scopeID);
+			message.set_thread_id(scopeID);
+			message.set_message_id(visualHistoryProtocolMessageID(generation, sequence));
+			message.set_actor_name(visualHistoryActor(sequence).toStdString());
+			message.set_message(visualHistoryBody(sequence).toStdString());
+			message.set_body_text(visualHistoryBody(sequence).toStdString());
+			message.set_body_format(MumbleProto::ChatBodyFormatPlainText);
+			message.set_created_at(1720000000ULL + static_cast< quint64 >(sequence + 16) * 60ULL);
+			messages.push_back(std::move(message));
 		}
 		return messages;
 	}
@@ -1665,7 +1701,30 @@ namespace {
 			{ QStringLiteral("anchor_after_offset"), 0.0 },
 			{ QStringLiteral("anchor_offset_delta"), 0.0 },
 			{ QStringLiteral("anchor_preserved"), false },
-			{ QStringLiteral("pure_prepend_applied"), false }
+			{ QStringLiteral("pure_prepend_applied"), false },
+			{ QStringLiteral("prepend_pending_started"), false },
+			{ QStringLiteral("prepend_pending_settled"), false },
+			{ QStringLiteral("prepend_scope_token_unchanged"), false },
+			{ QStringLiteral("prepend_generation_unchanged"), false },
+			{ QStringLiteral("prepend_queue_pending"), false },
+			{ QStringLiteral("prepend_anchor_active"), false },
+			{ QStringLiteral("prepend_presentation_busy"), false },
+			{ QStringLiteral("prepend_presentation_pending"), false },
+			{ QStringLiteral("prepend_presentation_finalizing"), false },
+			{ QStringLiteral("prepend_scope_reset_pending"), false },
+			{ QStringLiteral("prepend_stable_frame_committed"), false },
+			{ QStringLiteral("prepend_visible_frame_committed"), false },
+			{ QStringLiteral("prepend_history_loader_visible"), false },
+			{ QStringLiteral("prepend_history_loader_height"), 0.0 },
+			{ QStringLiteral("prepend_jump_to_latest_visible"), false },
+			{ QStringLiteral("prepend_composer_height"), 0.0 },
+			{ QStringLiteral("prepend_composer_contiguous"), false },
+			{ QStringLiteral("prepend_exact_message_order"), false },
+			{ QStringLiteral("prepend_start_frame_serial"), 0 },
+			{ QStringLiteral("prepend_first_committed_frame_serial"), 0 },
+			{ QStringLiteral("prepend_second_committed_frame_serial"), 0 },
+			{ QStringLiteral("prepend_matching_committed_frame_count"), 0 },
+			{ QStringLiteral("prepend_stable_duration_ms"), 0.0 }
 		};
 		if (!host || !isChatSurfaceVariant(surfaceVariant)) return state;
 
@@ -2040,18 +2099,32 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		return {};
 	}
 	const QString expectedFixtureScopeToken = m_host->activeScopeController()->scopeToken();
-	const QString expectedFixtureMessagePrefix = QStringLiteral("fixture:%1:").arg(m_generation + 1);
+	const QString fixtureGeneration = QString::number(m_generation + 1);
+	// The history fixture deliberately uses real uint32 protocol message IDs so
+	// MainWindow's production DTO builder and prepend queue own the inserted rows.
+	// Its exact stable-ID set remains authoritative; other fixtures retain their
+	// human-readable generation prefix as an additional stale-state guard.
+	const QString expectedFixtureMessagePrefix =
+		surfaceVariant == QLatin1String("chat-history-prepend-anchor")
+			? QString() : QStringLiteral("fixture:%1:").arg(m_generation + 1);
 	QVariantList expectedFixtureMessageIds;
-	expectedFixtureMessageIds.reserve(m_host->chatModel()->rowCount());
-	for (int row = 0; row < m_host->chatModel()->rowCount(); ++row) {
-		expectedFixtureMessageIds.push_back(
-			m_host->chatModel()->get(row).value(QStringLiteral("id")));
+	expectedFixtureMessageIds.reserve(initialExpectedMessageCount);
+	if (surfaceVariant == QLatin1String("chat-history-prepend-anchor")) {
+		for (int sequence = 1; sequence <= VisualHistoryInitialMessageCount; ++sequence) {
+			expectedFixtureMessageIds.push_back(visualHistoryMessageID(fixtureGeneration, sequence));
+		}
+	} else {
+		for (int row = 0; row < m_host->chatModel()->rowCount(); ++row) {
+			expectedFixtureMessageIds.push_back(
+				m_host->chatModel()->get(row).value(QStringLiteral("id")));
+		}
 	}
 	bool expectedFixtureMessageIdsValid = expectedFixtureMessageIds.size() == initialExpectedMessageCount;
 	QSet< QString > expectedFixtureMessageIdSet;
 	for (const QVariant &messageId : expectedFixtureMessageIds) {
 		const QString id = messageId.toString();
-		if (id.isEmpty() || !id.startsWith(expectedFixtureMessagePrefix)
+		if (id.isEmpty()
+			|| (!expectedFixtureMessagePrefix.isEmpty() && !id.startsWith(expectedFixtureMessagePrefix))
 			|| expectedFixtureMessageIdSet.contains(id)) {
 			expectedFixtureMessageIdsValid = false;
 		}
@@ -2220,7 +2293,6 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		}
 	}
 	if (surfaceVariant == QLatin1String("chat-history-prepend-anchor")) {
-		const QString fixtureGeneration = QString::number(m_generation + 1);
 		const QString anchorID = visualHistoryMessageID(fixtureGeneration, 12);
 		QVariant positioned;
 		if (!QMetaObject::invokeMethod(window, "positionVisualFixtureTimelineAt",
@@ -2259,22 +2331,70 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			return {};
 		}
 
-		QVariantList prependedMessages = visualHistoryMessages(
-			fixtureGeneration, 1 - VisualHistoryPrependMessageCount, VisualHistoryPrependMessageCount);
-		prependedMessages.append(m_host->chatModel()->messages());
-		{
-			struct MutationScope {
-				QmlShellHost *host;
-				explicit MutationScope(QmlShellHost *value) : host(value) {
-					host->setVisualFixtureMutationActive(true);
+		bool fixtureScopeIDValid = false;
+		const unsigned int fixtureScopeID =
+			expectedFixtureScopeToken.section(QLatin1Char(':'), 1).toUInt(&fixtureScopeIDValid);
+		MainWindow *mainWindow = qobject_cast< MainWindow * >(m_host->parent());
+		if (!fixtureScopeIDValid || fixtureScopeID == 0 || !mainWindow) {
+			if (error) *error = QStringLiteral("The history fixture could not resolve its MainWindow scope owner.");
+			return {};
+		}
+		const std::vector< MumbleProto::ChatMessage > existingMessages = visualHistoryProtocolMessages(
+			fixtureGeneration, 1, VisualHistoryInitialMessageCount, fixtureScopeID);
+		const std::vector< MumbleProto::ChatMessage > olderMessages = visualHistoryProtocolMessages(
+			fixtureGeneration, 1 - VisualHistoryPrependMessageCount,
+			VisualHistoryPrependMessageCount, fixtureScopeID);
+		bool prependPendingStarted = false;
+		bool prependPendingSettled = false;
+		QMetaObject::Connection prependPendingConnection = QObject::connect(
+			m_host->chatModel(), &ChatTimelineModel::prependPendingChanged, m_host,
+			[&]() {
+				if (m_host->chatModel()->prependPending()) {
+					prependPendingStarted = true;
+				} else if (prependPendingStarted) {
+					prependPendingSettled = true;
 				}
-				~MutationScope() { host->setVisualFixtureMutationActive(false); }
-			} mutationScope(m_host);
-			m_host->chatModel()->replaceMessages(prependedMessages);
+			});
+		struct PrependFixtureScope {
+			QmlShellHost *host;
+			QMetaObject::Connection connection;
+			explicit PrependFixtureScope(QmlShellHost *value, QMetaObject::Connection signalConnection)
+				: host(value), connection(signalConnection) {
+				host->setVisualFixtureMutationActive(true);
+			}
+			~PrependFixtureScope() {
+				QObject::disconnect(connection);
+				host->setVisualFixtureMutationActive(false);
+			}
+		} prependFixtureScope(m_host, prependPendingConnection);
+		const QString prependScopeToken = timelinePresentation.value(QStringLiteral("scopeToken")).toString();
+		const qulonglong prependPresentationGeneration =
+			timelinePresentation.value(QStringLiteral("generation")).toULongLong();
+		const qulonglong prependStartFrameSerial =
+			timelinePresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong();
+		QElapsedTimer prependTimer;
+		prependTimer.start();
+		const bool productionPrependQueued = mainWindow->publishPersistentChatPrependVisualFixture(
+			MumbleProto::Channel, fixtureScopeID, existingMessages, olderMessages);
+		if (!productionPrependQueued || !prependPendingStarted
+			|| !m_host->chatModel()->prependPending()) {
+			if (error) {
+				*error = QStringLiteral("The production history publisher did not synchronously enter its prepend queue.");
+			}
+			return {};
 		}
 
 		QVariantMap afterState;
+		QVariantMap afterPresentation;
 		bool anchorPreserved = false;
+		bool prependPresentationReady = false;
+		bool composerContiguous = false;
+		qulonglong prependFirstCommittedFrameSerial = 0;
+		qulonglong prependSecondCommittedFrameSerial = 0;
+		int prependMatchingCommittedFrameCount = 0;
+		QString prependFirstCommittedAnchorID;
+		double prependFirstCommittedAnchorOffset = 0.0;
+		double prependStableDurationMs = 0.0;
 		for (int attempt = 0; attempt < 12; ++attempt) {
 			QString frameError;
 			if (!waitForPresentedFrame(&frameError, presentationWindow)) {
@@ -2285,23 +2405,100 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				if (error) *error = QStringLiteral("The history fixture lost its production timeline state.");
 				return {};
 			}
+			QVariant presentationResult;
+			if (!QMetaObject::invokeMethod(window, "timelinePresentationState",
+					Q_RETURN_ARG(QVariant, presentationResult))) {
+				if (error) *error = QStringLiteral("The history fixture lost its presentation receipt.");
+				return {};
+			}
+			afterPresentation = presentationResult.toMap();
+			timelinePresentation = afterPresentation;
 			const double afterOffset = afterState.value(QStringLiteral("firstVisibleOffset")).toDouble();
 			anchorPreserved = afterState.value(QStringLiteral("firstVisibleStableId")).toString() == anchorID
-				&& qAbs(afterOffset - anchorBeforeOffset) <= 1.0;
-			if (anchorPreserved) break;
+				&& qAbs(afterOffset - anchorBeforeOffset) <= 0.5;
+			const double composerBoundary = afterPresentation.value(
+				QStringLiteral("jumpToLatestBottom")).toDouble()
+				+ afterPresentation.value(QStringLiteral("jumpToLatestBottomMargin")).toDouble();
+			composerContiguous = afterPresentation.value(QStringLiteral("composerHeight")).toDouble() > 1.0
+				&& qAbs(afterPresentation.value(QStringLiteral("composerTop")).toDouble()
+					- composerBoundary) <= 1.0;
+			const bool prependSurfaceReady = prependPendingStarted && prependPendingSettled
+				&& !m_host->chatModel()->prependPending()
+				&& afterPresentation.value(QStringLiteral("scopeToken")).toString() == prependScopeToken
+				&& afterPresentation.value(QStringLiteral("generation")).toULongLong()
+					== prependPresentationGeneration
+				&& !afterPresentation.value(QStringLiteral("prependQueuePending")).toBool()
+				&& !afterPresentation.value(QStringLiteral("prependAnchorActive")).toBool()
+				&& !afterPresentation.value(QStringLiteral("chatModelPresentationBusy")).toBool()
+				&& !afterPresentation.value(QStringLiteral("presentationPending")).toBool()
+				&& !afterPresentation.value(QStringLiteral("presentationFinalizing")).toBool()
+				&& !afterPresentation.value(QStringLiteral("scopeResetPending")).toBool()
+				&& afterPresentation.value(QStringLiteral("stableFrameCommitted")).toBool()
+				&& afterPresentation.value(QStringLiteral("visibleFrameCommitted")).toBool()
+				&& afterPresentation.value(QStringLiteral("settled")).toBool()
+				&& afterPresentation.value(QStringLiteral("visibleDeferredSummaryCount")).toInt() == 0
+				&& afterPresentation.value(QStringLiteral("visibleBlankPresentationCount")).toInt() == 0
+				&& afterPresentation.value(QStringLiteral("visiblePresentationHeightPendingCount")).toInt() == 0
+				&& afterPresentation.value(QStringLiteral("visiblePresentationHeightMismatchCount")).toInt() == 0
+				&& afterPresentation.value(QStringLiteral("historyLoaderVisible")).toBool()
+				&& qAbs(afterPresentation.value(QStringLiteral("historyLoaderHeight")).toDouble() - 48.0) <= 1.0
+				&& afterPresentation.value(QStringLiteral("jumpToLatestVisible")).toBool()
+				&& composerContiguous;
+			const qulonglong observedFrameSerial =
+				afterPresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong();
+			const QString observedAnchorID =
+				afterState.value(QStringLiteral("firstVisibleStableId")).toString();
+			const bool matchingCommittedGeometry = observedFrameSerial > prependStartFrameSerial
+				&& observedAnchorID == anchorID
+				&& qAbs(afterOffset - anchorBeforeOffset) <= 0.5;
+			if (prependSurfaceReady && matchingCommittedGeometry) {
+				if (prependFirstCommittedFrameSerial == 0) {
+					prependFirstCommittedFrameSerial = observedFrameSerial;
+					prependFirstCommittedAnchorID = observedAnchorID;
+					prependFirstCommittedAnchorOffset = afterOffset;
+					prependMatchingCommittedFrameCount = 1;
+				} else if (observedFrameSerial > prependFirstCommittedFrameSerial
+						&& prependFirstCommittedAnchorID == observedAnchorID
+						&& qAbs(afterOffset - prependFirstCommittedAnchorOffset) <= 0.5) {
+					prependSecondCommittedFrameSerial = observedFrameSerial;
+					prependMatchingCommittedFrameCount = 2;
+					prependStableDurationMs = static_cast< double >(prependTimer.elapsed());
+					prependPresentationReady = true;
+				}
+			} else if (prependFirstCommittedFrameSerial > 0
+					&& observedFrameSerial > prependFirstCommittedFrameSerial) {
+				prependFirstCommittedFrameSerial = 0;
+				prependSecondCommittedFrameSerial = 0;
+				prependMatchingCommittedFrameCount = 0;
+				prependFirstCommittedAnchorID.clear();
+				prependFirstCommittedAnchorOffset = 0.0;
+			}
+			if (anchorPreserved && prependPresentationReady) break;
 		}
 		const int anchorAfterRow = m_host->chatModel()->rowForStableId(anchorID);
 		const double anchorAfterOffset = afterState.value(QStringLiteral("firstVisibleOffset")).toDouble();
-		const bool purePrependApplied = m_host->chatModel()->rowCount() == finalExpectedMessageCount
+		bool exactPrependMessageOrder = m_host->chatModel()->rowCount() == finalExpectedMessageCount;
+		for (int row = 0; exactPrependMessageOrder && row < finalExpectedMessageCount; ++row) {
+			const int expectedSequence = 1 - VisualHistoryPrependMessageCount + row;
+			exactPrependMessageOrder = m_host->chatModel()->get(row).value(QStringLiteral("id")).toString()
+				== visualHistoryMessageID(fixtureGeneration, expectedSequence);
+		}
+		const bool purePrependApplied = exactPrependMessageOrder
 			&& anchorAfterRow == anchorBeforeRow + VisualHistoryPrependMessageCount
 			&& afterState.value(QStringLiteral("count")).toInt() == finalExpectedMessageCount;
-		if (!anchorPreserved || !purePrependApplied) {
+		if (!anchorPreserved || !purePrependApplied || !prependPresentationReady) {
 			if (error) {
-				*error = QStringLiteral("The production history prepend did not preserve its viewport anchor "
-					"(before row %1/offset %2, after row %3/offset %4, count %5/%6).")
+				*error = QStringLiteral("The production history prepend did not preserve its settled viewport "
+					"(before row %1/offset %2, after row %3/offset %4, count %5/%6, "
+					"pending %7/%8, anchor active %9, presentation %10/%11/%12).")
 					.arg(anchorBeforeRow).arg(anchorBeforeOffset, 0, 'f', 2)
 					.arg(anchorAfterRow).arg(anchorAfterOffset, 0, 'f', 2)
-					.arg(m_host->chatModel()->rowCount()).arg(finalExpectedMessageCount);
+					.arg(m_host->chatModel()->rowCount()).arg(finalExpectedMessageCount)
+					.arg(prependPendingStarted).arg(prependPendingSettled)
+					.arg(afterPresentation.value(QStringLiteral("prependAnchorActive")).toBool())
+					.arg(afterPresentation.value(QStringLiteral("presentationPending")).toBool())
+					.arg(afterPresentation.value(QStringLiteral("presentationFinalizing")).toBool())
+					.arg(afterPresentation.value(QStringLiteral("scopeResetPending")).toBool());
 			}
 			return {};
 		}
@@ -2314,7 +2511,48 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			{ QStringLiteral("anchor_after_offset"), anchorAfterOffset },
 			{ QStringLiteral("anchor_offset_delta"), qAbs(anchorAfterOffset - anchorBeforeOffset) },
 			{ QStringLiteral("anchor_preserved"), anchorPreserved },
-			{ QStringLiteral("pure_prepend_applied"), purePrependApplied }
+			{ QStringLiteral("pure_prepend_applied"), purePrependApplied },
+			{ QStringLiteral("prepend_pending_started"), prependPendingStarted },
+			{ QStringLiteral("prepend_pending_settled"), prependPendingSettled },
+			{ QStringLiteral("prepend_scope_token_unchanged"),
+				afterPresentation.value(QStringLiteral("scopeToken")).toString() == prependScopeToken },
+			{ QStringLiteral("prepend_generation_unchanged"),
+				afterPresentation.value(QStringLiteral("generation")).toULongLong()
+					== prependPresentationGeneration },
+			{ QStringLiteral("prepend_queue_pending"),
+				afterPresentation.value(QStringLiteral("prependQueuePending")).toBool() },
+			{ QStringLiteral("prepend_anchor_active"),
+				afterPresentation.value(QStringLiteral("prependAnchorActive")).toBool() },
+			{ QStringLiteral("prepend_presentation_busy"),
+				afterPresentation.value(QStringLiteral("chatModelPresentationBusy")).toBool() },
+			{ QStringLiteral("prepend_presentation_pending"),
+				afterPresentation.value(QStringLiteral("presentationPending")).toBool() },
+			{ QStringLiteral("prepend_presentation_finalizing"),
+				afterPresentation.value(QStringLiteral("presentationFinalizing")).toBool() },
+			{ QStringLiteral("prepend_scope_reset_pending"),
+				afterPresentation.value(QStringLiteral("scopeResetPending")).toBool() },
+			{ QStringLiteral("prepend_stable_frame_committed"),
+				afterPresentation.value(QStringLiteral("stableFrameCommitted")).toBool() },
+			{ QStringLiteral("prepend_visible_frame_committed"),
+				afterPresentation.value(QStringLiteral("visibleFrameCommitted")).toBool() },
+			{ QStringLiteral("prepend_history_loader_visible"),
+				afterPresentation.value(QStringLiteral("historyLoaderVisible")).toBool() },
+			{ QStringLiteral("prepend_history_loader_height"),
+				afterPresentation.value(QStringLiteral("historyLoaderHeight")).toDouble() },
+			{ QStringLiteral("prepend_jump_to_latest_visible"),
+				afterPresentation.value(QStringLiteral("jumpToLatestVisible")).toBool() },
+			{ QStringLiteral("prepend_composer_height"),
+				afterPresentation.value(QStringLiteral("composerHeight")).toDouble() },
+			{ QStringLiteral("prepend_composer_contiguous"), composerContiguous },
+			{ QStringLiteral("prepend_exact_message_order"), exactPrependMessageOrder },
+			{ QStringLiteral("prepend_start_frame_serial"), prependStartFrameSerial },
+			{ QStringLiteral("prepend_first_committed_frame_serial"),
+				prependFirstCommittedFrameSerial },
+			{ QStringLiteral("prepend_second_committed_frame_serial"),
+				prependSecondCommittedFrameSerial },
+			{ QStringLiteral("prepend_matching_committed_frame_count"),
+				prependMatchingCommittedFrameCount },
+			{ QStringLiteral("prepend_stable_duration_ms"), prependStableDurationMs }
 		};
 	}
 	bool screenShareNativeFrameReady = false;
@@ -2600,8 +2838,15 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	}
 	QVariantList fixtureMessageIds;
 	fixtureMessageIds.reserve(m_host->chatModel()->rowCount());
-	for (int row = 0; row < m_host->chatModel()->rowCount(); ++row) {
-		fixtureMessageIds.push_back(m_host->chatModel()->get(row).value(QStringLiteral("id")));
+	if (surfaceVariant == QLatin1String("chat-history-prepend-anchor")) {
+		for (int sequence = 1 - VisualHistoryPrependMessageCount;
+			 sequence <= VisualHistoryInitialMessageCount; ++sequence) {
+			fixtureMessageIds.push_back(visualHistoryMessageID(fixtureGeneration, sequence));
+		}
+	} else {
+		for (int row = 0; row < m_host->chatModel()->rowCount(); ++row) {
+			fixtureMessageIds.push_back(m_host->chatModel()->get(row).value(QStringLiteral("id")));
+		}
 	}
 	const QVariantMap chatFixtureState = visualChatFixtureState(m_host, surfaceVariant, prependFixtureState);
 	fixtureOverrideRollback.committed = true;
@@ -2618,6 +2863,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			 { QStringLiteral("capture_window"), captureWindow },
 			 { QStringLiteral("surface_present"), surfaceVariant != QLatin1String("none") },
 			 { QStringLiteral("screen_share_native_frame_ready"), screenShareNativeFrameReady },
+			 { QStringLiteral("provider_result_transition_exercised"), false },
 			 { QStringLiteral("rich_preview_present"), !normalizedRichPreview.isEmpty() },
 			 { QStringLiteral("rich_preview_message_id"), normalizedRichPreview.isEmpty()
 				 ? QString() : richBodyMessageId },
@@ -3485,6 +3731,9 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 			scopeState.insert(QStringLiteral("replyActor"), QStringLiteral("Alex"));
 			scopeState.insert(QStringLiteral("replySnippet"),
 				QStringLiteral("Use the community test build once this check passes."));
+		}
+		if (surfaceVariant == QLatin1String("chat-history-prepend-anchor")) {
+			scopeState.insert(QStringLiteral("canLoadOlder"), true);
 		}
 		const bool systemMessages = motdVariant != QLatin1String("none")
 			&& motdVariant != QLatin1String("history-visible");

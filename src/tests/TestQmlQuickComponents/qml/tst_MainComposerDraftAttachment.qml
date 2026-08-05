@@ -212,8 +212,8 @@ TestCase {
 
 	function test_scope_history_stays_hidden_until_stable_geometry_is_committed() {
 		verify(/property bool scopePresentationPending:\s*false[\s\S]*property bool scopePresentationFrameCommitPending:\s*false[\s\S]*scopePresentationContentVisible:[\s\S]*scopePresentationStartedAt\s*<=\s*0[\s\S]*scopePresentationStableFrameCommittedAt\s*>\s*0[\s\S]*property int scopePresentationExposedHeightChangeCount:\s*0/.test(mainSource))
-		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationVisibleFrameCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationFrameCommitPending\s*=\s*false[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
-		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*scopePresentationStableFrameCommittedAt\s*>\s*0[\s\S]*completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationStableFrameCount\s*>=\s*2[\s\S]*scopePresentationStableFrameCommittedAt\s*=\s*Date\.now\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationFirstVisibleStableRowsCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationVisibleFrameCommittedAt\s*=[\s\S]*scopePresentationFirstVisibleStableRowsCommittedAt[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
+		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*scopePresentationStableFrameCommittedAt\s*>\s*0[\s\S]*completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationFirstStableFrameCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationStableFrameCount\s*>=\s*2[\s\S]*scopePresentationSecondMatchingStableFrameCommittedAt\s*=\s*Date\.now\(\)/.test(mainSource))
 		verify(!/scopePresentationContentVisible:[\s\S]{0,100}scopePresentationFinalizing/.test(mainSource))
 		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity[\s\S]*activeScope\.loading[\s\S]*!timeline\.scopePresentationContentVisible[\s\S]*visible:\s*\(activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*:\s*chatModel\.count\s*===\s*0[\s\S]*\|\|\s*!timeline\.scopePresentationContentVisible\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*scopePresentationQuietTimer\.start\(\)[\s\S]*armScopePresentationDeadline\(\)/.test(mainSource))
@@ -242,7 +242,10 @@ TestCase {
 		verify(/function\s+noteScopePresentationMutation\(\)[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
 		verify(/property int scopePresentationMutationCount:\s*0[\s\S]*property int scopePresentationTailContainedMutationCount:\s*-1[\s\S]*function\s+beginScopeChange\(\)[\s\S]*scopePresentationMutationCount\s*=\s*0[\s\S]*scopePresentationTailContainedMutationCount\s*=\s*-1/.test(mainSource))
 		verify(/function\s+positionTailImmediately\(\)[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationTailContainedMutationCount[\s\S]*===\s*scopePresentationMutationCount[\s\S]*return[\s\S]*tailContentYTarget\(\)/.test(mainSource))
-		verify(/function\s+containTailMessageWhenPossible\(\)[\s\S]*const previousY\s*=\s*contentY[\s\S]*setTailContentY\(contentY\s*\+\s*correction\)[\s\S]*scopePresentationTailContainedMutationCount\s*=[\s\S]*scopePresentationMutationCount/.test(mainSource))
+		verify(/function\s+containTailMessageWhenPossible\(\)[\s\S]*item\.height\s*>\s*height\s*\+\s*1\.0[\s\S]*setTailContentY\(item\.y\)[\s\S]*return\s+Math\.abs\(contentY\s*-\s*item\.y\)[\s\S]*const previousY\s*=\s*contentY[\s\S]*setTailContentY\(contentY\s*\+\s*correction\)[\s\S]*scopePresentationTailContainedMutationCount\s*=[\s\S]*scopePresentationMutationCount/.test(mainSource))
+		verify(/id:\s*bottomFollowTimer[\s\S]*const\s+tailContained\s*=\s*timeline\.containTailMessageWhenPossible\(\)[\s\S]*timeline\.stickToBottom\s*&&\s*!timeline\.isNearBottom\(\)[\s\S]*&&\s*!tailContained[\s\S]*timeline\.requestBottomFollow\(\)/.test(mainSource))
+		verify(/onFrameSwapped:\s*\{[\s\S]*timeline\.frameSwappedSerial\s*\+=\s*1[\s\S]*timeline\.observeScopePresentationFrame\(\)/.test(mainSource))
+		verify(/"frameSwappedSerial":\s*timeline\.frameSwappedSerial[\s\S]*property int frameSwappedSerial:\s*0/.test(mainSource))
 		verify(/function\s+armScopePresentationDeadline\(\)[\s\S]*scopePresentationDeadlineAt\s*-\s*Date\.now\(\)[\s\S]*scopePresentationForcedByDeadline\s*=\s*true[\s\S]*scopePresentationDeadlineTimer\.interval\s*=\s*Math\.max\(1,[\s\S]*scopePresentationDeadlineTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+recoverScopePresentationFrameRegression\(\)[\s\S]*scopePresentationFrameCommitPending\s*=\s*false[\s\S]*scopePresentationForcedByDeadline\s*=\s*scopePresentationForcedByDeadline[\s\S]*scopePresentationDeadlineExpired\(\)[\s\S]*if\s*\(scopePresentationForcedByDeadline\)[\s\S]*finishScopePresentation\(true\)[\s\S]*scopePresentationQuietTimer\.restart\(\)[\s\S]*if\s*\(!armScopePresentationDeadline\(\)\)[\s\S]*scopePresentationQuietTimer\.stop\(\)[\s\S]*finishScopePresentation\(true\)/.test(mainSource))
 		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*!presentationReady[\s\S]*visiblePresentationHeightConvergencePending\(\)[\s\S]*recoverScopePresentationFrameRegression\(\)/.test(mainSource))
@@ -334,8 +337,8 @@ TestCase {
 		const stableReadySource = mainSource.slice(stableReadyStart, stableReadyEnd)
 		verify(!stableReadySource.includes("inactiveRichResourceCount === 0"))
 		verify(!stableReadySource.includes("paintedLoadingCount === 0"))
-		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*scopePresentationStableFrameCount[\s\S]*>=\s*2[\s\S]*scopePresentationStableFrameCommittedAt\s*=\s*Date\.now\(\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationVisibleFrameCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
+		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*scopePresentationStableFrameCount[\s\S]*>=\s*2[\s\S]*scopePresentationSecondMatchingStableFrameCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationStableFrameCommittedAt\s*=[\s\S]*scopePresentationSecondMatchingStableFrameCommittedAt/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationFirstVisibleStableRowsCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		const continueStart = mainSource.indexOf("function continueScopePresentationFinalization")
 		const continueEnd = mainSource.indexOf("function completeScopePresentationFinalization", continueStart)
 		verify(continueStart >= 0 && continueEnd > continueStart)
@@ -832,9 +835,11 @@ TestCase {
 		const beginScopeSource = mainSource.slice(beginScopeStart, beginScopeEnd)
 		verify(/scopePresentationPending\s*=\s*true[\s\S]*timelineScrollHandler\.cancelNavigationForOwnershipLoss\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)/.test(beginScopeSource))
 		verify(/function\s+onScopeTokenChanged\(\)\s*\{\s*timeline\.beginScopeChange\(\)[\s\S]*root\.closeQuickReactions\(\)[\s\S]*root\.clearPreviewHydrationQueue\(\)/.test(mainSource))
+		verify(/function\s+onLoadingChanged\(\)[\s\S]*const\s+generation\s*=\s*timeline\.scopePresentationGeneration[\s\S]*const\s+scopeToken\s*=\s*String\(activeScope\.scopeToken[\s\S]*Qt\.callLater\(function\(\)[\s\S]*generation\s*!==\s*timeline\.scopePresentationGeneration[\s\S]*scopeToken\s*!==\s*String\(activeScope\.scopeToken[\s\S]*timeline\.noteScopePresentationDataReady\(\)/.test(mainSource))
 		verify(/onScrollingEnded:\s*\{\s*if\s*\(!timelineScrollHandler\.navigationAvailable\)\s*return[\s\S]*timeline\.scrollbarDragActive[\s\S]*timelineScrollBar\.pressed[\s\S]*return[\s\S]*timeline\.explicitNavigationMovement\s*=\s*false[\s\S]*timeline\.stickToBottom/.test(mainSource))
 		verify(/onMovementEnded:\s*\{[\s\S]*timelineScrollHandler\.navigationTransitionActive[\s\S]*timelineScrollHandler\.gestureActive[\s\S]*timelineScrollHandler\.scrolling[\s\S]*scopePresentationPending[\s\S]*performanceChatScrollOwnershipActive[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*return[\s\S]*scrollbarDragActive/.test(mainSource))
-		verify(/id:\s*timelineScrollHandler[\s\S]*onScrollingStarted:[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)/.test(mainSource))
+		verify(/id:\s*timelineScrollHandler[\s\S]*onScrollingStarted:\s*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*onScrollingEnded:[\s\S]*if\s*\(!timeline\.explicitNavigationMovement\)[\s\S]*return/.test(mainSource))
+		verify(/onContentYChanged:\s*\{[\s\S]*timelineScrollHandler\.scrolling\s*&&\s*!explicitNavigationMovement[\s\S]*takeExplicitNavigationOwnership\("wheel-or-middle-drag"\)/.test(mainSource))
 		const scrollbarStart = mainSource.indexOf("id: timelineScrollBar")
 		const scrollbarEnd = mainSource.indexOf("MiddleDragScrollHandler", scrollbarStart)
 		verify(scrollbarStart >= 0 && scrollbarEnd > scrollbarStart)
@@ -901,7 +906,7 @@ TestCase {
 		verify(/function\s+pendingVisibleRichRecoveryCount\(\)[\s\S]*richResourceRecoveryPending\(item\)/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*const\s+pendingVisibleRichRecoveryCount\s*=[\s\S]*timeline\.pendingVisibleRichRecoveryCount\(\)/.test(mainSource))
 		verify(/"pendingVisibleRichRecoveryCount":\s*[\s\S]*pendingVisibleRichRecoveryCount/.test(mainSource))
-		verify(/const\s+richHydrated\s*=[\s\S]*pendingVisibleHydrationCount\s*===\s*0[\s\S]*pendingVisibleRichRecoveryCount\s*===\s*0[\s\S]*"richHydrated":\s*richHydrated/.test(mainSource))
+		verify(/function\s+recordScopePresentationFrameMilestones\(\)[\s\S]*pendingVisibleHydrationCount\(\)\s*===\s*0[\s\S]*pendingVisibleRichRecoveryCount\(\)\s*===\s*0[\s\S]*scopePresentationRichHydratedAt\s*=\s*committedAt[\s\S]*const\s+richHydrated\s*=\s*timeline\.scopePresentationRichHydratedAt\s*>\s*0[\s\S]*"richHydrated":\s*richHydrated/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*function\s+queueRichLoaderResumes\(\)[\s\S]*candidates\.sort[\s\S]*richLoaderResumeQueue/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*if\s*\(richScrollInProgress\s*\|\|\s*coldScopeMaterializationDelayTimer\.running\)\s*return/.test(mainSource))
 		verify(/const plainSourceOwned = item\.plainDeferredSourceOwned === true[\s\S]*const visible = point\.y \+ item\.height > 0\.5[\s\S]*prefetchEligible[\s\S]*nearViewportWarmId[\s\S]*if \(!visible && !prefetchEligible && !plainSourceOwned\)\s*continue[\s\S]*candidates\.push/.test(mainSource))
@@ -1184,7 +1189,7 @@ TestCase {
 			richResourcesChangedSource))
 		verify(/!richResourcesActive\s*&&\s*!inVisibleViewport[\s\S]*!timeline\.richScrollInProgress[\s\S]*timeline\.scheduleNearViewportPrefetch\(\)/.test(
 			richResourcesChangedSource))
-		verify(/function\s+timelinePresentationState\(\)[\s\S]*const\s+richHydrated\s*=[\s\S]*inactiveRichResourceCount\s*===\s*0[\s\S]*"richHydrated":\s*richHydrated[\s\S]*"visibleInactiveRichResourceCount":[\s\S]*"settled":\s*visibleFrameCommittedAt\s*>\s*0[\s\S]*!timeline\.prependAnchorActive[\s\S]*!chatModel\.prependPending/.test(mainSource))
+		verify(/function\s+recordScopePresentationFrameMilestones\(\)[\s\S]*diagnostics\.inactiveRichResourceCount\s*===\s*0[\s\S]*scopePresentationRichHydratedAt\s*=\s*committedAt[\s\S]*function\s+timelinePresentationState\(\)[\s\S]*"richHydrated":\s*richHydrated[\s\S]*"visibleInactiveRichResourceCount":[\s\S]*"settled":\s*visibleFrameCommittedAt\s*>\s*0[\s\S]*!timeline\.prependAnchorActive[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(!/"settled":[\s\S]{0,400}!timeline\.topAnchorActive/.test(mainSource))
 		verify(!/"settled":[\s\S]{0,400}!timeline\.scopePresentationObservationActive/.test(mainSource))
 		verify(/function\s+completePerformanceChatScrollWorkload\(\)[\s\S]*!timeline\.topAnchorActive[\s\S]*performanceChatScrollFullRangeToStart[\s\S]*timeline\.beginTopAnchor\(true\)/.test(mainSource))
@@ -2034,8 +2039,10 @@ TestCase {
 			receiptQueueSource))
 		verify(/stationaryThumbWarmPinMatchesReceipt[\s\S]*stationaryThumbWarmGate\.owns[\s\S]*stationaryThumbWarmGate\.retains[\s\S]*finishAdmission[\s\S]*retireAdmission/.test(
 			receiptDrainSource), "only the next-turn controller may transition exact gate ownership")
+		verify(/function\s+takeExplicitNavigationOwnership\(classification\)[\s\S]*const\s+retiresThumbWarm\s*=[\s\S]*navigationClass\s*!==\s*"scrollbar"[\s\S]*!scrollbarDragActive\s*&&\s*!timelineScrollBar\.pressed[\s\S]*scrollbarReleaseGuardTimer\.stop\(\)[\s\S]*releasePrependAnchor\(\)[\s\S]*releaseViewportAnchor\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*clearStationaryThumbWarmPins\("explicit-navigation"\)/.test(
+			mainSource), "actual wheel takeover must retire the thumb receipt after publishing new ownership")
 		verify(/id:\s*scrollbarReleaseGuardTimer[\s\S]*scrollbarReleasePending\s*=\s*false[\s\S]*clearStationaryThumbWarmPins\("thumb-release"\)/.test(
-			mainSource), "release must retain geometry through the guard and then clear every pin")
+			mainSource), "edge-clamped wheel observation must retain the bounded release fallback")
 		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*clearStationaryThumbWarmPins\("scope-change"\)/.test(
 			mainSource))
 		verify(/ListView\.onPooled:[\s\S]*retireStationaryThumbWarmForDelegate\("delegate-pooled"\)[\s\S]*handleListViewPooled/.test(
@@ -2139,7 +2146,6 @@ TestCase {
 			timelineStateEnd)
 		verify(/const\s+visiblePresentationComplete[\s\S]*visiblePresentationDeadlineReady[\s\S]*"settled":\s*visibleFrameCommittedAt\s*>\s*0[\s\S]*visiblePresentationComplete[\s\S]*stationaryThumbWarmPinCount\s*===\s*0/.test(
 			timelineStateSource))
-		verify(/const\s+richHydrated\s*=[\s\S]*pendingVisibleHydrationCount\s*===\s*0[\s\S]*paintedLoadingCount\s*===\s*0/.test(
-			timelineStateSource))
+		verify(/function\s+recordScopePresentationFrameMilestones\(\)[\s\S]*pendingVisibleHydrationCount\(\)\s*===\s*0[\s\S]*diagnostics\.paintedLoadingCount\s*===\s*0[\s\S]*scopePresentationRichHydratedAt\s*=\s*committedAt/.test(mainSource))
 	}
 }

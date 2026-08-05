@@ -6123,7 +6123,9 @@ TestCase {
 		const readyMetadata = findChild(gallery, "attachmentFileMetadata_ready-doc")
 		const loadingTile = findChild(gallery, "attachment_loading-image")
 		const loadingBusy = findChild(gallery, "attachmentBusyIndicator_loading-image")
+		const loadingSurface = findChild(gallery, "attachmentLoadingSurface_loading-image")
 		const loadingLabel = findChild(gallery, "attachmentLoadingLabel_loading-image")
+		const loadingOverlay = findChild(gallery, "attachmentStateOverlay_loading-image")
 		const loadingAction = findChild(gallery, "attachmentAction_loading-image")
 		const loadingSave = findChild(gallery, "attachmentDownload_loading-image")
 		const errorTile = findChild(gallery, "attachment_error-image")
@@ -6132,7 +6134,8 @@ TestCase {
 		const errorAction = findChild(gallery, "attachmentAction_error-image")
 		const errorSave = findChild(gallery, "attachmentDownload_error-image")
 		verify(readyTile && readyAction && readySave && readyName && readyMetadata)
-		verify(loadingTile && loadingBusy && loadingLabel && loadingAction && loadingSave)
+		verify(loadingTile && loadingBusy && loadingSurface && loadingLabel
+			&& loadingOverlay && loadingAction && loadingSave)
 		verify(errorTile && errorLabel && errorRetry && errorAction && errorSave)
 
 		tryCompare(viewport, "contentY", 0)
@@ -6159,6 +6162,9 @@ TestCase {
 		compare(loadingAction.Accessible.ignored, false)
 		compare(loadingSave.Accessible.ignored, false)
 		compare(loadingAction.activeFocusOnTab, true)
+		verify(loadingBusy.z > loadingOverlay.z)
+		compare(loadingLabel.color, Theme.textStrong)
+		verify(loadingSurface.color.a > 0.9)
 		compare(readyAction.Accessible.ignored, true)
 		compare(readySave.Accessible.ignored, true)
 		compare(errorRetry.Accessible.ignored, true)
@@ -6179,6 +6185,11 @@ TestCase {
 		compare(errorAction.Accessible.ignored, true)
 		compare(errorSave.Accessible.ignored, true)
 		compare(errorRetry.activeFocusOnTab, false)
+
+		gallery.hoverEffectsEnabled = false
+		compare(readyAction.hoverEnabled, false)
+		compare(loadingAction.hoverEnabled, false)
+		compare(errorAction.hoverEnabled, false)
 
 		gallery.attachments = [{
 			"id": "ready-doc",

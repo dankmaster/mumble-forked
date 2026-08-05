@@ -7,7 +7,10 @@ import Mumble.Theme 1.0
 ApplicationWindow {
 	id: root
 	onClosing: close => close.accepted = false
-	onFrameSwapped: timeline.observeScopePresentationFrame()
+	onFrameSwapped: {
+		timeline.frameSwappedSerial += 1
+		timeline.observeScopePresentationFrame()
+	}
 	onActiveChanged: {
 		if (active)
 			timeline.markVisibleScopeReadIfEligible()
@@ -2067,6 +2070,12 @@ ApplicationWindow {
 				? timeline.scopePresentationCompletedAt : Date.now()
 			const dataReadyAt = timeline.scopePresentationDataReadyAt
 			const stableReadyAt = timeline.scopePresentationStableReadyAt
+			const firstStableFrameCommittedAt =
+				timeline.scopePresentationFirstStableFrameCommittedAt
+			const secondMatchingStableFrameCommittedAt =
+				timeline.scopePresentationSecondMatchingStableFrameCommittedAt
+			const firstVisibleStableRowsCommittedAt =
+				timeline.scopePresentationFirstVisibleStableRowsCommittedAt
 			const stableFrameCommittedAt =
 				timeline.scopePresentationStableFrameCommittedAt
 			const visibleFrameCommittedAt =
@@ -2107,14 +2116,8 @@ ApplicationWindow {
 				|| (timeline.scopePresentationForcedByDeadline
 					&& timeline.visiblePresentationDeadlineReady(visiblePresentation))
 			const stablePresentationReady = stableReadyAt > 0
-				&& visibleFrameCommittedAt > 0
-				&& !timeline.scopePresentationPending
-				&& !timeline.scopePresentationFinalizing
-			const richHydrated = visibleFrameCommittedAt > 0
-				&& pendingVisibleHydrationCount === 0
-				&& pendingVisibleRichRecoveryCount === 0
-				&& visiblePresentation.paintedLoadingCount === 0
-				&& visiblePresentation.inactiveRichResourceCount === 0
+			const richHydrated = timeline.scopePresentationRichHydratedAt > 0
+			const degradedReady = timeline.scopePresentationDegradedReadyAt > 0
 			return {
 				"scopeToken": String(activeScope.scopeToken || ""),
 				"scopeLabel": String(activeScope.label || ""),
@@ -2196,15 +2199,43 @@ ApplicationWindow {
 				"forcedByDeadline": timeline.scopePresentationForcedByDeadline,
 				"dataReady": dataReadyAt > 0,
 				"stablePresentationReady": stablePresentationReady,
+				"firstStableFrameCommitted": firstStableFrameCommittedAt > 0,
+				"secondMatchingStableFrameCommitted":
+					secondMatchingStableFrameCommittedAt > 0,
+				"firstVisibleStableRowsCommitted":
+					firstVisibleStableRowsCommittedAt > 0,
 				"stableFrameCommitted": stableFrameCommittedAt > 0,
 				"visibleFrameCommitted": visibleFrameCommittedAt > 0,
 				"stableFrameConsecutiveCount":
 					timeline.scopePresentationStableFrameCount,
 				"richHydrated": richHydrated,
+				"degradedReady": degradedReady,
+				"loadingFrameCommitted":
+					timeline.scopePresentationLoadingFrameCommittedAt > 0,
+				"composerInteractive":
+					timeline.scopePresentationComposerInteractiveAt > 0,
+				"startedAt": timeline.scopePresentationStartedAt,
 				"dataReadyAt": dataReadyAt,
 				"stableReadyAt": stableReadyAt,
+				"firstStableFrameCommittedAt": firstStableFrameCommittedAt,
+				"secondMatchingStableFrameCommittedAt":
+					secondMatchingStableFrameCommittedAt,
+				"firstVisibleStableRowsCommittedAt":
+					firstVisibleStableRowsCommittedAt,
 				"stableFrameCommittedAt": stableFrameCommittedAt,
 				"visibleFrameCommittedAt": visibleFrameCommittedAt,
+				"loadingFrameCommittedAt":
+					timeline.scopePresentationLoadingFrameCommittedAt,
+				"composerInteractiveAt":
+					timeline.scopePresentationComposerInteractiveAt,
+				"richHydratedAt": timeline.scopePresentationRichHydratedAt,
+				"degradedReadyAt": timeline.scopePresentationDegradedReadyAt,
+				"providerResultAppliedAt":
+					timeline.scopePresentationProviderResultAppliedAt,
+				"providerResultVisiblePaintAt":
+					timeline.scopePresentationProviderResultVisiblePaintAt,
+				"providerResultSerial":
+					timeline.scopePresentationProviderResultSerial,
 				"dataReadyDurationMs": timeline.scopePresentationStartedAt > 0
 					&& dataReadyAt > 0
 					? Math.max(0, dataReadyAt - timeline.scopePresentationStartedAt) : 0,
@@ -2219,6 +2250,41 @@ ApplicationWindow {
 					&& visibleFrameCommittedAt > 0
 					? Math.max(0, visibleFrameCommittedAt
 						- timeline.scopePresentationStartedAt) : 0,
+				"firstStableFrameDurationMs": timeline.scopePresentationStartedAt > 0
+					&& firstStableFrameCommittedAt > 0
+					? Math.max(0, firstStableFrameCommittedAt
+						- timeline.scopePresentationStartedAt) : 0,
+				"secondMatchingStableFrameDurationMs":
+					timeline.scopePresentationStartedAt > 0
+						&& secondMatchingStableFrameCommittedAt > 0
+						? Math.max(0, secondMatchingStableFrameCommittedAt
+							- timeline.scopePresentationStartedAt) : 0,
+				"firstVisibleStableRowsDurationMs":
+					timeline.scopePresentationStartedAt > 0
+						&& firstVisibleStableRowsCommittedAt > 0
+						? Math.max(0, firstVisibleStableRowsCommittedAt
+							- timeline.scopePresentationStartedAt) : 0,
+				"loadingFrameDurationMs": timeline.scopePresentationStartedAt > 0
+					&& timeline.scopePresentationLoadingFrameCommittedAt > 0
+					? Math.max(0, timeline.scopePresentationLoadingFrameCommittedAt
+						- timeline.scopePresentationStartedAt) : 0,
+				"composerInteractiveDurationMs": timeline.scopePresentationStartedAt > 0
+					&& timeline.scopePresentationComposerInteractiveAt > 0
+					? Math.max(0, timeline.scopePresentationComposerInteractiveAt
+						- timeline.scopePresentationStartedAt) : 0,
+				"richHydratedDurationMs": timeline.scopePresentationStartedAt > 0
+					&& timeline.scopePresentationRichHydratedAt > 0
+					? Math.max(0, timeline.scopePresentationRichHydratedAt
+						- timeline.scopePresentationStartedAt) : 0,
+				"degradedReadyDurationMs": timeline.scopePresentationStartedAt > 0
+					&& timeline.scopePresentationDegradedReadyAt > 0
+					? Math.max(0, timeline.scopePresentationDegradedReadyAt
+						- timeline.scopePresentationStartedAt) : 0,
+				"providerResultToVisiblePaintMs":
+					timeline.scopePresentationProviderResultAppliedAt > 0
+						&& timeline.scopePresentationProviderResultVisiblePaintAt > 0
+						? timeline.scopePresentationProviderResultVisiblePaintAt
+							- timeline.scopePresentationProviderResultAppliedAt : 0,
 				"outerLoaderLoadedCount":
 					timeline.scopePresentationOuterLoaderLoadedCount,
 				"firstOuterLoaderLoadedDurationMs":
@@ -2251,6 +2317,7 @@ ApplicationWindow {
 					timeline.scopePresentationPhaseDuration(
 						timeline.scopePresentationLastHeightCommitAt),
 				"generation": timeline.scopePresentationGeneration,
+				"frameSwappedSerial": timeline.frameSwappedSerial,
 				"mutationCount": timeline.scopePresentationMutationCount,
 				"tailCorrectionCount": timeline.scopePresentationTailCorrectionCount,
 				"exposedHeightChangeCount": timeline.scopePresentationExposedHeightChangeCount,
@@ -2582,7 +2649,18 @@ ApplicationWindow {
 				root.closeConversationSearch(false)
 		}
 		function onLoadingChanged() {
-			timeline.scheduleScopePresentationFastPath()
+			const generation = timeline.scopePresentationGeneration
+			const scopeToken = String(activeScope.scopeToken || "")
+			// Scope loading is published immediately before the matching model DTOs.
+			// Defer one GUI turn so the readiness probe observes the target queue or
+			// completed direct replacement, then fence rapid A -> B navigation.
+			Qt.callLater(function() {
+				if (generation !== timeline.scopePresentationGeneration
+						|| scopeToken !== String(activeScope.scopeToken || ""))
+					return
+				timeline.noteScopePresentationDataReady()
+				timeline.scheduleScopePresentationFastPath()
+			})
 		}
 		function onUnreadCountChanged() {
 			if (Number(activeScope.unreadCount || 0) > 0)
@@ -3654,14 +3732,17 @@ ApplicationWindow {
 							&& !root.performanceChatScrollRunning
 						smoothWheelEnabled: true
 						wheelStep: Math.max(80, Math.min(112, timeline.height * 0.14))
-						onScrollingStarted:
-							timeline.takeExplicitNavigationOwnership("wheel-or-middle-drag")
+						onScrollingStarted: timeline.scheduleViewportMembershipUpdate()
 						onScrollingEnded: {
 							if (!timelineScrollHandler.navigationAvailable)
 								return
 							if (timeline.scrollbarDragActive
 									|| timeline.scrollbarReleasePending
 									|| timelineScrollBar.pressed) {
+								timeline.scheduleViewportMembershipUpdate()
+								return
+							}
+							if (!timeline.explicitNavigationMovement) {
 								timeline.scheduleViewportMembershipUpdate()
 								return
 							}
@@ -4354,6 +4435,7 @@ ApplicationWindow {
 					property bool scopePresentationObservationActive: false
 					property bool scopePresentationForcedByDeadline: false
 					property int scopePresentationGeneration: 0
+					property int frameSwappedSerial: 0
 					property int scopePresentationMutationCount: 0
 					property int scopePresentationTailContainedMutationCount: -1
 					property int scopePresentationTailCorrectionCount: 0
@@ -4364,8 +4446,18 @@ ApplicationWindow {
 					property double scopePresentationDeadlineAt: 0
 					property double scopePresentationDataReadyAt: 0
 					property double scopePresentationStableReadyAt: 0
+					property double scopePresentationFirstStableFrameCommittedAt: 0
+					property double scopePresentationSecondMatchingStableFrameCommittedAt: 0
+					property double scopePresentationFirstVisibleStableRowsCommittedAt: 0
 					property double scopePresentationStableFrameCommittedAt: 0
 					property double scopePresentationVisibleFrameCommittedAt: 0
+					property double scopePresentationLoadingFrameCommittedAt: 0
+					property double scopePresentationComposerInteractiveAt: 0
+					property double scopePresentationRichHydratedAt: 0
+					property double scopePresentationDegradedReadyAt: 0
+					property double scopePresentationProviderResultAppliedAt: 0
+					property double scopePresentationProviderResultVisiblePaintAt: 0
+					property string scopePresentationProviderResultSerial: ""
 					property double scopePresentationCompletedAt: 0
 					property int scopePresentationOuterLoaderLoadedCount: 0
 					property double scopePresentationFirstOuterLoaderLoadedAt: 0
@@ -4500,6 +4592,7 @@ ApplicationWindow {
 					}
 
 					function beginScopeChange() {
+						scopePresentationStartedAt = Date.now()
 						// Publish the scope owner before cancelFlick(): Qt may synchronously
 						// emit movementEnded while retiring a native precision-wheel flick.
 						scopePresentationPending = true
@@ -4580,13 +4673,22 @@ ApplicationWindow {
 						scopePresentationExposedHeightChangeCount = 0
 						scopePresentationExposedTailCorrectionCount = 0
 						scopePresentationExposedTailTravel = 0
-						scopePresentationStartedAt = Date.now()
 						scopePresentationDeadlineAt = scopePresentationStartedAt
 							+ scopePresentationDeadlineTimer.defaultInterval
 						scopePresentationDataReadyAt = 0
 						scopePresentationStableReadyAt = 0
+						scopePresentationFirstStableFrameCommittedAt = 0
+						scopePresentationSecondMatchingStableFrameCommittedAt = 0
+						scopePresentationFirstVisibleStableRowsCommittedAt = 0
 						scopePresentationStableFrameCommittedAt = 0
 						scopePresentationVisibleFrameCommittedAt = 0
+						scopePresentationLoadingFrameCommittedAt = 0
+						scopePresentationComposerInteractiveAt = 0
+						scopePresentationRichHydratedAt = 0
+						scopePresentationDegradedReadyAt = 0
+						scopePresentationProviderResultAppliedAt = 0
+						scopePresentationProviderResultVisiblePaintAt = 0
+						scopePresentationProviderResultSerial = ""
 						scopePresentationCompletedAt = 0
 						scopePresentationOuterLoaderLoadedCount = 0
 						scopePresentationFirstOuterLoaderLoadedAt = 0
@@ -4657,6 +4759,9 @@ ApplicationWindow {
 
 					function armScopePresentationStableFrameCommit() {
 						scopePresentationStableReadyAt = Date.now()
+						scopePresentationFirstStableFrameCommittedAt = 0
+						scopePresentationSecondMatchingStableFrameCommittedAt = 0
+						scopePresentationFirstVisibleStableRowsCommittedAt = 0
 						scopePresentationStableFrameCommittedAt = 0
 						scopePresentationVisibleFrameCommittedAt = 0
 						scopePresentationFrameCommitPending = true
@@ -4675,7 +4780,9 @@ ApplicationWindow {
 								|| scopePresentationStableFrameCommittedAt <= 0)
 							return
 						const generation = scopePresentationGeneration
-						scopePresentationVisibleFrameCommittedAt = Date.now()
+						scopePresentationFirstVisibleStableRowsCommittedAt = Date.now()
+						scopePresentationVisibleFrameCommittedAt =
+							scopePresentationFirstVisibleStableRowsCommittedAt
 						scopePresentationCompletedAt = scopePresentationVisibleFrameCommittedAt
 						scopePresentationFrameCommitPending = false
 						scopePresentationPending = false
@@ -4701,6 +4808,9 @@ ApplicationWindow {
 						// snapshot as one cohort so the next frame cannot inherit stale evidence.
 						scopePresentationFrameCommitPending = false
 						scopePresentationStableReadyAt = 0
+						scopePresentationFirstStableFrameCommittedAt = 0
+						scopePresentationSecondMatchingStableFrameCommittedAt = 0
+						scopePresentationFirstVisibleStableRowsCommittedAt = 0
 						scopePresentationStableFrameCommittedAt = 0
 						scopePresentationVisibleFrameCommittedAt = 0
 						scopePresentationStableFrameCount = 0
@@ -4729,7 +4839,66 @@ ApplicationWindow {
 						return true
 					}
 
+					function recordScopePresentationFrameMilestones() {
+						if (scopePresentationStartedAt <= 0)
+							return
+						const committedAt = Date.now()
+						if (scopePresentationLoadingFrameCommittedAt <= 0
+								&& emptyConversationState.visible
+								&& emptyConversationState.visualLoading)
+							scopePresentationLoadingFrameCommittedAt = committedAt
+						if (scopePresentationComposerInteractiveAt <= 0
+								&& activeScope.canSend && composerSurface.visible
+								&& composerSurface.height > 1 && composerInput.enabled)
+							scopePresentationComposerInteractiveAt = committedAt
+						if (scopePresentationFirstVisibleStableRowsCommittedAt <= 0)
+							return
+
+						const diagnostics = visiblePresentationDiagnostics()
+						const providerAppliedAt = Number(
+							diagnostics.providerResultAppliedAt || 0)
+						const providerSerial = String(
+							diagnostics.providerResultSerial || "")
+						if (providerAppliedAt > 0 && providerSerial.length > 0
+								&& (scopePresentationProviderResultSerial !== providerSerial
+									|| scopePresentationProviderResultAppliedAt
+										!== providerAppliedAt)) {
+							scopePresentationProviderResultSerial = providerSerial
+							scopePresentationProviderResultAppliedAt = providerAppliedAt
+							scopePresentationProviderResultVisiblePaintAt = 0
+							scopePresentationRichHydratedAt = 0
+							scopePresentationDegradedReadyAt = 0
+						}
+						if (scopePresentationProviderResultVisiblePaintAt <= 0
+								&& diagnostics.providerResultPainted === true
+								&& providerAppliedAt > 0 && providerSerial.length > 0)
+							scopePresentationProviderResultVisiblePaintAt = committedAt
+
+						const terminalGeometryReady = pendingVisibleHydrationCount() === 0
+							&& pendingVisibleRichRecoveryCount() === 0
+							&& diagnostics.blankCount === 0
+							&& diagnostics.blankPreviewSurfaceCount === 0
+							&& diagnostics.presentationHeightPendingCount === 0
+							&& diagnostics.presentationHeightMismatchCount === 0
+							&& diagnostics.paintedLoadingCount === 0
+						if (!terminalGeometryReady)
+							return
+						if (diagnostics.paintedTerminalCount > 0
+								|| diagnostics.deadlineFallbackCount > 0) {
+							scopePresentationRichHydratedAt = 0
+							if (scopePresentationDegradedReadyAt <= 0)
+								scopePresentationDegradedReadyAt = committedAt
+							return
+						}
+						if (diagnostics.inactiveRichResourceCount === 0
+								&& scopePresentationRichHydratedAt <= 0) {
+							scopePresentationDegradedReadyAt = 0
+							scopePresentationRichHydratedAt = committedAt
+						}
+					}
+
 					function observeScopePresentationFrame() {
+						recordScopePresentationFrameMilestones()
 						if (scopePresentationStableReadyAt <= 0
 								|| !scopePresentationFrameCommitPending
 								|| !scopePresentationPending || scopePresentationFinalizing
@@ -4772,6 +4941,11 @@ ApplicationWindow {
 								- scopePresentationStableFrameTopMargin) <= 0.5
 						scopePresentationStableFrameCount = stableWithPrevious
 							? scopePresentationStableFrameCount + 1 : 1
+						if (!stableWithPrevious) {
+							scopePresentationFirstStableFrameCommittedAt = Date.now()
+							scopePresentationSecondMatchingStableFrameCommittedAt = 0
+							scopePresentationStableFrameCommittedAt = 0
+						}
 						scopePresentationStableFrameFirstVisibleId = firstVisibleId
 						scopePresentationStableFrameFirstVisibleOffset = firstVisibleOffset
 						scopePresentationStableFrameContentY = contentY
@@ -4779,7 +4953,9 @@ ApplicationWindow {
 						scopePresentationStableFrameViewportHeight = height
 						scopePresentationStableFrameTopMargin = topMargin
 						if (scopePresentationStableFrameCount >= 2) {
-							scopePresentationStableFrameCommittedAt = Date.now()
+							scopePresentationSecondMatchingStableFrameCommittedAt = Date.now()
+							scopePresentationStableFrameCommittedAt =
+								scopePresentationSecondMatchingStableFrameCommittedAt
 							root.update()
 							return
 						}
@@ -5218,6 +5394,9 @@ ApplicationWindow {
 							"presentationHeightPendingCount": 0,
 							"presentationHeightMismatchCount": 0,
 							"maximumPresentationHeightError": 0,
+							"providerResultAppliedAt": 0,
+							"providerResultSerial": "",
+							"providerResultPainted": false,
 							"rows": []
 						}
 
@@ -5239,8 +5418,19 @@ ApplicationWindow {
 							item.duplicateHandoffSummaryPainted === true
 							const deadlineFallback =
 								item.deadlinePresentationFallback === true
-							const paintedComplete = paintedSurface || paintedTerminal
+						const paintedComplete = paintedSurface || paintedTerminal
 								|| (paintedLoading && paintedSummary)
+							const providerResultAppliedAt = Number(item.source
+								? item.source.providerResultAppliedAt || 0 : 0)
+							const providerResultSerial = String(item.source
+								? item.source.providerResultSerial || "" : "")
+							if (providerResultAppliedAt > diagnostics.providerResultAppliedAt
+									&& providerResultSerial.length > 0) {
+								diagnostics.providerResultAppliedAt = providerResultAppliedAt
+								diagnostics.providerResultSerial = providerResultSerial
+								diagnostics.providerResultPainted =
+									paintedSurface || paintedTerminal
+							}
 							const warmPin = stationaryThumbWarmPin(item.stableId)
 							if (paintedSummary)
 								++diagnostics.paintedSummaryCount
@@ -6399,8 +6589,10 @@ ApplicationWindow {
 					}
 
 					function takeExplicitNavigationOwnership(classification) {
-						if (String(classification || "") !== "scrollbar"
-								&& !scrollbarDragActive) {
+						const navigationClass = String(classification || "")
+						const retiresThumbWarm = navigationClass !== "scrollbar"
+							&& !scrollbarDragActive && !timelineScrollBar.pressed
+						if (retiresThumbWarm) {
 							scrollbarReleaseGuardTimer.stop()
 							scrollbarReleasePending = false
 						}
@@ -6408,13 +6600,20 @@ ApplicationWindow {
 							++explicitNavigationMovementCount
 						explicitNavigationMovement = true
 						explicitWheelInputPending = false
-						lastMovementClassification = String(classification || "explicit")
+						lastMovementClassification = navigationClass || "explicit"
 						root.closeQuickReactions()
 						stickToBottom = false
 						releasePrependAnchor()
 						releaseViewportAnchor()
 						releaseTopAnchor()
 						invalidateBottomFollow()
+						// A wheel/middle-drag movement has now proved new user ownership.
+						// Retire the thumb-era receipt only after that ownership and the
+						// selected viewport anchors are published; observation-only edge
+						// packets keep the bounded release fallback instead.
+						if (retiresThumbWarm && (stationaryThumbWarmPinCount > 0
+								|| stationaryThumbWarmReceipts.length > 0))
+							clearStationaryThumbWarmPins("explicit-navigation")
 						richContentResumeTimer.stop()
 					}
 
@@ -7574,10 +7773,26 @@ ApplicationWindow {
 					function containTailMessageWhenPossible() {
 						if (count <= 0 || scrollbarDragActive || scrollbarReleasePending
 								|| timelineScrollBar.pressed)
-							return
+							return false
 						const item = itemAtIndex(count - 1)
 						if (!item || !item.visible)
-							return
+							return false
+						// An oversized latest message must remain identifiable. Showing an
+						// attachment/card fragment without its actor and body makes the first
+						// frame incoherent, so prefer the message start and let the user scroll
+						// through the remaining rich content.
+						if (item.height > height + 1.0) {
+							if (item.y < contentY - 1.0) {
+								const previousY = contentY
+								setTailContentY(item.y)
+								if (scopePresentationFinalizing
+										&& Math.abs(contentY - previousY) > 0.5)
+									scopePresentationTailContainedMutationCount =
+										scopePresentationMutationCount
+							}
+							return Math.abs(contentY - item.y) <= 1.0
+								&& Math.abs(contentY - tailContentYTarget()) > 0.5
+						}
 						// A rich row can be taller than the viewport because its actor/body chrome
 						// surrounds an otherwise fully containable preview. Tail-following must keep
 						// that primary card intact instead of clipping its first device-independent
@@ -7598,10 +7813,8 @@ ApplicationWindow {
 									scopePresentationTailContainedMutationCount =
 											scopePresentationMutationCount
 							}
-							return
+							return Math.abs(contentY - tailContentYTarget()) > 0.5
 						}
-						if (item.height > height + 1.0)
-							return
 						// The inline footer normally gives the latest message breathing room.
 						// If that footer pushes an otherwise fitting rich message above the
 						// viewport, trade only the required footer pixels for complete content.
@@ -7612,9 +7825,11 @@ ApplicationWindow {
 							setTailContentY(item.y)
 							if (scopePresentationFinalizing
 									&& Math.abs(contentY - previousY) > 0.5)
-								scopePresentationTailContainedMutationCount =
+									scopePresentationTailContainedMutationCount =
 										scopePresentationMutationCount
 						}
+						return Math.abs(contentY - item.y) <= 1.0
+							&& Math.abs(contentY - tailContentYTarget()) > 0.5
 					}
 
 					// Delegate y-coordinates settle over several scene-graph frames after a
@@ -7636,6 +7851,12 @@ ApplicationWindow {
 
 					onContentYChanged: {
 						scheduleViewportMembershipUpdate()
+						// The custom handler emits a balanced start/end pair even for a
+						// coarse wheel packet clamped at a physical edge. Transfer ownership
+						// only from an observed viewport mutation, preserving thumb-era pins
+						// for a zero-distance packet.
+						if (timelineScrollHandler.scrolling && !explicitNavigationMovement)
+							takeExplicitNavigationOwnership("wheel-or-middle-drag")
 						const staticPreheatDelta = contentY - staticPreviewPreheatLastContentY
 						if (Math.abs(staticPreheatDelta) > 0.5
 								&& (richScrollInProgress || explicitWheelInputPending
@@ -8285,11 +8506,12 @@ ApplicationWindow {
 									timeline.restoringBottom = false
 									return
 								}
-								timeline.containTailMessageWhenPossible()
+								const tailContained = timeline.containTailMessageWhenPossible()
 								timeline.restoringBottom = false
 								if (ownsScopeReset)
 									timeline.scopeResetPending = false
-								if (timeline.stickToBottom && !timeline.isNearBottom())
+								if (timeline.stickToBottom && !timeline.isNearBottom()
+										&& !tailContained)
 									timeline.requestBottomFollow()
 								else
 									timeline.markVisibleScopeReadIfEligible()
@@ -8324,6 +8546,7 @@ ApplicationWindow {
 								chatModel.presentationBusy = true
 								return
 							}
+							timeline.noteScopePresentationDataReady()
 							if (!timeline.deferredPrependAnchorActive) {
 								timeline.scheduleRichContentResume()
 								return
@@ -8335,6 +8558,7 @@ ApplicationWindow {
 						}
 						function onAppendPendingChanged() {
 							if (!chatModel.appendPending) {
+								timeline.noteScopePresentationDataReady()
 								// replaceMessages() publishes the complete model before its
 								// append-idle signal. Probe an eligible plain/sparse scope once
 								// on the zero-delay timer; never scan the model synchronously and
@@ -11771,7 +11995,9 @@ ApplicationWindow {
 											accessibilityViewportItem: timeline
 											accessibilityViewportOffset: timeline.contentY
 											animationsEnabled: !root.visualFixtureOverrideActive
-													&& !timeline.richScrollInProgress
+												&& !timeline.richScrollInProgress
+											hoverEffectsEnabled: !root.visualFixtureOverrideActive
+												&& !timeline.richScrollInProgress
 												onAttachmentRequested: attachment => root.requestAttachment(
 													attachment, messageDelegate.stableId)
 												onAttachmentDownloadRequested: attachment => root.downloadAttachment(
