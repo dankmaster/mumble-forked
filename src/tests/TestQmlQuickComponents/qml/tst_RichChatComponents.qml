@@ -6103,7 +6103,7 @@ TestCase {
 		action.enabled = true
     }
 
-	function test_attachment_accessibility_tracks_contained_tile() {
+	function test_attachment_accessibility_tracks_contained_controls() {
 		const fixture = createTemporaryObject(attachmentAccessibilityFixtureComponent,
 			testCase)
 		verify(fixture !== null)
@@ -6149,7 +6149,8 @@ TestCase {
 		compare(loadingBusy.Accessible.ignored, true)
 		compare(loadingLabel.Accessible.ignored, true)
 		compare(loadingAction.Accessible.ignored, true)
-		compare(loadingSave.Accessible.ignored, true)
+		compare(loadingSave.Accessible.ignored, false)
+		compare(loadingSave.activeFocusOnTab, true)
 		compare(errorLabel.Accessible.ignored, true)
 		compare(errorRetry.Accessible.ignored, true)
 		compare(errorAction.Accessible.ignored, true)
@@ -6180,11 +6181,12 @@ TestCase {
 
 		viewport.contentY = errorTile.y + 1
 		tryCompare(viewport, "contentY", errorTile.y + 1)
-		tryCompare(errorLabel.Accessible, "ignored", true)
-		compare(errorRetry.Accessible.ignored, true)
+		tryCompare(errorLabel.Accessible, "ignored", false)
+		compare(errorRetry.Accessible.ignored, false)
 		compare(errorAction.Accessible.ignored, true)
-		compare(errorSave.Accessible.ignored, true)
-		compare(errorRetry.activeFocusOnTab, false)
+		compare(errorSave.Accessible.ignored, false)
+		compare(errorRetry.activeFocusOnTab, true)
+		compare(errorSave.activeFocusOnTab, true)
 
 		gallery.hoverEffectsEnabled = false
 		compare(readyAction.hoverEnabled, false)

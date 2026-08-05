@@ -959,6 +959,46 @@ function Assert-QmlAccessibilityEvidence {
 			throw "Surface '$CaseId' lacks required semantic node '$requiredName'."
 		}
 	}
+	if ($surface -eq "chat-attachment-states") {
+		$entries = @(Get-QmlAccessibilityEntries $Snapshot)
+		$conversationEntries = @($entries | Where-Object {
+			([string]$_.node.role).Equals("List", [StringComparison]::OrdinalIgnoreCase) -and
+			[string]$_.node.name -eq "Conversation messages"
+		})
+		if ($conversationEntries.Count -ne 1) {
+			throw "Attachment case '$CaseId' does not expose exactly one current conversation subtree."
+		}
+		$conversationPath = [string]$conversationEntries[0].path
+		$attachmentEntries = @($entries | Where-Object {
+			([string]$_.node.role).Equals("List", [StringComparison]::OrdinalIgnoreCase) -and
+			[string]$_.node.name -eq "Message attachments" -and
+			(Test-QmlAccessibilityPathContains -Path $conversationPath -Candidate ([string]$_.path))
+		})
+		if ($attachmentEntries.Count -ne 1) {
+			throw "Attachment case '$CaseId' does not expose one attachment list owned by the current conversation."
+		}
+		$attachmentPath = [string]$attachmentEntries[0].path
+		$failureAlerts = @($entries | Where-Object {
+			([string]$_.node.role).Equals("AlertMessage", [StringComparison]::OrdinalIgnoreCase) -and
+			-not [string]::IsNullOrWhiteSpace([string]$_.node.name) -and
+			[string]$_.node.description -eq "Failed attachment preview" -and
+			(Test-QmlAccessibilityPathContains -Path $attachmentPath -Candidate ([string]$_.path))
+		})
+		if ($failureAlerts.Count -ne 1) {
+			throw "Attachment case '$CaseId' does not expose one machine-readable failed-preview alert owned by the failed attachment."
+		}
+		foreach ($ownedName in @("Alex", "10:36",
+			"Here are the assets from the latest community-test pass.",
+			"Save original Failed attachment preview", "Retry preview for Failed attachment preview")) {
+			$ownedEntries = @($entries | Where-Object {
+				[string]$_.node.name -eq $ownedName -and
+				(Test-QmlAccessibilityPathContains -Path $conversationPath -Candidate ([string]$_.path))
+			})
+			if ($ownedEntries.Count -ne 1) {
+				throw "Attachment case '$CaseId' does not expose current-message semantic '$ownedName' exactly once."
+			}
+		}
+	}
 	if ($surface -eq "menu-profile") {
 		$profileHeaders = @($nodes | Where-Object {
 			([string]$_.role).Equals("MenuItem", [StringComparison]::OrdinalIgnoreCase) -and
@@ -1344,7 +1384,7 @@ foreach ($case in $selectedCases) {
 		"rich_preview_size", "rich_preview_present", "rich_preview_message_id", "rich_body_message_id", "rich_preview_title",
 		"presentation_family", "case_variant", "surface_variant", "surface_present", "capture_window",
 		"screen_share_native_frame_ready", "conversation_search_state",
-		"chat_fixture_state", "fixture_scope_token", "fixture_message_id_prefix",
+		"chat_fixture_state", "presentation_lifecycle", "fixture_scope_token", "fixture_message_id_prefix",
 		"fixture_message_ids",
 		"pre_apply_presentation_generation", "presentation_generation", "timeline_presentation_wait_ms",
 		"rich_preview_open_label", "rich_preview_embed_provider", "rich_preview_embed_aspect",
@@ -1501,7 +1541,8 @@ foreach ($case in $selectedCases) {
 			"prepend_visible_frame_committed", "prepend_history_loader_visible",
 			"prepend_history_loader_height", "prepend_jump_to_latest_visible",
 			"prepend_composer_height", "prepend_composer_contiguous",
-			"prepend_exact_message_order",
+			"prepend_settlement_observed", "prepend_exact_message_order",
+			"prepend_expected_message_ids", "prepend_actual_message_ids",
 			"prepend_start_frame_serial", "prepend_first_committed_frame_serial",
 			"prepend_second_committed_frame_serial",
 			"prepend_matching_committed_frame_count",
@@ -1588,7 +1629,22 @@ foreach ($case in $selectedCases) {
 				}
 			}
 			"chat-history-prepend-anchor" {
-				$expectedAnchor = [string]@($applied.fixture_message_ids)[17]
+				$expectedPrependMessageIds = @($chatState.prepend_expected_message_ids | ForEach-Object { [string]$_ })
+				$actualPrependMessageIds = @($chatState.prepend_actual_message_ids | ForEach-Object { [string]$_ })
+				$orderedPrependExportMatches = $expectedPrependMessageIds.Count -eq 30 -and
+					$actualPrependMessageIds.Count -eq $expectedPrependMessageIds.Count
+				if ($orderedPrependExportMatches) {
+					for ($messageIndex = 0; $messageIndex -lt $expectedPrependMessageIds.Count; ++$messageIndex) {
+						if (-not $actualPrependMessageIds[$messageIndex].Equals(
+								$expectedPrependMessageIds[$messageIndex], [StringComparison]::Ordinal)) {
+							$orderedPrependExportMatches = $false
+							break
+						}
+					}
+				}
+				$expectedAnchor = if ($expectedPrependMessageIds.Count -gt 17) {
+					[string]$expectedPrependMessageIds[17]
+				} else { "" }
 				$reportedOffsetDelta = [double]$chatState.anchor_offset_delta
 				$calculatedOffsetDelta = [Math]::Abs(
 					[double]$chatState.anchor_after_offset - [double]$chatState.anchor_before_offset)
@@ -1613,7 +1669,9 @@ foreach ($case in $selectedCases) {
 					-not [bool]$chatState.prepend_jump_to_latest_visible -or
 					[double]$chatState.prepend_composer_height -le 1.0 -or
 					-not [bool]$chatState.prepend_composer_contiguous -or
+					-not [bool]$chatState.prepend_settlement_observed -or
 					-not [bool]$chatState.prepend_exact_message_order -or
+					-not $orderedPrependExportMatches -or
 					[long]$chatState.prepend_first_committed_frame_serial -le
 						[long]$chatState.prepend_start_frame_serial -or
 					[long]$chatState.prepend_second_committed_frame_serial -le
@@ -1622,7 +1680,7 @@ foreach ($case in $selectedCases) {
 					[double]$chatState.prepend_stable_duration_ms -gt 300.0 -or
 					[Math]::Abs($reportedOffsetDelta - $calculatedOffsetDelta) -gt 0.001) {
 					$chatJson = $chatState | ConvertTo-Json -Compress -Depth 8
-					throw "History fixture '$($case.id)' did not execute a stable six-row production prepend: $chatJson"
+					throw "History fixture '$($case.id)' did not execute a settled 30-row production prepend receipt: $chatJson"
 				}
 			}
 		}
@@ -1714,11 +1772,16 @@ foreach ($case in $selectedCases) {
 		[string]$case.state -eq "connected"
 	$timelinePresentation = $null
 	$timelineHandshakeDurationMs = $null
-	$containsRichOrAttachmentContent = $richPreviewVariant -ne "none" -or
-		$caseVariant -ne "none" -or $surfaceVariant -eq "chat-attachment-states"
-	# Static fixture content is already terminal when it is injected. The extended
-	# allowance is available only to a case that proves a real uncached transition.
-	$extendedPresentationBudgetExercised = $false
+	$presentationLifecycle = [string]$applied.presentation_lifecycle
+	if ($requiresProductionTimelineHandshake -and
+		$presentationLifecycle -notin @("cached_scope_switch", "uncached_initial_materialization")) {
+		throw "Case '$($case.id)' returned unsupported presentation lifecycle '$presentationLifecycle'."
+	}
+	# The controller creates the scope and publishes its model after the RPC timer
+	# starts. Local terminal DTOs therefore remain an uncached first materialization,
+	# not a cached scope switch merely because no network request occurs.
+	$extendedPresentationBudgetExercised = $requiresProductionTimelineHandshake -and
+		$presentationLifecycle -eq "uncached_initial_materialization"
 	$timelinePresentationBudgetMs = if ($extendedPresentationBudgetExercised) { 1000.0 } else { 300.0 }
 	$applyRpcBudgetMs = 1000.0
 	$presentationTimingDiagnosticPath = $null
@@ -1730,8 +1793,7 @@ foreach ($case in $selectedCases) {
 		$presentationTimingDiagnostic = [ordered]@{
 			case_id = [string]$case.id
 			status = "pending"
-			presentation_classification = if ($extendedPresentationBudgetExercised) { "uncached" }
-				elseif ($containsRichOrAttachmentContent) { "cached-rich" } else { "cached-simple" }
+			presentation_classification = $presentationLifecycle
 			visible_rows_budget_ms = $timelinePresentationBudgetMs
 			loading_feedback_budget_ms = 100.0
 			composer_interactive_budget_ms = 500.0
@@ -2422,8 +2484,7 @@ foreach ($case in $selectedCases) {
 		visual_coherence_passed = $true
 		apply_duration_ms = $applyDurationMs
 		presentation_classification = if (-not $requiresProductionTimelineHandshake) { $null }
-			elseif ($extendedPresentationBudgetExercised) { "uncached" }
-			elseif ($containsRichOrAttachmentContent) { "cached-rich" } else { "cached-simple" }
+			else { $presentationLifecycle }
 		visible_rows_budget_ms = if ($requiresProductionTimelineHandshake) {
 			$timelinePresentationBudgetMs
 		} else { $null }
@@ -2483,6 +2544,18 @@ foreach ($case in $selectedCases) {
 		} else { $null }
 		prepend_matching_committed_frame_count = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
 			[int]$chatState.prepend_matching_committed_frame_count
+		} else { $null }
+		prepend_settlement_observed = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[bool]$chatState.prepend_settlement_observed
+		} else { $null }
+		prepend_exact_message_order = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[bool]$chatState.prepend_exact_message_order
+		} else { $null }
+		prepend_expected_message_ids = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			@($chatState.prepend_expected_message_ids)
+		} else { $null }
+		prepend_actual_message_ids = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			@($chatState.prepend_actual_message_ids)
 		} else { $null }
 		stable_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }
 			else { [double]$timelinePresentation.stableFrameDurationMs }

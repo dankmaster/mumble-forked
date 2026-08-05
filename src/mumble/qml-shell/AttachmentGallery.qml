@@ -300,6 +300,8 @@ Item {
 
 				ColumnLayout {
 					id: attachmentErrorContent
+					readonly property bool failureAccessibilityExposed:
+						root.itemContainedInAccessibilityViewport(attachmentErrorContent)
 					anchors.centerIn: parent
 					width: Math.max(1, parent.width - Theme.space3 * 2)
 					spacing: Theme.space2
@@ -320,7 +322,7 @@ Item {
 						Accessible.role: Accessible.AlertMessage
 						Accessible.name: text
 						Accessible.description: attachmentTile.label
-						Accessible.ignored: !attachmentTile.accessibilityExposed
+						Accessible.ignored: !attachmentErrorContent.failureAccessibilityExposed
 					}
 
 					ModernButton {
@@ -331,8 +333,8 @@ Item {
 						tone: "retry"
 						text: qsTr("Retry preview")
 						Accessible.name: qsTr("Retry preview for %1").arg(attachmentTile.label)
-						Accessible.ignored: !attachmentTile.accessibilityExposed
-						activeFocusOnTab: attachmentTile.accessibilityExposed
+						Accessible.ignored: !attachmentErrorContent.failureAccessibilityExposed
+						activeFocusOnTab: attachmentErrorContent.failureAccessibilityExposed
 						onClicked: root.attachmentRetryRequested(attachmentTile.modelData)
 					}
 				}
@@ -435,7 +437,10 @@ Item {
                 }
 
 				ModernIconButton {
+					id: attachmentDownload
 					objectName: "attachmentDownload_" + attachmentTile.stableId
+					readonly property bool downloadAccessibilityExposed:
+						root.itemContainedInAccessibilityViewport(attachmentDownload)
 					anchors.top: attachmentTile.imageAttachment ? parent.top : undefined
 					anchors.verticalCenter: attachmentTile.imageAttachment ? undefined : parent.verticalCenter
 					anchors.right: parent.right
@@ -449,11 +454,11 @@ Item {
 					iconName: "download"
 					text: qsTr("Save original")
 					Accessible.name: qsTr("Save original %1").arg(attachmentTile.label)
-					Accessible.ignored: !attachmentTile.accessibilityExposed
-					activeFocusOnTab: attachmentTile.accessibilityExposed
+					Accessible.ignored: !attachmentDownload.downloadAccessibilityExposed
+					activeFocusOnTab: attachmentDownload.downloadAccessibilityExposed
 					hoverEnabled: root.hoverEffectsEnabled
 					ToolTip.visible: root.hoverEffectsEnabled && hovered
-						&& attachmentTile.accessibilityExposed
+						&& attachmentDownload.downloadAccessibilityExposed
 					ToolTip.text: text
 					onClicked: root.attachmentDownloadRequested(attachmentTile.modelData)
 				}

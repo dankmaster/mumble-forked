@@ -1719,7 +1719,10 @@ namespace {
 			{ QStringLiteral("prepend_jump_to_latest_visible"), false },
 			{ QStringLiteral("prepend_composer_height"), 0.0 },
 			{ QStringLiteral("prepend_composer_contiguous"), false },
+			{ QStringLiteral("prepend_settlement_observed"), false },
 			{ QStringLiteral("prepend_exact_message_order"), false },
+			{ QStringLiteral("prepend_expected_message_ids"), QVariantList() },
+			{ QStringLiteral("prepend_actual_message_ids"), QVariantList() },
 			{ QStringLiteral("prepend_start_frame_serial"), 0 },
 			{ QStringLiteral("prepend_first_committed_frame_serial"), 0 },
 			{ QStringLiteral("prepend_second_committed_frame_serial"), 0 },
@@ -2388,6 +2391,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		QVariantMap afterPresentation;
 		bool anchorPreserved = false;
 		bool prependPresentationReady = false;
+		bool prependSettlementObserved = false;
 		bool composerContiguous = false;
 		qulonglong prependFirstCommittedFrameSerial = 0;
 		qulonglong prependSecondCommittedFrameSerial = 0;
@@ -2395,34 +2399,27 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		QString prependFirstCommittedAnchorID;
 		double prependFirstCommittedAnchorOffset = 0.0;
 		double prependStableDurationMs = 0.0;
-		for (int attempt = 0; attempt < 12; ++attempt) {
-			QString frameError;
-			if (!waitForPresentedFrame(&frameError, presentationWindow)) {
-				if (error) *error = QStringLiteral("History-anchor restoration failed: %1").arg(frameError);
-				return {};
-			}
+		auto readPrependReceipt = [&]() {
 			if (!readTimelineState(&afterState)) {
-				if (error) *error = QStringLiteral("The history fixture lost its production timeline state.");
-				return {};
+				return false;
 			}
 			QVariant presentationResult;
 			if (!QMetaObject::invokeMethod(window, "timelinePresentationState",
 					Q_RETURN_ARG(QVariant, presentationResult))) {
-				if (error) *error = QStringLiteral("The history fixture lost its presentation receipt.");
-				return {};
+				return false;
 			}
 			afterPresentation = presentationResult.toMap();
 			timelinePresentation = afterPresentation;
-			const double afterOffset = afterState.value(QStringLiteral("firstVisibleOffset")).toDouble();
-			anchorPreserved = afterState.value(QStringLiteral("firstVisibleStableId")).toString() == anchorID
-				&& qAbs(afterOffset - anchorBeforeOffset) <= 0.5;
+			return true;
+		};
+		auto prependSurfaceSettled = [&]() {
 			const double composerBoundary = afterPresentation.value(
 				QStringLiteral("jumpToLatestBottom")).toDouble()
 				+ afterPresentation.value(QStringLiteral("jumpToLatestBottomMargin")).toDouble();
 			composerContiguous = afterPresentation.value(QStringLiteral("composerHeight")).toDouble() > 1.0
 				&& qAbs(afterPresentation.value(QStringLiteral("composerTop")).toDouble()
 					- composerBoundary) <= 1.0;
-			const bool prependSurfaceReady = prependPendingStarted && prependPendingSettled
+			return prependPendingStarted && prependPendingSettled
 				&& !m_host->chatModel()->prependPending()
 				&& afterPresentation.value(QStringLiteral("scopeToken")).toString() == prependScopeToken
 				&& afterPresentation.value(QStringLiteral("generation")).toULongLong()
@@ -2435,7 +2432,6 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				&& !afterPresentation.value(QStringLiteral("scopeResetPending")).toBool()
 				&& afterPresentation.value(QStringLiteral("stableFrameCommitted")).toBool()
 				&& afterPresentation.value(QStringLiteral("visibleFrameCommitted")).toBool()
-				&& afterPresentation.value(QStringLiteral("settled")).toBool()
 				&& afterPresentation.value(QStringLiteral("visibleDeferredSummaryCount")).toInt() == 0
 				&& afterPresentation.value(QStringLiteral("visibleBlankPresentationCount")).toInt() == 0
 				&& afterPresentation.value(QStringLiteral("visiblePresentationHeightPendingCount")).toInt() == 0
@@ -2444,6 +2440,47 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				&& qAbs(afterPresentation.value(QStringLiteral("historyLoaderHeight")).toDouble() - 48.0) <= 1.0
 				&& afterPresentation.value(QStringLiteral("jumpToLatestVisible")).toBool()
 				&& composerContiguous;
+		};
+		constexpr qint64 prependReceiptDeadlineMilliseconds = 300;
+		while (prependTimer.elapsed() < prependReceiptDeadlineMilliseconds) {
+			QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
+			if (!readPrependReceipt()) {
+				if (error) *error = QStringLiteral("The history fixture lost its production settlement receipt.");
+				return {};
+			}
+			prependSettlementObserved = prependSurfaceSettled();
+			if (prependSettlementObserved) break;
+			presentationWindow->requestUpdate();
+			QThread::msleep(1);
+		}
+
+		for (int committedFrame = 0;
+				 prependSettlementObserved && committedFrame < 2
+				 && prependTimer.elapsed() < prependReceiptDeadlineMilliseconds;
+				 ++committedFrame) {
+			const qulonglong previousFrameSerial =
+				afterPresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong();
+			bool committedSwapObserved = false;
+			presentationWindow->requestUpdate();
+			while (prependTimer.elapsed() < prependReceiptDeadlineMilliseconds) {
+				QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
+				if (!readPrependReceipt()) {
+					if (error) *error = QStringLiteral("The history fixture lost its post-prepend frame receipt.");
+					return {};
+				}
+				if (afterPresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong()
+						> previousFrameSerial) {
+					committedSwapObserved = true;
+					break;
+				}
+				QThread::msleep(1);
+			}
+			if (!committedSwapObserved) break;
+
+			const double afterOffset = afterState.value(QStringLiteral("firstVisibleOffset")).toDouble();
+			anchorPreserved = afterState.value(QStringLiteral("firstVisibleStableId")).toString() == anchorID
+				&& qAbs(afterOffset - anchorBeforeOffset) <= 0.5;
+			const bool prependSurfaceReady = prependSurfaceSettled();
 			const qulonglong observedFrameSerial =
 				afterPresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong();
 			const QString observedAnchorID =
@@ -2452,7 +2489,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				&& observedAnchorID == anchorID
 				&& qAbs(afterOffset - anchorBeforeOffset) <= 0.5;
 			if (prependSurfaceReady && matchingCommittedGeometry) {
-				if (prependFirstCommittedFrameSerial == 0) {
+				if (committedFrame == 0) {
 					prependFirstCommittedFrameSerial = observedFrameSerial;
 					prependFirstCommittedAnchorID = observedAnchorID;
 					prependFirstCommittedAnchorOffset = afterOffset;
@@ -2465,32 +2502,35 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 					prependStableDurationMs = static_cast< double >(prependTimer.elapsed());
 					prependPresentationReady = true;
 				}
-			} else if (prependFirstCommittedFrameSerial > 0
-					&& observedFrameSerial > prependFirstCommittedFrameSerial) {
-				prependFirstCommittedFrameSerial = 0;
-				prependSecondCommittedFrameSerial = 0;
-				prependMatchingCommittedFrameCount = 0;
-				prependFirstCommittedAnchorID.clear();
-				prependFirstCommittedAnchorOffset = 0.0;
+			} else {
+				break;
 			}
-			if (anchorPreserved && prependPresentationReady) break;
 		}
 		const int anchorAfterRow = m_host->chatModel()->rowForStableId(anchorID);
 		const double anchorAfterOffset = afterState.value(QStringLiteral("firstVisibleOffset")).toDouble();
-		bool exactPrependMessageOrder = m_host->chatModel()->rowCount() == finalExpectedMessageCount;
-		for (int row = 0; exactPrependMessageOrder && row < finalExpectedMessageCount; ++row) {
+		QVariantList expectedPrependMessageIDs;
+		QVariantList actualPrependMessageIDs;
+		expectedPrependMessageIDs.reserve(finalExpectedMessageCount);
+		actualPrependMessageIDs.reserve(m_host->chatModel()->rowCount());
+		for (int row = 0; row < finalExpectedMessageCount; ++row) {
 			const int expectedSequence = 1 - VisualHistoryPrependMessageCount + row;
-			exactPrependMessageOrder = m_host->chatModel()->get(row).value(QStringLiteral("id")).toString()
-				== visualHistoryMessageID(fixtureGeneration, expectedSequence);
+			expectedPrependMessageIDs.push_back(visualHistoryMessageID(fixtureGeneration, expectedSequence));
 		}
+		for (int row = 0; row < m_host->chatModel()->rowCount(); ++row) {
+			actualPrependMessageIDs.push_back(
+				m_host->chatModel()->get(row).value(QStringLiteral("id")).toString());
+		}
+		const bool exactPrependMessageOrder = actualPrependMessageIDs == expectedPrependMessageIDs;
 		const bool purePrependApplied = exactPrependMessageOrder
 			&& anchorAfterRow == anchorBeforeRow + VisualHistoryPrependMessageCount
 			&& afterState.value(QStringLiteral("count")).toInt() == finalExpectedMessageCount;
-		if (!anchorPreserved || !purePrependApplied || !prependPresentationReady) {
+		if (!anchorPreserved || !purePrependApplied || !prependSettlementObserved
+			|| !prependPresentationReady) {
 			if (error) {
 				*error = QStringLiteral("The production history prepend did not preserve its settled viewport "
 					"(before row %1/offset %2, after row %3/offset %4, count %5/%6, "
-					"pending %7/%8, anchor active %9, presentation %10/%11/%12).")
+					"pending %7/%8, anchor active %9, presentation %10/%11/%12, "
+					"settlement %13, committed swaps %14).")
 					.arg(anchorBeforeRow).arg(anchorBeforeOffset, 0, 'f', 2)
 					.arg(anchorAfterRow).arg(anchorAfterOffset, 0, 'f', 2)
 					.arg(m_host->chatModel()->rowCount()).arg(finalExpectedMessageCount)
@@ -2498,7 +2538,8 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 					.arg(afterPresentation.value(QStringLiteral("prependAnchorActive")).toBool())
 					.arg(afterPresentation.value(QStringLiteral("presentationPending")).toBool())
 					.arg(afterPresentation.value(QStringLiteral("presentationFinalizing")).toBool())
-					.arg(afterPresentation.value(QStringLiteral("scopeResetPending")).toBool());
+					.arg(afterPresentation.value(QStringLiteral("scopeResetPending")).toBool())
+					.arg(prependSettlementObserved).arg(prependMatchingCommittedFrameCount);
 			}
 			return {};
 		}
@@ -2544,7 +2585,10 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			{ QStringLiteral("prepend_composer_height"),
 				afterPresentation.value(QStringLiteral("composerHeight")).toDouble() },
 			{ QStringLiteral("prepend_composer_contiguous"), composerContiguous },
+			{ QStringLiteral("prepend_settlement_observed"), prependSettlementObserved },
 			{ QStringLiteral("prepend_exact_message_order"), exactPrependMessageOrder },
+			{ QStringLiteral("prepend_expected_message_ids"), expectedPrependMessageIDs },
+			{ QStringLiteral("prepend_actual_message_ids"), actualPrependMessageIDs },
 			{ QStringLiteral("prepend_start_frame_serial"), prependStartFrameSerial },
 			{ QStringLiteral("prepend_first_committed_frame_serial"),
 				prependFirstCommittedFrameSerial },
@@ -2849,6 +2893,9 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		}
 	}
 	const QVariantMap chatFixtureState = visualChatFixtureState(m_host, surfaceVariant, prependFixtureState);
+	const QString presentationLifecycle = state == QLatin1String("connected")
+		&& presentationWindow == window
+		? QStringLiteral("uncached_initial_materialization") : QStringLiteral("not_applicable");
 	fixtureOverrideRollback.committed = true;
 	++m_generation;
 	return { { QStringLiteral("case_id"), caseId }, { QStringLiteral("state"), state },
@@ -2889,6 +2936,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			 { QStringLiteral("toast_state"), toastState },
 			 { QStringLiteral("conversation_search_state"), conversationSearchState },
 			 { QStringLiteral("chat_fixture_state"), chatFixtureState },
+			 { QStringLiteral("presentation_lifecycle"), presentationLifecycle },
 			 { QStringLiteral("fixture_scope_token"), expectedFixtureScopeToken },
 			 { QStringLiteral("fixture_message_id_prefix"), expectedFixtureMessagePrefix },
 			 { QStringLiteral("fixture_message_ids"), fixtureMessageIds },

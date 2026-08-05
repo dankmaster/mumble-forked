@@ -433,10 +433,14 @@ Describe "Qt Quick visual manifest validation" {
 		$models | Should Match '(?s)bool MediaSessionBackend::detachedPlaybackSupported\(\) const \{\s*#ifdef Q_OS_WIN.*?return false;'
 	}
 
-	It "gates every contained attachment control through the shared viewport bounds contract" {
+	It "exposes individually contained attachment failure controls through the owning message subtree" {
 		$gateScript = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		$attachment = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\AttachmentGallery.qml"
 		$gateScript | Should Match '"chat-attachment-states" \{ @\([\s\S]*?"Community test dashboard"[\s\S]*?"Save original Community test dashboard"[\s\S]*?"Performance trace"[\s\S]*?"Save original Performance trace"[\s\S]*?"Loading Performance trace"[\s\S]*?"Failed attachment preview"'
+		$gateScript | Should Match '\$surface\s*-eq\s*"chat-attachment-states"[\s\S]*?AlertMessage[\s\S]*?Failed attachment preview[\s\S]*?Retry preview for Failed attachment preview'
 		$gateScript | Should Match 'Assert-QmlAccessibilityViewportBounds -Snapshot \$Snapshot -CaseId \$CaseId'
+		$attachment | Should Match 'failureAccessibilityExposed:[\s\S]*itemContainedInAccessibilityViewport\(attachmentErrorContent\)'
+		$attachment | Should Match 'downloadAccessibilityExposed:[\s\S]*itemContainedInAccessibilityViewport\(attachmentDownload\)'
 		$gateScript | Should Not Match 'exposes partially clipped semantic node'
 		$gateScript | Should Not Match '"View preview Community test dashboard"'
 	}
@@ -519,11 +523,19 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'prepend_stable_duration_ms\s*-gt\s*300\.0'
 		$worker | Should Match 'prepend_history_loader_height'
 		$worker | Should Match 'prepend_composer_contiguous'
+		$worker | Should Match 'prepend_settlement_observed'
 		$worker | Should Match 'prepend_exact_message_order'
+		$worker | Should Match 'prepend_expected_message_ids'
+		$worker | Should Match 'prepend_actual_message_ids'
+		$worker | Should Match '\$orderedPrependExportMatches'
 		$worker | Should Match 'prepend_first_committed_frame_serial\s*-le'
 		$worker | Should Match 'prepend_second_committed_frame_serial\s*-le'
 		$worker | Should Match 'prepend_matching_committed_frame_count\s*-lt\s*2'
-		$worker | Should Match 'did not execute a stable six-row production prepend'
+		$worker | Should Match 'did not execute a settled 30-row production prepend receipt'
+		$controller | Should Match 'prependReceiptDeadlineMilliseconds\s*=\s*300'
+		$controller | Should Match 'prependSettlementObserved'
+		$controller | Should Match 'previousFrameSerial'
+		$controller | Should Not Match 'for \(int attempt = 0; attempt < 12; \+\+attempt\)'
 		$worker | Should Match '"chat-history-prepend-anchor"\s*\{\s*@\('
 		$worker | Should Match 'command\s*=\s*"qmlTimelinePresentationState"'
 		$worker | Should Match 'presentationPending'
@@ -754,7 +766,9 @@ Describe "Qt Quick visual manifest validation" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		$worker | Should Match '\$applyTimer\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)'
 		$worker | Should Match 'if \(\$ExtendedPresentationBudgetExercised\) \{ 1000\.0 \} else \{ 300\.0 \}'
-		$worker | Should Match '\$extendedPresentationBudgetExercised\s*=\s*\$false'
+		$worker | Should Match '\$presentationLifecycle\s*=\s*\[string\]\$applied\.presentation_lifecycle'
+		$worker | Should Match 'uncached_initial_materialization'
+		$worker | Should Match '\$extendedPresentationBudgetExercised\s*=\s*\$requiresProductionTimelineHandshake\s*-and'
 		$worker | Should Not Match '\$isHeavyConversation'
 		$worker | Should Match '\$applyRpcBudgetMs\s*=\s*1000\.0'
 		$worker | Should Not Match '\$applyDurationMs\s*-gt\s*\$applyRpcBudgetMs'
@@ -769,6 +783,8 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'provider_result_transition_exercised'
 		$worker | Should Match '\$expectsProviderResultReceipt\s*=\s*\$providerResultTransitionExercised'
 		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
+		$controller | Should Match 'QStringLiteral\("presentation_lifecycle"\), presentationLifecycle'
+		$controller | Should Match 'QStringLiteral\("uncached_initial_materialization"\)'
 		$controller | Should Match 'QStringLiteral\("provider_result_transition_exercised"\), false'
 		$controller | Should Not Match 'QDateTime::currentMSecsSinceEpoch\(\)'
 		$controller | Should Not Match 'QStringLiteral\("providerResultSerial"\)'
