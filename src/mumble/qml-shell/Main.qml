@@ -10,6 +10,7 @@ ApplicationWindow {
 	onFrameSwapped: {
 		timeline.frameSwappedSerial += 1
 		timeline.observeScopePresentationFrame()
+		timeline.observePrependSettlementFrame()
 	}
 	onActiveChanged: {
 		if (active)
@@ -2081,6 +2082,8 @@ ApplicationWindow {
 			const visibleFrameCommittedAt =
 				timeline.scopePresentationVisibleFrameCommittedAt
 			const probeAnchor = timeline.historyLoadProbeAnchorState()
+			const prependSettlementGeometry =
+				timeline.prependSettlementGeometrySnapshot()
 			const timelineViewportOrigin = timeline.mapToItem(root.contentItem, 0, 0)
 			const roomHeaderOrigin = stonksRoomPanelLoader.mapToItem(
 				root.contentItem, 0, 0)
@@ -2333,6 +2336,25 @@ ApplicationWindow {
 				"prependAnchorTargetY": timeline.prependAnchorTargetY,
 				"prependAnchorInsertedExtent": timeline.prependAnchorInsertedExtent,
 				"prependQueuePending": chatModel.prependPending,
+				"prependSettlementState": timeline.prependSettlementState,
+				"prependSettlementTransactionId":
+					timeline.prependSettlementTransactionId,
+				"prependSettlementScopeToken":
+					timeline.prependSettlementScopeToken,
+				"prependSettlementPresentationGeneration":
+					timeline.prependSettlementPresentationGeneration,
+				"prependSettlementExpectedOrderedIdHash":
+					timeline.prependSettlementExpectedOrderedIdHash,
+				"prependSettlementExpectedMessageCount":
+					timeline.prependSettlementExpectedMessageCount,
+				"prependSettlementAnchorId": timeline.prependSettlementAnchorId,
+				"prependSettlementExpectedAnchorOffset":
+					timeline.prependSettlementExpectedAnchorOffset,
+				"prependSettlementReceiptSequence":
+					timeline.prependSettlementReceiptSequence,
+				"prependSettlementReceipt": timeline.prependSettlementReceipt,
+				"prependSettlementCurrentGeometryFingerprint":
+					prependSettlementGeometry.fingerprint,
 				"appendQueuePending": chatModel.appendPending,
 				"chatModelPresentationBusy": chatModel.presentationBusy,
 				"deferredPresentationUpdatesPending":
@@ -4355,6 +4377,30 @@ ApplicationWindow {
 					property bool restoringPrependAnchor: false
 					property int prependAnchorRetries: 0
 					property int prependAnchorCorrectionFrames: 0
+					property int prependSettlementTransactionSequence: 0
+					property string prependSettlementState: "SETTLED"
+					property string prependSettlementTransactionId: ""
+					property string prependSettlementScopeToken: ""
+					property int prependSettlementPresentationGeneration: 0
+					property string prependSettlementExpectedOrderedIdHash: ""
+					property int prependSettlementExpectedMessageCount: 0
+					property string prependSettlementAnchorId: ""
+					property real prependSettlementExpectedAnchorOffset: 0
+					property int prependSettlementStartFrameSerial: 0
+					property double prependSettlementStartedAt: 0
+					property bool prependSettlementPendingObserved: false
+					property string prependSettlementFirstGeometryFingerprint: ""
+					property int prependSettlementFirstFrameSerial: 0
+					property string prependSettlementSecondObservationUpdateTransactionId: ""
+					property string prependSettlementRetirementUpdateTransactionId: ""
+					property int prependSettlementReceiptSequence: 0
+					property var prependSettlementReceipt: ({})
+					readonly property bool prependSettlementHeightCommitOwned:
+						prependAnchorActive && !chatModel.prependPending
+						&& (prependSettlementState === "MODEL_APPLIED"
+							|| prependSettlementState === "ANCHOR_CORRECTION_ACTIVE"
+							|| prependSettlementState === "FIRST_STABLE_GEOMETRY_OBSERVED"
+							|| prependSettlementState === "SECOND_MATCHING_GEOMETRY_OBSERVED")
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
 					// Rich source promotion and asynchronous row construction are one
@@ -5658,6 +5704,226 @@ ApplicationWindow {
 							return true
 						}
 						return false
+					}
+
+					function prependSettlementTransactionActive() {
+						return prependSettlementTransactionId.length > 0
+							&& prependSettlementState !== "SETTLED"
+							&& prependSettlementState !== "CANCELLED"
+					}
+
+					function prependSettlementFixed(value) {
+						const number = Number(value)
+						return isFinite(number) ? number.toFixed(3) : "nan"
+					}
+
+					function prependOrderedMessageIdentity() {
+						const ids = []
+						for (let index = 0; index < chatModel.count; ++index) {
+							const row = chatModel.get(index) || ({})
+							ids.push(String(row.id || ""))
+						}
+						return {
+							"count": ids.length,
+							"hash": Qt.md5(ids.join("\u001f"))
+						}
+					}
+
+					function prependSettlementGeometrySnapshot() {
+						const anchorId = prependSettlementAnchorId
+						const anchorItem = anchorId.length > 0
+							? timelineDelegateForStableId(anchorId) : null
+						const anchorOffset = anchorItem
+							? Number(anchorItem.mapToItem(timeline, 0, 0).y || 0) : 0
+						const diagnostics = visiblePresentationDiagnostics()
+						const timelineOrigin = timeline.mapToItem(root.contentItem, 0, 0)
+						const composerOrigin = composerSurface.mapToItem(root.contentItem, 0, 0)
+						const jumpOrigin = jumpToLatestButton.mapToItem(root.contentItem, 0, 0)
+						const currentTimelineHeader = timeline.headerItem
+						const historyLoader = currentTimelineHeader
+							? currentTimelineHeader.olderHistoryControl : null
+						const jumpBottom = Number(jumpOrigin.y || 0)
+							+ Number(jumpToLatestButton.height || 0)
+						const composerTop = Number(composerOrigin.y || 0)
+						const composerContiguous = composerSurface.height > 1
+							&& Math.abs(composerTop - (jumpBottom
+								+ Number(jumpToLatestButton.timelineBottomMargin || 0))) <= 1
+						const historyLoaderVisible = !!historyLoader && historyLoader.visible
+						const historyLoaderHeight = historyLoader
+							? Number(historyLoader.height || 0) : 0
+						const fingerprint = "count=" + chatModel.count
+							+ "|anchor=" + anchorId
+							+ "|offset=" + prependSettlementFixed(anchorOffset)
+							+ "|contentY=" + prependSettlementFixed(contentY)
+							+ "|contentHeight=" + prependSettlementFixed(contentHeight)
+							+ "|viewportY=" + prependSettlementFixed(timelineOrigin.y)
+							+ "|viewportBottom=" + prependSettlementFixed(
+								Number(timelineOrigin.y || 0) + Number(height || 0))
+							+ "|loader=" + (historyLoaderVisible ? "1" : "0")
+							+ "/" + prependSettlementFixed(historyLoaderHeight)
+							+ "|jump=" + (jumpToLatestButton.visible ? "1" : "0")
+							+ "/" + prependSettlementFixed(jumpBottom)
+							+ "|composer=" + prependSettlementFixed(composerTop)
+							+ "/" + prependSettlementFixed(composerSurface.height)
+							+ "|blank=" + diagnostics.blankCount
+							+ "|height=" + diagnostics.presentationHeightPendingCount
+							+ "/" + diagnostics.presentationHeightMismatchCount
+						return {
+							"fingerprint": fingerprint,
+							"anchorAvailable": !!anchorItem,
+							"anchorOffset": anchorOffset,
+							"blankCount": diagnostics.blankCount,
+							"heightPendingCount": diagnostics.presentationHeightPendingCount,
+							"heightMismatchCount": diagnostics.presentationHeightMismatchCount,
+							"historyLoaderVisible": historyLoaderVisible,
+							"historyLoaderHeight": historyLoaderHeight,
+							"jumpToLatestVisible": jumpToLatestButton.visible,
+							"composerContiguous": composerContiguous
+						}
+					}
+
+					function beginPrependSettlementTransaction(insertedCount) {
+						if (!prependAnchorActive || prependAnchorId.length === 0
+								|| insertedCount <= 0)
+							return false
+						++prependSettlementTransactionSequence
+						prependSettlementScopeToken = String(activeScope.scopeToken || "")
+						prependSettlementPresentationGeneration = scopePresentationGeneration
+						prependSettlementTransactionId = prependSettlementScopeToken + "/"
+							+ prependSettlementPresentationGeneration + "/"
+							+ prependSettlementTransactionSequence
+						prependSettlementExpectedMessageCount = chatModel.count
+							+ Math.max(0, Number(insertedCount || 0))
+						prependSettlementExpectedOrderedIdHash = ""
+						prependSettlementAnchorId = prependAnchorId
+						prependSettlementExpectedAnchorOffset = prependAnchorOffset
+						prependSettlementStartFrameSerial = frameSwappedSerial
+						prependSettlementStartedAt = Date.now()
+						prependSettlementPendingObserved = chatModel.prependPending
+						prependSettlementFirstGeometryFingerprint = ""
+						prependSettlementFirstFrameSerial = 0
+						prependSettlementSecondObservationUpdateTransactionId = ""
+						prependSettlementState = "PREPEND_STARTED"
+						prependSettlementDeadlineTimer.restart()
+						return true
+					}
+
+					function markPrependSettlementModelApplied() {
+						if (!prependSettlementTransactionActive()
+								|| prependSettlementState !== "PREPEND_STARTED"
+								|| !prependSettlementPendingObserved || chatModel.prependPending)
+							return false
+						const identity = prependOrderedMessageIdentity()
+						if (identity.count !== prependSettlementExpectedMessageCount)
+							return false
+						prependSettlementExpectedOrderedIdHash = identity.hash
+						prependSettlementState = "MODEL_APPLIED"
+						root.update()
+						return true
+					}
+
+					function cancelPrependSettlementTransaction() {
+						if (!prependSettlementTransactionActive())
+							return
+						prependSettlementDeadlineTimer.stop()
+						prependSettlementFirstGeometryFingerprint = ""
+						prependSettlementFirstFrameSerial = 0
+						prependSettlementState = "CANCELLED"
+					}
+
+					function publishPrependSettlementReceipt(snapshot, identity) {
+						if (!prependSettlementTransactionActive()
+								|| prependSettlementState !== "SECOND_MATCHING_GEOMETRY_OBSERVED")
+							return false
+						const settlementTimestamp = Date.now()
+						const settlementDuration = Math.max(0,
+							settlementTimestamp - prependSettlementStartedAt)
+						if (settlementDuration > 300)
+							return false
+						const transactionId = prependSettlementTransactionId
+						++prependSettlementReceiptSequence
+						prependSettlementReceipt = {
+							"sequence": prependSettlementReceiptSequence,
+							"transaction_id": transactionId,
+							"scope_token": prependSettlementScopeToken,
+							"presentation_generation": prependSettlementPresentationGeneration,
+							"ordered_message_count": identity.count,
+							"ordered_message_id_hash": identity.hash,
+							"qualifying_frame_count": 2,
+							"first_geometry_fingerprint":
+								prependSettlementFirstGeometryFingerprint,
+							"second_geometry_fingerprint": snapshot.fingerprint,
+							"first_frame_serial": prependSettlementFirstFrameSerial,
+							"second_frame_serial": frameSwappedSerial,
+							"anchor_id": prependSettlementAnchorId,
+							"anchor_offset": snapshot.anchorOffset,
+							"settlement_timestamp_ms": settlementTimestamp,
+							"settlement_duration_ms": settlementDuration
+						}
+						prependSettlementState = "SETTLEMENT_RECEIPT_PUBLISHED"
+						prependSettlementDeadlineTimer.stop()
+						releasePrependAnchor(true, transactionId)
+						return true
+					}
+
+					function observePrependSettlementFrame() {
+						if (!prependSettlementTransactionActive())
+							return
+						if (prependSettlementState === "PREPEND_STARTED") {
+							if (!markPrependSettlementModelApplied())
+								return
+						}
+						if (prependSettlementState === "MODEL_APPLIED")
+							prependSettlementState = "ANCHOR_CORRECTION_ACTIVE"
+						if (prependSettlementState !== "ANCHOR_CORRECTION_ACTIVE"
+								&& prependSettlementState !== "FIRST_STABLE_GEOMETRY_OBSERVED")
+							return
+						const identity = prependOrderedMessageIdentity()
+						const snapshot = prependSettlementGeometrySnapshot()
+						const identityMatches = prependSettlementPendingObserved
+							&& !chatModel.prependPending && prependAnchorActive
+							&& !prependMutationInProgress && prependAnchorCorrectionFrames === 0
+							&& String(activeScope.scopeToken || "") === prependSettlementScopeToken
+							&& scopePresentationGeneration === prependSettlementPresentationGeneration
+							&& identity.count === prependSettlementExpectedMessageCount
+							&& identity.hash === prependSettlementExpectedOrderedIdHash
+							&& snapshot.anchorAvailable
+							&& Math.abs(snapshot.anchorOffset
+								- prependSettlementExpectedAnchorOffset) <= 0.5
+						const surfaceMatches = snapshot.blankCount === 0
+							&& snapshot.heightPendingCount === 0
+							&& snapshot.heightMismatchCount === 0
+							&& snapshot.historyLoaderVisible
+							&& Math.abs(snapshot.historyLoaderHeight - 48) <= 1
+							&& snapshot.jumpToLatestVisible && snapshot.composerContiguous
+						if (!identityMatches || !surfaceMatches
+								|| frameSwappedSerial <= prependSettlementStartFrameSerial) {
+							prependSettlementFirstGeometryFingerprint = ""
+							prependSettlementFirstFrameSerial = 0
+							prependSettlementState = "ANCHOR_CORRECTION_ACTIVE"
+							return
+						}
+						if (prependSettlementFirstGeometryFingerprint.length === 0) {
+							prependSettlementFirstGeometryFingerprint = snapshot.fingerprint
+							prependSettlementFirstFrameSerial = frameSwappedSerial
+							prependSettlementState = "FIRST_STABLE_GEOMETRY_OBSERVED"
+							if (prependSettlementSecondObservationUpdateTransactionId
+									!== prependSettlementTransactionId) {
+								prependSettlementSecondObservationUpdateTransactionId =
+									prependSettlementTransactionId
+								root.update()
+							}
+							return
+						}
+						if (frameSwappedSerial <= prependSettlementFirstFrameSerial)
+							return
+						if (snapshot.fingerprint !== prependSettlementFirstGeometryFingerprint) {
+							prependSettlementFirstGeometryFingerprint = snapshot.fingerprint
+							prependSettlementFirstFrameSerial = frameSwappedSerial
+							return
+						}
+						prependSettlementState = "SECOND_MATCHING_GEOMETRY_OBSERVED"
+						publishPrependSettlementReceipt(snapshot, identity)
 					}
 
 					function historyLoadProbeAnchorState() {
@@ -7672,8 +7938,13 @@ ApplicationWindow {
 						return offsetRestored
 					}
 
-					function releasePrependAnchor(preserveViewportAnchor) {
+					function releasePrependAnchor(preserveViewportAnchor, settledTransactionId) {
 						clearViewportAnchorQuietRelease()
+						const settlementRetiresCurrent = String(settledTransactionId || "").length > 0
+							&& String(settledTransactionId || "") === prependSettlementTransactionId
+							&& prependSettlementState === "SETTLEMENT_RECEIPT_PUBLISHED"
+						if (!settlementRetiresCurrent)
+							cancelPrependSettlementTransaction()
 						// The structural prepend settles before its deferred rich rows are
 						// allowed to replace their fixed-height summaries. Hand the exact
 						// message/offset to the ordinary viewport anchor on the quiet path
@@ -7693,6 +7964,8 @@ ApplicationWindow {
 						prependAnchorRetries = 0
 						prependAnchorCorrectionFrames = 0
 						prependAnchorInsertedExtent = 0
+						if (settlementRetiresCurrent)
+							prependSettlementState = "ANCHOR_AND_PENDING_OWNERSHIP_RETIRED"
 						if (handoffToViewport) {
 							viewportAnchorId = preservedAnchorId
 							viewportAnchorOffset = preservedAnchorOffset
@@ -7701,10 +7974,20 @@ ApplicationWindow {
 							viewportAnchorActive = true
 						}
 						scheduleRichContentResume()
-						Qt.callLater(function() {
-							timeline.scheduleNextVisiblePresentationHeightSettlement()
-						})
-						root.update()
+						if (settlementRetiresCurrent) {
+							prependSettlementState = "SETTLED"
+							if (prependSettlementRetirementUpdateTransactionId
+									!== prependSettlementTransactionId) {
+								prependSettlementRetirementUpdateTransactionId =
+									prependSettlementTransactionId
+								root.update()
+							}
+						} else {
+							Qt.callLater(function() {
+								timeline.scheduleNextVisiblePresentationHeightSettlement()
+							})
+							root.update()
+						}
 					}
 
 					function extendDeferredPrependAnchorTarget(insertedCount) {
@@ -8405,9 +8688,19 @@ ApplicationWindow {
 								else
 									timeline.restorePrependAnchor()
 								restart()
-							} else {
+							} else if (!timeline.prependSettlementTransactionActive()) {
 								timeline.releasePrependAnchor(true)
 							}
+						}
+					}
+
+					Timer {
+						id: prependSettlementDeadlineTimer
+						interval: 300
+						repeat: false
+						onTriggered: {
+							if (timeline.prependSettlementTransactionActive())
+								timeline.releasePrependAnchor(true)
 						}
 					}
 
@@ -8564,16 +8857,21 @@ ApplicationWindow {
 								timeline.prependMutationInProgress = timeline.capturePrependAnchor()
 								timeline.deferredPrependAnchorActive =
 									timeline.prependMutationInProgress
+								if (timeline.prependMutationInProgress)
+									timeline.beginPrependSettlementTransaction(count)
 							}
 						}
 						function onPrependPendingChanged() {
 							if (chatModel.prependPending) {
+								if (timeline.prependSettlementTransactionActive())
+									timeline.prependSettlementPendingObserved = true
 								// A page insert and late source-preview results can otherwise
 								// compete for the same GUI turn. Keep preview DTO changes in the
 								// model's bounded queue until the prepend anchor is stable.
 								chatModel.presentationBusy = true
 								return
 							}
+							timeline.markPrependSettlementModelApplied()
 							timeline.noteScopePresentationDataReady()
 							if (!timeline.deferredPrependAnchorActive) {
 								timeline.scheduleRichContentResume()
@@ -8628,6 +8926,8 @@ ApplicationWindow {
 								timeline.prependMutationInProgress = timeline.capturePrependAnchor()
 								timeline.deferredPrependAnchorActive =
 									timeline.prependMutationInProgress
+								if (timeline.prependMutationInProgress)
+									timeline.beginPrependSettlementTransaction(last - first + 1)
 							} else if (first >= timeline.count) {
 								timeline.followTailAfterInsert = timeline.count === 0
 									|| (timeline.stickToBottom && timeline.isNearBottom())
@@ -8648,6 +8948,8 @@ ApplicationWindow {
 										timeline.prependAnchorCorrectionFrames, 4)
 									timeline.restoreDeferredPrependAnchor()
 									timeline.prependMutationInProgress = false
+									if (!chatModel.prependPending)
+										timeline.markPrependSettlementModelApplied()
 								})
 							} else if (timeline.followTailAfterInsert) {
 								timeline.releaseViewportAnchor()
@@ -9118,6 +9420,8 @@ ApplicationWindow {
 						presentationHeightTailIntent = true
 						return true
 					}
+					if (timeline.prependSettlementHeightCommitOwned)
+						return true
 					if (timeline.restoringViewportAnchor
 						|| timeline.viewportAnchorReleasePending
 						|| timeline.topAnchorActive
@@ -9699,11 +10003,14 @@ ApplicationWindow {
 									&& !timeline.scrollbarDragActive
 									&& !timeline.scrollbarReleasePending
 									&& !timelineScrollBar.pressed
-									&& !timeline.prependAnchorActive
-									&& !timeline.prependMutationInProgress
+									&& (!timeline.prependAnchorActive
+										|| timeline.prependSettlementHeightCommitOwned)
+									&& (!timeline.prependMutationInProgress
+										|| timeline.prependSettlementHeightCommitOwned)
 									&& !chatModel.prependPending
 									&& !timeline.restoringPrependAnchor
-									&& !timeline.deferredPrependAnchorActive
+									&& (!timeline.deferredPrependAnchorActive
+										|| timeline.prependSettlementHeightCommitOwned)
 									&& (!timeline.restoringBottom
 										|| presentationHeightFinalizationMovementOwned)
 									&& !timeline.explicitWheelInputPending

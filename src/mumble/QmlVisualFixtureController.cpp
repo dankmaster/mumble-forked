@@ -2364,8 +2364,6 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			timelinePresentation.value(QStringLiteral("generation")).toULongLong();
 		const qulonglong prependStartFrameSerial =
 			timelinePresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong();
-		const QString prependTransactionID = QStringLiteral("fixture-%1/%2/%3")
-			.arg(fixtureGeneration).arg(prependScopeToken).arg(prependPresentationGeneration);
 		const auto currentOrderedMessageIDs = [&]() {
 			QStringList ids;
 			ids.reserve(m_host->chatModel()->rowCount());
@@ -2381,8 +2379,9 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			expectedOrderedMessageIDs.push_back(visualHistoryMessageID(fixtureGeneration, expectedSequence));
 		}
 		const QString expectedOrderedMessageIDHash = QString::fromLatin1(QCryptographicHash::hash(
-			expectedOrderedMessageIDs.join(QChar(0x1f)).toUtf8(), QCryptographicHash::Sha256).toHex());
-		const qulonglong prependSettlementReceiptBaselineSequence = m_prependSettlementReceiptSequence;
+			expectedOrderedMessageIDs.join(QChar(0x1f)).toUtf8(), QCryptographicHash::Md5).toHex());
+		const qulonglong prependSettlementReceiptBaselineSequence =
+			timelinePresentation.value(QStringLiteral("prependSettlementReceiptSequence")).toULongLong();
 		bool prependPendingStarted = false;
 		bool prependPendingSettled = false;
 		QMetaObject::Connection prependPendingConnection = QObject::connect(
@@ -2420,19 +2419,10 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 
 		QVariantMap afterState;
 		QVariantMap afterPresentation;
-		bool anchorPreserved = false;
 		bool prependSurfaceSettlementReached = false;
 		bool composerContiguous = false;
-		qulonglong prependFirstCommittedFrameSerial = 0;
-		qulonglong prependSecondCommittedFrameSerial = 0;
-		int prependMatchingCommittedFrameCount = 0;
-		QString prependFirstCommittedAnchorID;
-		double prependFirstCommittedAnchorOffset = 0.0;
-		double prependSecondCommittedAnchorOffset = 0.0;
-		QString prependFirstCommittedGeometryFingerprint;
-		QString prependSecondCommittedGeometryFingerprint;
-		QString prependReceiptOrderedMessageIDHash;
-		double prependStableDurationMs = 0.0;
+		QVariantMap prependSettlementReceipt;
+		qulonglong prependSettlementReceiptSequence = prependSettlementReceiptBaselineSequence;
 		auto readPrependReceipt = [&]() {
 			if (!readTimelineState(&afterState)) {
 				return false;
@@ -2474,106 +2464,30 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				&& afterPresentation.value(QStringLiteral("historyLoaderVisible")).toBool()
 				&& qAbs(afterPresentation.value(QStringLiteral("historyLoaderHeight")).toDouble() - 48.0) <= 1.0
 				&& afterPresentation.value(QStringLiteral("jumpToLatestVisible")).toBool()
-				&& composerContiguous;
-		};
-		auto prependGeometryFingerprint = [&]() {
-			return QStringLiteral("count=%1|anchor=%2|offset=%3|contentY=%4|contentHeight=%5|viewportY=%6|"
-				"viewportBottom=%7|loader=%8/%9|jump=%10/%11|composer=%12/%13|blank=%14|height=%15/%16")
-				.arg(afterState.value(QStringLiteral("count")).toInt())
-				.arg(afterState.value(QStringLiteral("firstVisibleStableId")).toString())
-				.arg(afterState.value(QStringLiteral("firstVisibleOffset")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("contentY")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("contentHeight")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("viewportY")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("viewportBottom")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("historyLoaderVisible")).toBool())
-				.arg(afterPresentation.value(QStringLiteral("historyLoaderHeight")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("jumpToLatestVisible")).toBool())
-				.arg(afterPresentation.value(QStringLiteral("jumpToLatestBottom")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("composerTop")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("composerHeight")).toDouble(), 0, 'f', 3)
-				.arg(afterPresentation.value(QStringLiteral("visibleBlankPresentationCount")).toInt())
-				.arg(afterPresentation.value(QStringLiteral("visiblePresentationHeightPendingCount")).toInt())
-				.arg(afterPresentation.value(QStringLiteral("visiblePresentationHeightMismatchCount")).toInt());
+				&& composerContiguous
+				&& afterPresentation.value(QStringLiteral("prependSettlementState")).toString()
+					== QLatin1String("SETTLED")
+				&& afterPresentation.value(
+					QStringLiteral("prependSettlementCurrentGeometryFingerprint")).toString()
+					== prependSettlementReceipt.value(
+						QStringLiteral("second_geometry_fingerprint")).toString();
 		};
 		constexpr qint64 prependReceiptDeadlineMilliseconds = 300;
-		while (prependTimer.elapsed() < prependReceiptDeadlineMilliseconds) {
+		while (prependTimer.elapsed() <= prependReceiptDeadlineMilliseconds) {
 			QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
 			if (!readPrependReceipt()) {
 				if (error) *error = QStringLiteral("The history fixture lost its production settlement receipt.");
 				return {};
 			}
-			if (prependSurfaceSettled()) {
+			prependSettlementReceiptSequence = afterPresentation.value(
+				QStringLiteral("prependSettlementReceiptSequence")).toULongLong();
+			prependSettlementReceipt = afterPresentation.value(
+				QStringLiteral("prependSettlementReceipt")).toMap();
+			if (prependSettlementReceiptSequence > prependSettlementReceiptBaselineSequence
+				&& prependSettlementReceipt.value(QStringLiteral("sequence")).toULongLong()
+					== prependSettlementReceiptSequence
+				&& prependSurfaceSettled()) {
 				prependSurfaceSettlementReached = true;
-				break;
-			}
-			presentationWindow->requestUpdate();
-			QThread::msleep(1);
-		}
-
-		for (int committedFrame = 0;
-				 prependSurfaceSettlementReached && committedFrame < 2
-				 && prependTimer.elapsed() < prependReceiptDeadlineMilliseconds;
-				 ++committedFrame) {
-			const qulonglong previousFrameSerial =
-				afterPresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong();
-			bool committedSwapObserved = false;
-			presentationWindow->requestUpdate();
-			while (prependTimer.elapsed() < prependReceiptDeadlineMilliseconds) {
-				QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 10);
-				if (!readPrependReceipt()) {
-					if (error) *error = QStringLiteral("The history fixture lost its post-prepend frame receipt.");
-					return {};
-				}
-				if (afterPresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong()
-						> previousFrameSerial) {
-					committedSwapObserved = true;
-					break;
-				}
-				QThread::msleep(1);
-			}
-			if (!committedSwapObserved) break;
-
-			const double afterOffset = afterState.value(QStringLiteral("firstVisibleOffset")).toDouble();
-			anchorPreserved = afterState.value(QStringLiteral("firstVisibleStableId")).toString() == anchorID
-				&& qAbs(afterOffset - anchorBeforeOffset) <= 0.5;
-			const bool prependSurfaceReady = prependSurfaceSettled();
-			const qulonglong observedFrameSerial =
-				afterPresentation.value(QStringLiteral("frameSwappedSerial")).toULongLong();
-			const QString observedAnchorID =
-				afterState.value(QStringLiteral("firstVisibleStableId")).toString();
-			const QStringList observedOrderedMessageIDs = currentOrderedMessageIDs();
-			const QString observedOrderedMessageIDHash = QString::fromLatin1(QCryptographicHash::hash(
-				observedOrderedMessageIDs.join(QChar(0x1f)).toUtf8(), QCryptographicHash::Sha256).toHex());
-			const QString observedGeometryFingerprint = prependGeometryFingerprint();
-			const bool matchingCommittedGeometry = observedFrameSerial > prependStartFrameSerial
-				&& afterPresentation.value(QStringLiteral("scopeToken")).toString() == prependScopeToken
-				&& prependScopeToken == expectedFixtureScopeToken
-				&& afterPresentation.value(QStringLiteral("generation")).toULongLong()
-					== prependPresentationGeneration
-				&& observedOrderedMessageIDs == expectedOrderedMessageIDs
-				&& observedOrderedMessageIDHash == expectedOrderedMessageIDHash
-				&& observedAnchorID == anchorID
-				&& qAbs(afterOffset - anchorBeforeOffset) <= 0.5;
-			if (prependSurfaceReady && matchingCommittedGeometry) {
-				if (committedFrame == 0) {
-					prependFirstCommittedFrameSerial = observedFrameSerial;
-					prependFirstCommittedAnchorID = observedAnchorID;
-					prependFirstCommittedAnchorOffset = afterOffset;
-					prependFirstCommittedGeometryFingerprint = observedGeometryFingerprint;
-					prependReceiptOrderedMessageIDHash = observedOrderedMessageIDHash;
-					prependMatchingCommittedFrameCount = 1;
-				} else if (observedFrameSerial > prependFirstCommittedFrameSerial
-						&& prependFirstCommittedAnchorID == observedAnchorID
-						&& qAbs(afterOffset - prependFirstCommittedAnchorOffset) <= 0.5
-						&& observedGeometryFingerprint == prependFirstCommittedGeometryFingerprint
-						&& observedOrderedMessageIDHash == prependReceiptOrderedMessageIDHash) {
-					prependSecondCommittedFrameSerial = observedFrameSerial;
-					prependSecondCommittedAnchorOffset = afterOffset;
-					prependSecondCommittedGeometryFingerprint = observedGeometryFingerprint;
-					prependMatchingCommittedFrameCount = 2;
-				}
-			} else {
 				break;
 			}
 		}
@@ -2596,48 +2510,36 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			&& anchorAfterRow == anchorBeforeRow + VisualHistoryPrependMessageCount
 			&& afterState.value(QStringLiteral("count")).toInt() == finalExpectedMessageCount;
 		const QString actualOrderedMessageIDHash = QString::fromLatin1(QCryptographicHash::hash(
-			currentOrderedMessageIDs().join(QChar(0x1f)).toUtf8(), QCryptographicHash::Sha256).toHex());
+			currentOrderedMessageIDs().join(QChar(0x1f)).toUtf8(), QCryptographicHash::Md5).toHex());
+		const bool anchorPreserved =
+			afterState.value(QStringLiteral("firstVisibleStableId")).toString() == anchorID
+			&& qAbs(anchorAfterOffset - anchorBeforeOffset) <= 0.5;
+		const QString prependTransactionID =
+			prependSettlementReceipt.value(QStringLiteral("transaction_id")).toString();
+		const qulonglong prependFirstCommittedFrameSerial =
+			prependSettlementReceipt.value(QStringLiteral("first_frame_serial")).toULongLong();
+		const qulonglong prependSecondCommittedFrameSerial =
+			prependSettlementReceipt.value(QStringLiteral("second_frame_serial")).toULongLong();
+		const int prependMatchingCommittedFrameCount =
+			prependSettlementReceipt.value(QStringLiteral("qualifying_frame_count")).toInt();
+		const QString prependFirstCommittedGeometryFingerprint =
+			prependSettlementReceipt.value(QStringLiteral("first_geometry_fingerprint")).toString();
+		const QString prependSecondCommittedGeometryFingerprint =
+			prependSettlementReceipt.value(QStringLiteral("second_geometry_fingerprint")).toString();
+		const double prependStableDurationMs =
+			prependSettlementReceipt.value(QStringLiteral("settlement_duration_ms")).toDouble();
 		const bool twoMatchingCommittedFrames = prependMatchingCommittedFrameCount == 2
 			&& prependSecondCommittedFrameSerial > prependFirstCommittedFrameSerial
+			&& prependFirstCommittedFrameSerial > prependStartFrameSerial
 			&& !prependFirstCommittedGeometryFingerprint.isEmpty()
 			&& prependSecondCommittedGeometryFingerprint == prependFirstCommittedGeometryFingerprint;
-		const bool finalSurfaceSettled = prependSurfaceSettled();
-		QVariantMap prependSettlementReceipt;
-		if (anchorPreserved && purePrependApplied && prependSurfaceSettlementReached
-			&& finalSurfaceSettled && twoMatchingCommittedFrames
-			&& prependScopeToken == expectedFixtureScopeToken
-			&& afterPresentation.value(QStringLiteral("scopeToken")).toString() == prependScopeToken
-			&& afterPresentation.value(QStringLiteral("generation")).toULongLong()
-				== prependPresentationGeneration
-			&& actualOrderedMessageIDHash == expectedOrderedMessageIDHash
-			&& prependReceiptOrderedMessageIDHash == expectedOrderedMessageIDHash) {
-			const qulonglong receiptSequence = ++m_prependSettlementReceiptSequence;
-			prependStableDurationMs = static_cast< double >(prependTimer.elapsed());
-			prependSettlementReceipt = {
-				{ QStringLiteral("sequence"), receiptSequence },
-				{ QStringLiteral("transaction_id"), prependTransactionID },
-				{ QStringLiteral("scope_token"), prependScopeToken },
-				{ QStringLiteral("presentation_generation"), prependPresentationGeneration },
-				{ QStringLiteral("ordered_message_count"), finalExpectedMessageCount },
-				{ QStringLiteral("ordered_message_id_hash"), prependReceiptOrderedMessageIDHash },
-				{ QStringLiteral("qualifying_frame_count"), prependMatchingCommittedFrameCount },
-				{ QStringLiteral("first_geometry_fingerprint"),
-					prependFirstCommittedGeometryFingerprint },
-				{ QStringLiteral("second_geometry_fingerprint"),
-					prependSecondCommittedGeometryFingerprint },
-				{ QStringLiteral("first_frame_serial"), prependFirstCommittedFrameSerial },
-				{ QStringLiteral("second_frame_serial"), prependSecondCommittedFrameSerial },
-				{ QStringLiteral("anchor_id"), prependFirstCommittedAnchorID },
-				{ QStringLiteral("anchor_offset"), prependSecondCommittedAnchorOffset },
-				{ QStringLiteral("settlement_duration_ms"), prependStableDurationMs }
-			};
-		}
-		const qulonglong prependSettlementReceiptSequence = m_prependSettlementReceiptSequence;
+		const bool finalSurfaceSettled = prependSurfaceSettlementReached && prependSurfaceSettled();
 		const bool prependSettlementReceiptObserved =
-			prependSettlementReceiptSequence > prependSettlementReceiptBaselineSequence
+			prependSettlementReceiptSequence == prependSettlementReceiptBaselineSequence + 1
 			&& prependSettlementReceipt.value(QStringLiteral("sequence")).toULongLong()
 				== prependSettlementReceiptSequence
-			&& prependSettlementReceipt.value(QStringLiteral("transaction_id")).toString()
+			&& !prependTransactionID.isEmpty()
+			&& afterPresentation.value(QStringLiteral("prependSettlementTransactionId")).toString()
 				== prependTransactionID
 			&& prependSettlementReceipt.value(QStringLiteral("scope_token")).toString()
 				== expectedFixtureScopeToken
@@ -2647,12 +2549,19 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				== finalExpectedMessageCount
 			&& prependSettlementReceipt.value(QStringLiteral("ordered_message_id_hash")).toString()
 				== expectedOrderedMessageIDHash
+			&& afterPresentation.value(
+				QStringLiteral("prependSettlementExpectedOrderedIdHash")).toString()
+				== expectedOrderedMessageIDHash
 			&& prependSettlementReceipt.value(QStringLiteral("qualifying_frame_count")).toInt() == 2
-			&& prependSettlementReceipt.value(QStringLiteral("first_geometry_fingerprint")).toString()
-				== prependSettlementReceipt.value(QStringLiteral("second_geometry_fingerprint")).toString()
+			&& twoMatchingCommittedFrames
 			&& prependSettlementReceipt.value(QStringLiteral("anchor_id")).toString() == anchorID
 			&& qAbs(prependSettlementReceipt.value(QStringLiteral("anchor_offset")).toDouble()
-				- anchorBeforeOffset) <= 0.5;
+				- anchorBeforeOffset) <= 0.5
+			&& prependSettlementReceipt.value(QStringLiteral("settlement_timestamp_ms")).toDouble() > 0.0
+			&& prependStableDurationMs >= 0.0 && prependStableDurationMs <= 300.0
+			&& afterPresentation.value(
+				QStringLiteral("prependSettlementCurrentGeometryFingerprint")).toString()
+				== prependSecondCommittedGeometryFingerprint;
 		if (!anchorPreserved || !purePrependApplied || !prependSurfaceSettlementReached
 			|| !finalSurfaceSettled || !twoMatchingCommittedFrames
 			|| !prependSettlementReceiptObserved) {

@@ -1660,7 +1660,7 @@ foreach ($case in $selectedCases) {
 					"ordered_message_count", "ordered_message_id_hash", "qualifying_frame_count",
 					"first_geometry_fingerprint", "second_geometry_fingerprint",
 					"first_frame_serial", "second_frame_serial", "anchor_id", "anchor_offset",
-					"settlement_duration_ms"
+					"settlement_timestamp_ms", "settlement_duration_ms"
 				)
 				$prependReceiptComplete = $null -ne $prependReceipt
 				foreach ($receiptProperty in $requiredPrependReceiptProperties) {
@@ -1677,8 +1677,8 @@ foreach ($case in $selectedCases) {
 					[long]$prependReceipt.presentation_generation -eq
 						[long]$chatState.prepend_presentation_generation
 				$receiptSequenceAdvanced = $prependReceiptComplete -and
-					[long]$chatState.prepend_settlement_receipt_sequence -gt
-						[long]$chatState.prepend_settlement_receipt_baseline_sequence -and
+					[long]$chatState.prepend_settlement_receipt_sequence -eq
+						([long]$chatState.prepend_settlement_receipt_baseline_sequence + 1) -and
 					[long]$prependReceipt.sequence -eq
 						[long]$chatState.prepend_settlement_receipt_sequence
 				$receiptOrderedIdentityMatches = $prependReceiptComplete -and
