@@ -10,6 +10,7 @@
 #include "PersistentChatStore.h"
 
 #include <QtCore/QObject>
+#include <QtCore/QHash>
 #include <QtCore/QPointer>
 
 class PersistentChatController : public QObject {
@@ -45,7 +46,7 @@ signals:
 	void unreadStateChanged();
 
 private slots:
-	void handleHistoryResponse(const MumbleProto::ChatHistoryResponse &response);
+	void handleHistoryResponse(const MumbleProto::ChatHistoryResponse &response, quint64 connectionGeneration);
 	void handleMessage(const MumbleProto::ChatMessage &message);
 	void handleReadState(const MumbleProto::ChatReadStateUpdate &update);
 
@@ -56,7 +57,7 @@ private:
 	QPointer< PersistentChatGateway > m_gateway;
 	PersistentChatStore m_store;
 	PersistentChatScopeKey m_activeScope;
-	quint64 m_connectionGeneration = 0;
+	QHash< QString, quint64 > m_historyRequestConnectionGenerations;
 };
 
 #endif // MUMBLE_MUMBLE_PERSISTENTCHATCONTROLLER_H_

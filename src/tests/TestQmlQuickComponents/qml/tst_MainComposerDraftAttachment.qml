@@ -162,6 +162,8 @@ TestCase {
 		verify(/readonly property int compactActionButtonCount:[\s\S]{0,420}readonly property real compactActionTextInset:/.test(mainSource))
 		compare((mainSource.match(/Layout\.rightMargin:\s*messageDelegate\.compactActionTextInset/g) || []).length, 2)
 		verify(/id:\s*compactMessageActionTray[\s\S]{0,320}width:\s*messageDelegate\.compactActionTrayWidth/.test(mainSource))
+		verify(/function preferredOutgoingMessageWidth\(segments, startsGroup, replyActor, replySnippet,\s*deliveryVisible, actionTextInset\)[\s\S]{0,420}Math\.max\(0, Number\(actionTextInset \|\| 0\)\)/.test(mainSource))
+		verify(/preferredOwnWidth:\s*root\.preferredOutgoingMessageWidth\(bodySegments, startsGroup,\s*replyActor, replySnippet, hasDeliveryStatus, compactActionTextInset\)/.test(mainSource))
 	}
 
 	function test_message_reply_card_reserves_its_accessibility_margins() {
@@ -184,7 +186,8 @@ TestCase {
 	}
 
 	function test_partial_chat_rows_do_not_leak_unclipped_accessibility_nodes() {
-		verify(/accessibilityViewportVisible:\s*height\s*>\s*timeline\.height[\s\S]*y\s*\+\s*height\s*>\s*timeline\.contentY\s*\+\s*0\.5[\s\S]*y\s*>=\s*timeline\.contentY\s*-\s*0\.5[\s\S]*y\s*\+\s*height\s*<=\s*timeline\.contentY\s*\+\s*timeline\.height\s*\+\s*0\.5/.test(mainSource))
+		verify(/accessibilityViewportVisible:\s*asyncMessageDelegate\.height\s*>\s*timeline\.height[\s\S]*asyncMessageDelegate\.y\s*\+\s*asyncMessageDelegate\.height\s*>\s*timeline\.contentY\s*\+\s*0\.5[\s\S]*asyncMessageDelegate\.y\s*>=\s*timeline\.contentY\s*-\s*0\.5[\s\S]*asyncMessageDelegate\.y\s*\+\s*asyncMessageDelegate\.height\s*<=\s*timeline\.contentY\s*\+\s*timeline\.height\s*\+\s*0\.5/.test(mainSource))
+		verify(!/accessibilityViewportVisible:\s*height\s*>\s*timeline\.height/.test(mainSource))
 		verify(/id:\s*timeline[\s\S]*Accessible\.role:\s*Accessible\.List[\s\S]*target:\s*timeline\.contentItem[\s\S]*property:\s*"Accessible\.ignored"[\s\S]*value:\s*true/.test(mainSource))
 		for (const labelId of ["messageSenderLabel", "messageTimestampLabel", "messageStatusLabel"]) {
 			const escapedId = labelId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -202,19 +205,24 @@ TestCase {
 
 	function test_performance_chat_fixture_waits_for_a_stable_scroll_surface() {
 		verify(/function\s+performanceChatFixtureState\(\)[\s\S]*firstVisibleId[\s\S]*settled/.test(mainSource))
-		verify(/"settled":\s*!bottomFollowTimer\.running[\s\S]*!timeline\.scopeResetPending[\s\S]*!performanceChatScrollRunning/.test(mainSource))
+		verify(/const\s+visibleFrameCommitted[\s\S]*scopePresentationVisibleFrameCommittedAt\s*>\s*0/.test(mainSource))
+		verify(/"settled":\s*visibleFrameCommitted\s*&&\s*visiblePresentationReady[\s\S]*visibleHeightSettled[\s\S]*!bottomFollowTimer\.running[\s\S]*!timeline\.scopeResetPending[\s\S]*!performanceChatScrollRunning/.test(mainSource))
 		verify(/"contentY":\s*timeline\.contentY/.test(mainSource))
 	}
 
-	function test_scope_history_exposes_real_summaries_while_tail_geometry_settles() {
-		verify(/property bool scopePresentationPending:\s*false[\s\S]*scopePresentationContentVisible:[\s\S]*!scopePresentationPending\s*\|\|\s*scopePresentationFinalizing[\s\S]*property int scopePresentationExposedHeightChangeCount:\s*0/.test(mainSource))
-		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*scopePresentationQuietTimer\.start\(\)[\s\S]*scopePresentationDeadlineTimer\.start\(\)/.test(mainSource))
+	function test_scope_history_stays_hidden_until_stable_geometry_is_committed() {
+		verify(/property bool scopePresentationPending:\s*false[\s\S]*property bool scopePresentationFrameCommitPending:\s*false[\s\S]*scopePresentationContentVisible:[\s\S]*scopePresentationStartedAt\s*<=\s*0[\s\S]*scopePresentationStableFrameCommittedAt\s*>\s*0[\s\S]*property int scopePresentationExposedHeightChangeCount:\s*0/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationVisibleFrameCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationFrameCommitPending\s*=\s*false[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
+		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*scopePresentationStableFrameCommittedAt\s*>\s*0[\s\S]*completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationStableFrameCount\s*>=\s*2[\s\S]*scopePresentationStableFrameCommittedAt\s*=\s*Date\.now\(\)/.test(mainSource))
+		verify(!/scopePresentationContentVisible:[\s\S]{0,100}scopePresentationFinalizing/.test(mainSource))
+		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity[\s\S]*activeScope\.loading[\s\S]*!timeline\.scopePresentationContentVisible[\s\S]*visible:\s*\(activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*:\s*chatModel\.count\s*===\s*0[\s\S]*\|\|\s*!timeline\.scopePresentationContentVisible\)/.test(mainSource))
+		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*scopePresentationQuietTimer\.start\(\)[\s\S]*armScopePresentationDeadline\(\)/.test(mainSource))
 		verify(/onContentHeightChanged:\s*\{[\s\S]*if \(scopePresentationPending\)[\s\S]*noteScopePresentationMutation\(\)[\s\S]*return/.test(mainSource))
 		verify(/onContentHeightChanged:\s*\{[\s\S]*scopePresentationObservationActive\s*&&\s*stickToBottom[\s\S]*!dragging\s*&&\s*!flicking[\s\S]*setTailContentY\(maximumY\)[\s\S]*containTailMessageWhenPossible\(\)/.test(mainSource))
 		verify(/onMovementStarted:\s*\{[\s\S]*const\s+explicitNavigation\s*=\s*dragging[\s\S]*if\s*\(!explicitNavigation\)[\s\S]*if\s*\(stickToBottom\)[\s\S]*requestBottomFollow\(\)[\s\S]*return/.test(mainSource))
 		verify(!/onMovementStarted:\s*\{[\s\S]{0,900}scopePresentationObservationActive\s*&&\s*stickToBottom/.test(mainSource))
 		verify(/onMovementEnded:\s*\{[\s\S]*if\s*\(scrollbarDragActive\s*\|\|\s*scrollbarReleasePending[\s\S]*timelineScrollBar\.pressed[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*return[\s\S]*if\s*\(!restoringBottom\)[\s\S]*isAtBottom\(\)[\s\S]*requestBottomFollow\(\)/.test(mainSource))
-		verify(/id:\s*scopePresentationQuietTimer[\s\S]*interval:\s*120[\s\S]*finishScopePresentation\(false\)/.test(mainSource))
+		verify(/id:\s*scopePresentationQuietTimer[\s\S]*interval:\s*16[\s\S]*finishScopePresentation\(false\)/.test(mainSource))
 		verify(/function\s+pendingScopeHydrationCount\(\)[\s\S]*contentNeedsHydration[\s\S]*inHydrationWindow/.test(mainSource))
 		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]{0,420}scopePresentationFinalizing\s*=\s*true/.test(mainSource))
 		verify(!/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]{0,260}pendingScopeHydrationCount\(\)\s*>\s*0/.test(mainSource))
@@ -225,18 +233,30 @@ TestCase {
 		verify(/required property bool bodyHydrationPending/.test(mainSource))
 		verify(/property bool bodyNeedsHydration:\s*bodyHydrationPending[\s\S]*property bool contentNeedsHydration:[\s\S]*bodyNeedsHydration/.test(mainSource))
 		verify(/property bool backendHydrationRequested:\s*false/.test(mainSource))
-		verify(/function\s+requestPreviewHydrationIfNeeded\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*backendContentNeedsHydration\s*&&\s*!backendHydrationRequested[\s\S]*richContentViewportEligible[\s\S]*!timeline\.scopePresentationPending\s*\|\|\s*pendingAllowed[\s\S]*queuePreviewHydration\(stableId,\s*inVisibleViewport\)[\s\S]*backendHydrationRequested\s*=\s*true/.test(mainSource))
-		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
-		verify(/id:\s*scopePresentationDeadlineTimer[\s\S]*interval:\s*2000[\s\S]*finishScopePresentation\(true\)/.test(mainSource))
+		verify(/function\s+requestPreviewHydrationIfNeeded\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*backendContentNeedsHydration\s*&&\s*!backendHydrationRequested[\s\S]*richContentViewportEligible[\s\S]*!timeline\.scopePresentationPending\s*\|\|\s*pendingAllowed[\s\S]*queuePreviewHydration\(stableId,\s*inVisibleViewport,[\s\S]*hydrationOwnerScopeToken,\s*hydrationOwnerGeneration\)[\s\S]*backendHydrationRequested\s*=\s*true/.test(mainSource))
+		verify(/function\s+beginScopeChange\(\)[\s\S]*root\.clearPreviewHydrationQueue\(\)/.test(mainSource))
+		verify(/function\s+queuePreviewHydration\(messageId,\s*highPriority,\s*ownerScopeToken,\s*ownerGeneration\)[\s\S]*requestedScopeToken\s*!==\s*currentScopeToken[\s\S]*requestedGeneration\s*!==\s*currentGeneration/.test(mainSource))
+		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*armScopePresentationStableFrameCommit\(\)[\s\S]*scopePresentationFinalizing\s*=\s*false/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
+		verify(/id:\s*scopePresentationDeadlineTimer[\s\S]*defaultInterval:\s*2000[\s\S]*scopePresentationForcedByDeadline\s*=\s*true[\s\S]*finishScopePresentation\(true\)/.test(mainSource))
 		verify(/function\s+noteScopePresentationMutation\(\)[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/property int scopePresentationMutationCount:\s*0[\s\S]*property int scopePresentationTailContainedMutationCount:\s*-1[\s\S]*function\s+beginScopeChange\(\)[\s\S]*scopePresentationMutationCount\s*=\s*0[\s\S]*scopePresentationTailContainedMutationCount\s*=\s*-1/.test(mainSource))
+		verify(/function\s+positionTailImmediately\(\)[\s\S]*scopePresentationFinalizing[\s\S]*scopePresentationTailContainedMutationCount[\s\S]*===\s*scopePresentationMutationCount[\s\S]*return[\s\S]*tailContentYTarget\(\)/.test(mainSource))
+		verify(/function\s+containTailMessageWhenPossible\(\)[\s\S]*const previousY\s*=\s*contentY[\s\S]*setTailContentY\(contentY\s*\+\s*correction\)[\s\S]*scopePresentationTailContainedMutationCount\s*=[\s\S]*scopePresentationMutationCount/.test(mainSource))
+		verify(/function\s+armScopePresentationDeadline\(\)[\s\S]*scopePresentationDeadlineAt\s*-\s*Date\.now\(\)[\s\S]*scopePresentationForcedByDeadline\s*=\s*true[\s\S]*scopePresentationDeadlineTimer\.interval\s*=\s*Math\.max\(1,[\s\S]*scopePresentationDeadlineTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+recoverScopePresentationFrameRegression\(\)[\s\S]*scopePresentationFrameCommitPending\s*=\s*false[\s\S]*scopePresentationForcedByDeadline\s*=\s*scopePresentationForcedByDeadline[\s\S]*scopePresentationDeadlineExpired\(\)[\s\S]*if\s*\(scopePresentationForcedByDeadline\)[\s\S]*finishScopePresentation\(true\)[\s\S]*scopePresentationQuietTimer\.restart\(\)[\s\S]*if\s*\(!armScopePresentationDeadline\(\)\)[\s\S]*scopePresentationQuietTimer\.stop\(\)[\s\S]*finishScopePresentation\(true\)/.test(mainSource))
+		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*!presentationReady[\s\S]*visiblePresentationHeightConvergencePending\(\)[\s\S]*recoverScopePresentationFrameRegression\(\)/.test(mainSource))
+		verify(/function\s+noteScopePresentationMutation\(\)[\s\S]*scopePresentationFrameCommitPending[\s\S]*recoverScopePresentationFrameRegression\(\)/.test(mainSource))
+		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*const\s+deadlineMode\s*=\s*!!forcedByDeadline[\s\S]*scopePresentationForcedByDeadline[\s\S]*scopePresentationDeadlineExpired\(\)[\s\S]*scopePresentationForcedByDeadline\s*=\s*scopePresentationForcedByDeadline\s*\|\|\s*deadlineMode/.test(mainSource))
 		verify(/function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopePresentationFinalizeStartTimer\.restart\(\)[\s\S]*function\s+continueScopePresentationFinalization\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationFinalizeQuietTimer\.start\(\)[\s\S]*scopePresentationFinalizeDeadlineTimer\.start\(\)/.test(mainSource))
-		verify(/id:\s*scopePresentationFinalizeStartTimer[\s\S]*interval:\s*16[\s\S]*timeline\.continueScopePresentationFinalization\(\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*coldPreviewHydrationPacingActive\s*=\s*true[\s\S]*scheduleRichContentResume\(\)[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
+		verify(/id:\s*scopePresentationFinalizeStartTimer[\s\S]*interval:\s*0[\s\S]*timeline\.continueScopePresentationFinalization\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*coldPreviewHydrationPacingActive\s*=\s*true[\s\S]*scheduleRichContentResume\(\)[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
 		verify(/id:\s*scopePresentationFinalizeQuietTimer[\s\S]*interval:\s*16[\s\S]*completeScopePresentationFinalization\(false\)/.test(mainSource))
 		verify(/id:\s*scopePresentationFinalizeDeadlineTimer[\s\S]*interval:\s*1500[\s\S]*completeScopePresentationFinalization\(true\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*armScopePresentationStableFrameCommit\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*DelegateChooser[\s\S]*id:\s*asyncMessageDelegate[\s\S]*required property bool deferredPresentation[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible\s*\?\s*1\s*:\s*0[\s\S]*asynchronous:\s*true[\s\S]*active:\s*!deferredPresentation[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*ChatMessageFrame\s*\{/.test(mainSource))
-		verify(/role:\s*"deferredPresentation"[\s\S]{0,180}roleValue:\s*true[\s\S]*id:\s*deferredInlineMessageDelegate[\s\S]*required property int deferredPresentationHeight[\s\S]*performanceTimelineDelegate:\s*true[\s\S]*lightweightDeferredPresentation:\s*true[\s\S]*contentNeedsHydration:\s*true[\s\S]*presentationSummary:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]*height:\s*Math\.max\(timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)/.test(mainSource))
+		verify(/role:\s*"deferredPresentation"[\s\S]{0,180}roleValue:\s*true[\s\S]*id:\s*deferredInlineMessageDelegate[\s\S]*required property int deferredPresentationHeight[\s\S]*performanceTimelineDelegate:\s*true[\s\S]*lightweightDeferredPresentation:\s*true[\s\S]*contentNeedsHydration:\s*true[\s\S]*presentationSummary:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]*height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*Math\.max\(timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)/.test(mainSource))
 		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*text:\s*deferredInlineMessageDelegate\.title[\s\S]*text:\s*deferredInlineMessageDelegate\.subtitle[\s\S]*text:\s*deferredInlineMessageDelegate\.timestamp/.test(mainSource))
 		const inlineDelegateStart =
 			mainSource.indexOf("id: deferredInlineMessageDelegate")
@@ -245,7 +265,7 @@ TestCase {
 		verify(inlineDelegateStart >= 0 && inlineDelegateEnd > inlineDelegateStart)
 		const inlineDelegateSource =
 			mainSource.slice(inlineDelegateStart, inlineDelegateEnd)
-		verify(/height:\s*Math\.max\(timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
+		verify(/height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*Math\.max\(timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
 			inlineDelegateSource))
 		verify(/RowLayout\s*\{[\s\S]*anchors\.left:\s*parent\.left[\s\S]*anchors\.right:\s*parent\.right[\s\S]*anchors\.top:\s*parent\.top[\s\S]*height:\s*Math\.min\(48,/.test(
 			inlineDelegateSource))
@@ -260,7 +280,7 @@ TestCase {
 		verify(asyncDelegateStart >= 0 && asyncDelegateEnd > asyncDelegateStart)
 		const asyncDelegateSource = mainSource.slice(asyncDelegateStart, asyncDelegateEnd)
 		verify(/required property int deferredPresentationHeight/.test(asyncDelegateSource))
-		verify(/height:\s*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(
+		verify(/height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(
 			asyncDelegateSource))
 		verify(/readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending/.test(
 			asyncDelegateSource))
@@ -268,10 +288,26 @@ TestCase {
 			asyncDelegateSource))
 		verify(/function\s+resumeRichContentAfterScroll[\s\S]*resumeRequested\s*=\s*true[\s\S]*onLoaded:[\s\S]*item\.resumeRichContentAfterScroll/.test(
 			asyncDelegateSource))
-		verify(/id:\s*asyncMessageDelegate[\s\S]*readonly property string presentationSummary:[\s\S]*\[title,\s*subtitle,\s*timestamp\][\s\S]*visible:\s*asyncMessageDelegate\.active[\s\S]*!asyncMessageDelegate\.item[\s\S]*!asyncMessageDelegate\.item\.currentMessagePresentationReady[\s\S]*richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive[\s\S]*richLoaderSuspended[\s\S]*richResourcesRequired[\s\S]*previewNeedsHydration[\s\S]*previewLoaderIncubationSuppressed[\s\S]*text:\s*asyncMessageDelegate\.title[\s\S]*text:\s*asyncMessageDelegate\.subtitle[\s\S]*text:\s*asyncMessageDelegate\.timestamp/.test(mainSource))
+		verify(/id:\s*asyncMessageDelegate[\s\S]*readonly property string presentationSummary:[\s\S]*\[title,\s*subtitle,\s*timestamp\][\s\S]*visible:\s*asyncMessageDelegate\.deadlinePresentationFallback[\s\S]*asyncMessageDelegate\.active[\s\S]*!asyncMessageDelegate\.item[\s\S]*!asyncMessageDelegate\.item\.currentMessagePresentationReady[\s\S]*richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive[\s\S]*richLoaderSuspended[\s\S]*richResourcesRequired[\s\S]*previewNeedsHydration[\s\S]*previewLoaderIncubationSuppressed[\s\S]*text:\s*asyncMessageDelegate\.title[\s\S]*text:\s*asyncMessageDelegate\.subtitle[\s\S]*text:\s*asyncMessageDelegate\.timestamp/.test(mainSource))
 		verify(/accessibilitySuppressed:\s*root\.backgroundAccessibilitySuppressed[\s\S]*timeline\.scopePresentationPending[\s\S]*accessibilityBarrierEnabled:\s*logEntry\s*\|\|\s*messageRowReady/.test(mainSource))
-		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity\s*&&\s*\(activeScope\.loading[\s\S]*timeline\.scopePresentationPending[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*chatModel\.count\s*>\s*0[\s\S]*visible:[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*Preparing conversation/.test(mainSource))
-		verify(/function\s+timelinePresentationState\(\)[\s\S]*"scopeResetPending":\s*timeline\.scopeResetPending[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*visibleBlankPresentationCount[\s\S]*"visibleRows":\s*visiblePresentation\.rows[\s\S]*"settled":[\s\S]*visiblePresentation\.visibleCount\s*>\s*0[\s\S]*visiblePresentation\.blankCount\s*===\s*0/.test(mainSource))
+		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity[\s\S]*activeScope\.loading[\s\S]*!timeline\.scopePresentationContentVisible[\s\S]*visible:[\s\S]*!timeline\.scopePresentationContentVisible[\s\S]*Loading recent messages/.test(mainSource))
+		verify(!mainSource.includes("Preparing conversation"))
+		verify(/readonly property real baseTopMargin:[\s\S]*readonly property bool sparseBottomAlignmentActive:[\s\S]*count\s*>\s*0\s*&&\s*count\s*<=\s*10[\s\S]*topMargin:\s*sparseBottomAlignmentActive[\s\S]*Math\.max\(baseTopMargin,\s*height\s*-\s*contentHeight\)/.test(mainSource))
+		verify(/function\s+tailContentYTarget\(\)[\s\S]*naturalTailY\s*=\s*originY\s*\+\s*contentHeight\s*-\s*height[\s\S]*sparseBottomAlignmentActive[\s\S]*naturalTailY\s*:\s*Math\.max\(originY,\s*naturalTailY\)/.test(mainSource))
+		verify(/function\s+setTailContentY\(nextY\)[\s\S]*minimumY\s*=\s*sparseBottomAlignmentActive[\s\S]*tailContentYTarget\(\)\s*:\s*originY[\s\S]*maximumY\s*=\s*tailContentYTarget\(\)/.test(mainSource))
+		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*scopePresentationStableFrameViewportHeight[\s\S]*scopePresentationStableFrameTopMargin/.test(mainSource))
+		const timelineHeightHandlerStart = mainSource.indexOf(
+			"onOriginYChanged: scheduleViewportMembershipUpdate()")
+		const timelineHeightHandlerEnd = mainSource.indexOf(
+			"function visiblePresentationDeadlineReady", timelineHeightHandlerStart)
+		const timelineHeightHandlerSource = mainSource.slice(
+			timelineHeightHandlerStart, timelineHeightHandlerEnd)
+		verify(/onHeightChanged:\s*\{[\s\S]*scheduleViewportMembershipUpdate\(\)[\s\S]*!scopePresentationPending[\s\S]*requestBottomFollow\(\)/.test(
+			timelineHeightHandlerSource))
+		verify(!timelineHeightHandlerSource.includes(
+			"armScopePresentationStableFrameCommit()"))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*"roomHeaderHeight":\s*stonksRoomPanelLoader\.height[\s\S]*"composerHeight":\s*composerSurface\.height[\s\S]*"sparseBottomAlignmentActive"[\s\S]*"visibleTailGap"[\s\S]*"sparseBottomAlignmentError"[\s\S]*"sparseTailContentYTarget"[\s\S]*"sparseTailContentYError"[\s\S]*"emptyConversationVisible"/.test(mainSource))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*"scopeResetPending":\s*timeline\.scopeResetPending[\s\S]*exposedHeightChangeCount[\s\S]*exposedTailCorrectionCount[\s\S]*visibleBlankPresentationCount[\s\S]*"visibleRows":\s*visiblePresentation\.rows[\s\S]*"settled":\s*visibleFrameCommittedAt\s*>\s*0[\s\S]*visiblePresentationComplete/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*"prependQueuePending":\s*chatModel\.prependPending[\s\S]*"settled":[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(/bodyNeedsHydration[\s\S]*prependRichContentActive\(stableId,[\s\S]*chatModel\.requestBodyHydration\(stableId\)/.test(mainSource))
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*pendingAllowed[\s\S]*scopePresentationFinalizing[\s\S]*item\.lightweightDeferredPresentation\s*!==\s*true[\s\S]*item\.accessibilityPooled\s*===\s*true[\s\S]*item\.contentNeedsHydration\s*!==\s*true[\s\S]*item\.mapToItem\(timeline,[\s\S]*point\.y\s*\+\s*item\.height\s*<=\s*0\.5[\s\S]*deferredRepeater[\s\S]*item\.mapToItem\(timeline,[\s\S]*point\.y\s*\+\s*item\.height\s*<=\s*0\.5[\s\S]*deferredMaterializationTimer\.start\(\)/.test(mainSource))
@@ -291,8 +327,15 @@ TestCase {
 			visibleMaterializationSource))
 		verify(/coldScopeMaterializationDelayMs:\s*0[\s\S]*function\s+beginScopeChange\(\)[\s\S]*coldScopeMaterializationDelayTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*richContentResumeTimer\.restart\(\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*visiblePresentationDiagnostics\(\)[\s\S]*visiblePresentationReady\(diagnostics\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
-		verify(/function\s+visiblePresentationReady\(diagnostics\)[\s\S]*visibleCount\s*>\s*0[\s\S]*readyCount\s*===\s*diagnostics\.visibleCount[\s\S]*fullMessageCount\s*===\s*diagnostics\.visibleCount[\s\S]*deferredSummaryCount\s*===\s*0[\s\S]*blankCount\s*===\s*0[\s\S]*inactiveRichResourceCount\s*===\s*0/.test(mainSource))
+		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*const\s+deadlineMode[\s\S]*scopePresentationForcedByDeadline[\s\S]*forceVisibleDeadlineFallbacks\(\)[\s\S]*coldScopeMaterializationDelayTimer\.running[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*visiblePresentationDiagnostics\(\)[\s\S]*visiblePresentationReady\(diagnostics\)[\s\S]*visiblePresentationDeadlineReady\(diagnostics\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)/.test(mainSource))
+		verify(/function\s+visiblePresentationReady\(diagnostics\)[\s\S]*visibleCount\s*>\s*0[\s\S]*readyCount\s*===\s*diagnostics\.visibleCount[\s\S]*fullMessageCount\s*===\s*diagnostics\.visibleCount[\s\S]*deferredSummaryCount\s*===\s*0[\s\S]*blankCount\s*===\s*0[\s\S]*presentationHeightPendingCount\s*===\s*0[\s\S]*presentationHeightMismatchCount\s*===\s*0/.test(mainSource))
+		const stableReadyStart = mainSource.indexOf("function visiblePresentationReady")
+		const stableReadyEnd = mainSource.indexOf("function visiblePresentationHeightConvergencePending", stableReadyStart)
+		const stableReadySource = mainSource.slice(stableReadyStart, stableReadyEnd)
+		verify(!stableReadySource.includes("inactiveRichResourceCount === 0"))
+		verify(!stableReadySource.includes("paintedLoadingCount === 0"))
+		verify(/function\s+observeScopePresentationFrame\(\)[\s\S]*scopePresentationStableFrameCount[\s\S]*>=\s*2[\s\S]*scopePresentationStableFrameCommittedAt\s*=\s*Date\.now\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationVisibleFrameCommittedAt\s*=\s*Date\.now\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		const continueStart = mainSource.indexOf("function continueScopePresentationFinalization")
 		const continueEnd = mainSource.indexOf("function completeScopePresentationFinalization", continueStart)
 		verify(continueStart >= 0 && continueEnd > continueStart)
@@ -305,9 +348,9 @@ TestCase {
 		verify(finalizeStart >= 0 && finalizeEnd > finalizeStart)
 		verify(!/deferredMaterializationTimer\.running|deferredMaterializationQueue\.length/.test(
 			mainSource.slice(finalizeStart, finalizeEnd)))
-		verify(!/deferredMaterializationActiveId\s*=/.test(
+		verify(/if\s*\(deadlineMode\)\s*\{[\s\S]*clearDeferredMaterializationOwnership\(\)/.test(
 			mainSource.slice(finalizeStart, finalizeEnd)))
-		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\][\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\([\s\S]*contentHeight\s*\+\s*timeline\.height[\s\S]*richScrollRetentionBuffer\s*=[\s\S]*richScrollRetentionTarget[\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
+		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\][\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\([\s\S]*contentHeight\s*\+\s*timeline\.height[\s\S]*richScrollRetentionBuffer\s*=[\s\S]*richScrollRetentionTarget[\s\S]*timeline\.armScopePresentationStableFrameCommit\(\)[\s\S]*timeline\.scopePresentationFinalizing\s*=\s*false/.test(mainSource))
 		verify(/id:\s*coldScopeMaterializationDelayTimer[\s\S]*interval:\s*timeline\.coldScopeMaterializationDelayMs[\s\S]*scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(true\)[\s\S]*scopePresentationFinalizeQuietTimer\.restart\(\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		const rowsInsertedStart = mainSource.indexOf("function onRowsInserted(parentIndex, first, last)")
 		const rowsInsertedEnd = mainSource.indexOf("function onModelReset", rowsInsertedStart)
@@ -316,13 +359,45 @@ TestCase {
 			mainSource.slice(rowsInsertedStart, rowsInsertedEnd)))
 		verify(/function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*candidates\.sort[\s\S]*right\.viewportY\s*-\s*left\.viewportY[\s\S]*deferredMaterializationQueue\s*=\s*queued/.test(mainSource))
 		verify(/function\s+deferredPresentationStillEligible\(stableId\)[\s\S]*lightweightDeferredPresentation\s*!==\s*true[\s\S]*accessibilityPooled\s*===\s*true[\s\S]*mapToItem\(timeline,[\s\S]*deferredRepeater[\s\S]*String\(item\.stableId\s*\|\|\s*""\)\s*!==\s*key[\s\S]*return\s+point\.y\s*\+\s*item\.height\s*>\s*0\.5[\s\S]*return\s+false/.test(mainSource))
-		verify(/property string deferredMaterializationActiveId:\s*""[\s\S]*function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*deferredMaterializationActiveId\.length\s*>\s*0/.test(mainSource))
-		verify(/deferredMaterializationsPerFrame:\s*scopePresentationFinalizing\s*\?\s*1\s*:\s*2[\s\S]*function\s+materializeNextDeferredRow\(\)[\s\S]*serializeSourcePromotion\s*=\s*scopePresentationFinalizing[\s\S]*materialized\s*<\s*deferredMaterializationsPerFrame[\s\S]*deferredPresentationStillEligible\(stableId\)[\s\S]*if\s*\(serializeSourcePromotion\)[\s\S]*deferredMaterializationActiveId\s*=\s*stableId[\s\S]*chatModel\.materializeDeferredMessage\(stableId\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\][\s\S]*topAnchorActive[\s\S]*topAnchorSettleTimer\.restart\(\)[\s\S]*topAnchorFrameTimer\.restart\(\)[\s\S]*finalizationGeneration[\s\S]*scopePresentationGeneration[\s\S]*!timeline\.scopePresentationPending[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*queueRichLoaderResumes\(\)[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*queueVisibleDeferredMaterialization\(false\)/.test(mainSource))
+		verify(/property string deferredMaterializationActiveId:\s*""[\s\S]*property int deferredMaterializationActiveGeneration:\s*-1[\s\S]*property var plainDeferredMaterializationActive:\s*\(\{\}\)[\s\S]*function\s+queueVisibleDeferredMaterialization\(allowDuringFinalization\)[\s\S]*deferredMaterializationOwnershipActive\(\)/.test(mainSource))
+		verify(/function\s+clearDeferredMaterializationOwnership\(\)[\s\S]*deferredMaterializationActiveId\s*=\s*""[\s\S]*deferredMaterializationActiveGeneration\s*=\s*-1[\s\S]*plainDeferredMaterializationActive\s*=\s*\(\{\}\)/.test(mainSource))
+		verify(/readonly property int plainDeferredMaterializationsPerFrame:\s*2/.test(mainSource))
+		const sourceMaterializationStart =
+			mainSource.indexOf("function materializeNextDeferredRow()")
+		const sourceMaterializationEnd =
+			mainSource.indexOf("function completeDeferredMaterialization(",
+				sourceMaterializationStart)
+		verify(sourceMaterializationStart >= 0
+			&& sourceMaterializationEnd > sourceMaterializationStart)
+		const sourceMaterialization = mainSource.slice(sourceMaterializationStart,
+			sourceMaterializationEnd)
+		verify(/serializeSourcePromotion\s*=\s*scopePresentationFinalizing[\s\S]*deferredMaterializationOwnershipActive\(\)[\s\S]*materialized\s*<\s*deferredMaterializationsPerFrame/.test(
+			sourceMaterialization))
+		verify(/knownPlain\s*=\s*!activeScope\.activity[\s\S]*chatModel\.deferredMessagePlainForMaterialization\(stableId\)[\s\S]*if\s*\(!knownPlain\)[\s\S]*plainCohortIds\.length\s*===\s*0[\s\S]*serializedCandidateId\s*=\s*stableId[\s\S]*break/.test(
+			sourceMaterialization))
+		verify(/plainCohortIds\.length[\s\S]*>=\s*plainDeferredMaterializationsPerFrame[\s\S]*break/.test(
+			sourceMaterialization))
+		const queueRetired = sourceMaterialization.indexOf(
+			"deferredMaterializationQueue = []")
+		const plainOwnersPublished = sourceMaterialization.indexOf(
+			"plainDeferredMaterializationActive = nextPlainActive")
+		const firstPlainMutation = sourceMaterialization.indexOf(
+			"chatModel.materializeDeferredMessage(stableId)", plainOwnersPublished)
+		verify(queueRetired >= 0 && plainOwnersPublished > queueRetired
+			&& firstPlainMutation > plainOwnersPublished)
+		const plainBranchEnd = sourceMaterialization.indexOf(
+			"else if (serializedCandidateId.length > 0)", plainOwnersPublished)
+		verify(plainBranchEnd > plainOwnersPublished)
+		verify(!/deferredMaterializationActiveId\s*=/.test(
+			sourceMaterialization.slice(plainOwnersPublished, plainBranchEnd)))
+		const serializedBranch = sourceMaterialization.slice(plainBranchEnd)
+		verify(/deferredMaterializationActiveId\s*=\s*serializedCandidateId[\s\S]*deferredMaterializationActiveGeneration\s*=[\s\S]*materializationGeneration[\s\S]*chatModel\.materializeDeferredMessage\(serializedCandidateId\)/.test(
+			serializedBranch))
 		verify(/function\s+materializeNextDeferredRow\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\][\s\S]*if\s*\(materialized\s*===\s*0\)[\s\S]*finishRichContentRecoveryIfIdle\(\)[\s\S]*return[\s\S]*const\s+finalizationGeneration/.test(mainSource))
-		verify(/function\s+completeDeferredMaterialization\(stableId\)[\s\S]*key\s*!==\s*deferredMaterializationActiveId[\s\S]*deferredMaterializationActiveId\s*=\s*""[\s\S]*positionTailImmediately\(\)[\s\S]*queueVisibleDeferredMaterialization\(/.test(mainSource))
-		verify(/function\s+completeDeferredMaterialization\(stableId\)[\s\S]*if\s*\(key\.length\s*===\s*0\s*\|\|\s*key\s*!==\s*deferredMaterializationActiveId\)\s*return\s*false/.test(mainSource))
+		verify(/function\s+completeDeferredMaterialization\(stableId,\s*generation\)[\s\S]*retirePlainDeferredMaterialization\(key,\s*ownedGeneration\)[\s\S]*key\s*!==\s*deferredMaterializationActiveId[\s\S]*ownedGeneration\s*!==\s*deferredMaterializationActiveGeneration[\s\S]*deferredMaterializationActiveGeneration\s*=\s*-1[\s\S]*finishDeferredMaterializationCohort\(ownedGeneration\)/.test(mainSource))
+		verify(/function\s+finishDeferredMaterializationCohort\(generation\)[\s\S]*ownedGeneration\s*!==\s*scopePresentationGeneration[\s\S]*deferredMaterializationOwnershipActive\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*Qt\.callLater[\s\S]*queueVisibleDeferredMaterialization\(/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*scopePresentationPending[\s\S]*scopePresentationFinalizing\s*&&\s*stickToBottom[\s\S]*positionTailImmediately\(\)/.test(mainSource))
-		verify(/function\s+requestBottomFollow\(\)[\s\S]*const maximumY\s*=\s*Math\.max\([\s\S]*!scopeResetPending[\s\S]*Math\.abs\(maximumY\s*-\s*contentY\)\s*<=\s*0\.5[\s\S]*markVisibleScopeReadIfEligible\(\)[\s\S]*return[\s\S]*bottomFollowTimer\.start\(\)/.test(mainSource))
+		verify(/function\s+requestBottomFollow\(\)[\s\S]*const maximumY\s*=\s*tailContentYTarget\(\)[\s\S]*!scopeResetPending[\s\S]*Math\.abs\(maximumY\s*-\s*contentY\)\s*<=\s*0\.5[\s\S]*markVisibleScopeReadIfEligible\(\)[\s\S]*return[\s\S]*bottomFollowTimer\.start\(\)/.test(mainSource))
 		const deferredStart = mainSource.indexOf("id: deferredHistoryRow")
 		const deferredEnd = mainSource.indexOf("DelegateChoice {", deferredStart + 1)
 		verify(deferredStart >= 0 && deferredEnd > deferredStart)
@@ -342,7 +417,7 @@ TestCase {
 
 	function test_activity_is_a_read_only_log_surface_without_conversation_loading_chrome() {
 		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*if\s*\(activeScope\.activity\)[\s\S]*return\s+true/.test(mainSource))
-		verify(/id:\s*emptyConversationState[\s\S]*activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*qsTr\("No server log entries yet"\)[\s\S]*qsTr\("New Murmur server-log entries will appear here live\."\)/.test(mainSource))
+		verify(/id:\s*emptyConversationState[\s\S]*visualLoading:\s*!activeScope\.activity[\s\S]*activeScope\.loading[\s\S]*!timeline\.scopePresentationContentVisible[\s\S]*visible:\s*\(activeScope\.activity\s*\?\s*chatModel\.count\s*===\s*0[\s\S]*qsTr\("No server log entries yet"\)[\s\S]*qsTr\("New Murmur server-log entries will appear here live\."\)/.test(mainSource))
 		verify(/id:\s*composerSurface[\s\S]*visible:\s*!activeScope\.activity[\s\S]*Layout\.preferredHeight:\s*visible\s*\?/.test(mainSource))
 		verify(/id:\s*activityLogColumnHeader[\s\S]{0,2400}visible:\s*activeScope\.activity[\s\S]{0,1200}qsTr\("TIME"\)[\s\S]{0,800}qsTr\("EVENT"\)[\s\S]{0,1200}qsTr\("LIVE"\)/.test(mainSource))
 		verify(/id:\s*timeline[\s\S]{0,760}Accessible\.name:\s*activeScope\.activity\s*\?\s*qsTr\("Activity log"\)/.test(mainSource))
@@ -365,14 +440,41 @@ TestCase {
 	function test_empty_and_lightweight_scopes_skip_the_presentation_delay() {
 		verify(/function\s+scheduleScopePresentationFastPath\(\)[\s\S]*scopePresentationFastPathTimer\.restart\(\)/.test(mainSource))
 		verify(/function\s+rowNeedsDeferredPresentation\(row\)[\s\S]*bodyHydrationPending[\s\S]*Object\.keys\(preview\)[\s\S]*attachments\.length/.test(mainSource))
-		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*activeScope\.loading[\s\S]*chatModel\.count\s*===\s*0[\s\S]*return\s+true[\s\S]*count\s*===\s*0[\s\S]*return\s+false[\s\S]*contentHeight\s*>\s*height\s*\+\s*0\.5[\s\S]*itemAtIndex\(0\)[\s\S]*itemAtIndex\(count\s*-\s*1\)/.test(mainSource))
-		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*rowNeedsDeferredPresentation\(chatModel\.get\(index\)\)[\s\S]*return\s+false[\s\S]*forceLayout\(\)/.test(mainSource))
-		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationQuietTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*scopePresentationFastPath\s*=\s*true[\s\S]*scopePresentationPending\s*=\s*false/.test(mainSource))
+		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*activeScope\.loading[\s\S]*chatModel\.count\s*===\s*0[\s\S]*return\s+true[\s\S]*chatModel\.count\s*>\s*10[\s\S]*rejectScopePresentationFastPath\("model-count"\)[\s\S]*count\s*===\s*0[\s\S]*rejectScopePresentationFastPath\("timeline-empty"\)/.test(mainSource))
+		const fastPathStart = mainSource.indexOf("function canCompleteScopePresentationFastPath")
+		const fastPathEnd = mainSource.indexOf("function completeScopePresentationFastPath", fastPathStart)
+		const fastPathSource = mainSource.slice(fastPathStart, fastPathEnd)
+		verify(!fastPathSource.includes("contentHeight > height"))
+		verify(!fastPathSource.includes("itemAtIndex(0)"))
+		const largeModelReject = fastPathSource.indexOf("chatModel.count > 10")
+		const rowProbe = fastPathSource.indexOf("chatModel.get(index)")
+		const forcedLayout = fastPathSource.indexOf("forceLayout()")
+		verify(largeModelReject >= 0 && rowProbe > largeModelReject
+			&& forcedLayout > largeModelReject)
+		verify(/function\s+canCompleteScopePresentationFastPath\(\)[\s\S]*rowNeedsDeferredPresentation\(chatModel\.get\(index\)\)[\s\S]*rejectScopePresentationFastPath\([\s\S]*forceLayout\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationQuietTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*scopePresentationFastPath\s*=\s*true[\s\S]*armScopePresentationStableFrameCommit\(\)/.test(mainSource))
+		const completeFastPathStart = mainSource.indexOf("function completeScopePresentationFastPath")
+		const completeFastPathEnd = mainSource.indexOf("function noteScopePresentationMutation", completeFastPathStart)
+		verify(completeFastPathStart >= 0 && completeFastPathEnd > completeFastPathStart)
+		const completeFastPathSource = mainSource.slice(completeFastPathStart, completeFastPathEnd)
+		verify(!completeFastPathSource.includes("scopePresentationPending = false"))
+		verify(!completeFastPathSource.includes("chatModel.presentationBusy = false"))
 		verify(/id:\s*scopePresentationFastPathTimer[\s\S]*interval:\s*0[\s\S]*completeScopePresentationFastPath\(\)/.test(mainSource))
-		verify(/function\s+onAppendPendingChanged\(\)[\s\S]*!chatModel\.appendPending[\s\S]*scheduleScopePresentationFastPath\(\)[\s\S]*timeline\.scopePresentationPending[\s\S]*!timeline\.scopePresentationFinalizing[\s\S]*!activeScope\.loading[\s\S]*timeline\.finishScopePresentation\(false\)/.test(mainSource))
+		const appendPendingHandlerStart = mainSource.indexOf("function onAppendPendingChanged()")
+		const appendPendingHandlerEnd = mainSource.indexOf("function onRowsAboutToChange", appendPendingHandlerStart)
+		verify(appendPendingHandlerStart >= 0 && appendPendingHandlerEnd > appendPendingHandlerStart)
+		const appendPendingHandler = mainSource.slice(appendPendingHandlerStart, appendPendingHandlerEnd)
+		verify(!appendPendingHandler.includes("completeScopePresentationFastPath()"))
+		compare((appendPendingHandler.match(/scheduleScopePresentationFastPath\(\)/g) || []).length, 1)
+		verify(!appendPendingHandler.includes("finishScopePresentation(false)"))
+		verify(/function\s+onDataChanged\([\s\S]*scopePresentationPending[\s\S]*noteScopePresentationMutation\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
 		verify(/function\s+onLoadingChanged\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
 		verify(/function\s+onCountChanged\(\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
 		verify(/"presentationFastPath":\s*timeline\.scopePresentationFastPath/.test(mainSource))
+		verify(/function\s+rejectScopePresentationFastPath\(reason\)[\s\S]*scopePresentationFirstFastPathBlocker[\s\S]*scopePresentationLastFastPathBlocker[\s\S]*return\s+false/.test(mainSource))
+		verify(/onItemChanged:\s*\{[\s\S]*if\s*\(item\)[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
+		verify(/onContentNeedsHydrationChanged:\s*\{[\s\S]*!contentNeedsHydration[\s\S]*scheduleScopePresentationFastPath\(\)/.test(mainSource))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*"fastPathAttemptCount"[\s\S]*"firstFastPathBlocker"[\s\S]*"lastFastPathBlocker"/.test(mainSource))
 	}
 
 	function test_performance_chat_scroll_is_frame_driven_without_a_qml_animation() {
@@ -425,13 +527,20 @@ TestCase {
 			"onPresentationHeightQuietObservationEligibleChanged:", eligibilityStart)
 		verify(eligibilityStart >= 0 && eligibilityEnd > eligibilityStart)
 		const eligibilitySource = asyncSource.slice(eligibilityStart, eligibilityEnd)
-		verify(/presentationHeightQuietObservationEligible:[\s\S]*!accessibilityPooled[\s\S]*messageRowReady[\s\S]*!richGeometrySettling[\s\S]*!richResourceActivationPending[\s\S]*isFinite\(presentationHeightMeasuredHeight\)[\s\S]*!timeline\.scopePresentationObservationActive[\s\S]*!timeline\.explicitWheelInputPending[\s\S]*!root\.performanceChatScrollRunning/.test(eligibilitySource))
+		verify(/presentationHeightQuietObservationEligible:[\s\S]*!accessibilityPooled[\s\S]*messageRowReady[\s\S]*isFinite\(presentationHeightMeasuredHeight\)[\s\S]*!timeline\.explicitWheelInputPending[\s\S]*!root\.performanceChatScrollRunning/.test(eligibilitySource))
+		verify(/\(!richGeometrySettling\s*\|\|\s*timeline\.scopePresentationFinalizing\)[\s\S]*\(!richResourceActivationPending[\s\S]*\|\|\s*timeline\.scopePresentationFinalizing\)/.test(
+			eligibilitySource))
+		verify(/presentationHeightFinalizationMovementOwned:[\s\S]*scopePresentationPending[\s\S]*scopePresentationFinalizing[\s\S]*\(!timeline\.richScrollInProgress[\s\S]*presentationHeightFinalizationMovementOwned[\s\S]*\(!timeline\.moving[\s\S]*presentationHeightFinalizationMovementOwned[\s\S]*\(!timeline\.restoringBottom[\s\S]*presentationHeightFinalizationMovementOwned[\s\S]*\(!bottomFollowTimer\.running[\s\S]*presentationHeightFinalizationMovementOwned/.test(
+			asyncSource))
+		verify(!eligibilitySource.includes("!timeline.scopePresentationPending"))
+		verify(!eligibilitySource.includes("!timeline.scopePresentationFinalizing"))
 		// A stable existing anchor is ownership, not a reason to recapture and
 		// overwrite the selected message/offset. Only its restore/release phases
 		// remain ineligible.
 		verify(!/!\s*timeline\.viewportAnchorActive/.test(eligibilitySource))
 		verify(/!timeline\.viewportAnchorReleasePending[\s\S]*!timeline\.restoringViewportAnchor/.test(eligibilitySource))
 		verify(/!timeline\.viewportAnchorQuietReleaseActive/.test(eligibilitySource))
+		verify(/onPresentationHeightQuietObservationEligibleChanged:\s*\{[\s\S]*!presentationHeightFinalizationMovementOwned[\s\S]*stopPresentationHeightObservation\(\)/.test(asyncSource))
 		const prepareStart = asyncSource.indexOf(
 			"function preparePresentationHeightCommit()")
 		const prepareEnd = asyncSource.indexOf(
@@ -606,11 +715,11 @@ TestCase {
 		verify(finiteMeasuredHeight > 0
 			&& finiteMeasuredHeight < conservativeEstimate)
 		compare(Math.max(58, finiteMeasuredHeight), finiteMeasuredHeight)
-		const heightStart = asyncSource.indexOf("height: stationaryThumbWarmPinned")
+		const heightStart = asyncSource.indexOf("height: deadlinePresentationFallback")
 		const heightEnd = asyncSource.indexOf("onHeightChanged:", heightStart)
 		verify(heightStart >= 0 && heightEnd > heightStart)
 		const heightSource = asyncSource.slice(heightStart, heightEnd)
-		verify(/stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*Math\.max\([\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(heightSource))
+		verify(/deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*Math\.max\([\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(heightSource))
 		verify(!/item\.implicitHeight/.test(heightSource))
 		const clipStart = asyncSource.indexOf("clip: stationaryThumbWarmPinned")
 		const clipEnd = asyncSource.indexOf("opacity:", clipStart)
@@ -651,7 +760,8 @@ TestCase {
 		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0[\s\S]*richScrollRetentionTarget\s*=\s*0/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]{0,900}chatModel\.presentationBusy\s*=\s*true/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*releaseTopAnchor\(\)[\s\S]*richContentResumeTimer\.stop\(\)[\s\S]*richLoaderResumeTimer\.stop\(\)[\s\S]*richLoaderResumeQueue\s*=\s*\[\][\s\S]*deferredMaterializationTimer\.stop\(\)[\s\S]*deferredMaterializationQueue\s*=\s*\[\]/.test(mainSource))
-		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
+		verify(/function\s+completeScopePresentationFastPath\(\)[\s\S]*armScopePresentationStableFrameCommit\(\)/.test(mainSource))
+		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		verify(/function\s+finishRichContentRecoveryIfIdle\(\)[\s\S]{0,220}if\s*\(scopePresentationPending\)[\s\S]{0,80}return/.test(mainSource))
 		verify(/id:\s*richScrollRetentionRampTimer[\s\S]*interval:\s*16[\s\S]*repeat:\s*true[\s\S]*richScrollRetentionBuffer\s*=\s*Math\.min\([\s\S]*richScrollRetentionRampStep[\s\S]*stop\(\)/.test(mainSource))
 		const viewportMembershipFunctionsStart =
@@ -686,15 +796,15 @@ TestCase {
 		verify(finalizationCallLaterStart >= 0)
 		const finalizationCallLaterSource = finalizationSource.slice(
 			finalizationCallLaterStart)
-		verify(/if\s*\(!forcedByDeadline\s*&&\s*\(viewportMembershipTimer\.running\s*\|\|\s*timeline\.viewportMembershipUpdatePending\)\)\s*\{\s*scopePresentationFinalizeQuietTimer\.restart\(\)\s*return/.test(
+		verify(/if\s*\(!deadlineMode\s*&&\s*\(viewportMembershipTimer\.running\s*\|\|\s*timeline\.viewportMembershipUpdatePending\)\)\s*\{\s*scopePresentationFinalizeQuietTimer\.restart\(\)\s*return/.test(
 			finalizationCallLaterSource))
-		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationFinalizing\s*=\s*false/.test(
+		verify(/scopePresentationFinalizeDeadlineTimer\.stop\(\)[\s\S]*scopeResetPending\s*=\s*false[\s\S]*armScopePresentationStableFrameCommit\(\)[\s\S]*scopePresentationFinalizing\s*=\s*false/.test(
 			finalizationCallLaterSource))
 		verify(/onContentYChanged:\s*\{\s*scheduleViewportMembershipUpdate\(\)/.test(
 			mainSource))
 		verify(/onContentHeightChanged:\s*\{\s*scheduleViewportMembershipUpdate\(\)/.test(
 			mainSource))
-		verify(/onHeightChanged:\s*scheduleViewportMembershipUpdate\(\)/.test(
+		verify(/onHeightChanged:\s*\{\s*scheduleViewportMembershipUpdate\(\)[\s\S]*stickToBottom[\s\S]*scopePresentationGeneration[\s\S]*requestBottomFollow\(\)/.test(
 			mainSource))
 		verify(/onOriginYChanged:\s*scheduleViewportMembershipUpdate\(\)/.test(
 			mainSource))
@@ -791,15 +901,31 @@ TestCase {
 		verify(/function\s+pendingVisibleRichRecoveryCount\(\)[\s\S]*richResourceRecoveryPending\(item\)/.test(mainSource))
 		verify(/function\s+timelinePresentationState\(\)[\s\S]*const\s+pendingVisibleRichRecoveryCount\s*=[\s\S]*timeline\.pendingVisibleRichRecoveryCount\(\)/.test(mainSource))
 		verify(/"pendingVisibleRichRecoveryCount":\s*[\s\S]*pendingVisibleRichRecoveryCount/.test(mainSource))
-		verify(/"settled":[\s\S]*pendingVisibleRichRecoveryCount\s*===\s*0/.test(mainSource))
+		verify(/const\s+richHydrated\s*=[\s\S]*pendingVisibleHydrationCount\s*===\s*0[\s\S]*pendingVisibleRichRecoveryCount\s*===\s*0[\s\S]*"richHydrated":\s*richHydrated/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*richContentResumeTimer\.restart\(\)[\s\S]*function\s+queueRichLoaderResumes\(\)[\s\S]*candidates\.sort[\s\S]*richLoaderResumeQueue/.test(mainSource))
 		verify(/function\s+scheduleRichContentResume\(\)[\s\S]*if\s*\(richScrollInProgress\s*\|\|\s*coldScopeMaterializationDelayTimer\.running\)\s*return/.test(mainSource))
-		verify(/const visible = point\.y \+ item\.height > 0\.5[\s\S]*prefetchEligible[\s\S]*nearViewportWarmId[\s\S]*if \(!visible && !prefetchEligible\)\s*continue[\s\S]*candidates\.push/.test(mainSource))
+		verify(/const plainSourceOwned = item\.plainDeferredSourceOwned === true[\s\S]*const visible = point\.y \+ item\.height > 0\.5[\s\S]*prefetchEligible[\s\S]*nearViewportWarmId[\s\S]*if \(!visible && !prefetchEligible && !plainSourceOwned\)\s*continue[\s\S]*candidates\.push/.test(mainSource))
 		verify(/function\s+queueRichLoaderResumes\(\)[\s\S]*item\.messageRowReady\s*===\s*true[\s\S]*item\.previewPresentationReady\s*===\s*true[\s\S]*!richResourceRecoveryPending\(item\)[\s\S]*stableId\s*===\s*richLoaderResumeActiveId/.test(mainSource))
 		verify(/function\s+resumeNextRichLoader\(\)[\s\S]*resumeRichContentAfterScroll\([\s\S]*scopePresentationFinalizing[\s\S]*finishRichContentRecoveryIfIdle\(\)[\s\S]*id:\s*richLoaderResumeTimer[\s\S]*interval:\s*16/.test(mainSource))
 		verify(/function\s+resumeNextRichLoader\(\)[\s\S]*resumeRichContentAfterScroll\(\s*timeline\.scopePresentationFinalizing,\s*true\)/.test(mainSource))
+		verify(/readonly property int plainScopeResumeAdmissionsPerFrame:\s*2/.test(mainSource))
+		verify(/readonly property bool plainTimestampOnlyFooterContent:[\s\S]*own[\s\S]*timestamp\.length\s*>\s*0[\s\S]*!hasReactions[\s\S]*!hasReplyContent[\s\S]*!hasDeliveryStatus[\s\S]*hasEmbeddedFooterContent[\s\S]*!plainTimestampOnlyFooterContent\s*\?\s*34\s*:\s*0/.test(
+			mainSource))
+		verify(/readonly property bool plainScopeResumeEligible:\s*!logEntry[\s\S]*!contentNeedsHydration[\s\S]*!hasPreviewContent[\s\S]*!hasAttachmentContent[\s\S]*!hasInlineImageContent/.test(mainSource))
+		const plainResumeStart = mainSource.indexOf("const plainScopeResume =")
+		const plainResumeEnd = mainSource.indexOf(
+			"richLoaderResumeActiveId = stableId", plainResumeStart)
+		verify(plainResumeStart >= 0 && plainResumeEnd > plainResumeStart)
+		const plainResumeSource = mainSource.slice(plainResumeStart, plainResumeEnd)
+		verify(/scopePresentationPending[\s\S]*scopePresentationFinalizing[\s\S]*stillVisible\s*\|\|\s*plainSourceOwned[\s\S]*item\.plainScopeResumeEligible\s*===\s*true[\s\S]*resumeRichContentAfterScroll\(true,\s*false\)[\s\S]*plainAdmissions\s*>=\s*plainScopeResumeAdmissionsPerFrame/.test(
+			plainResumeSource))
+		verify(!/richLoaderResumeActiveId\s*=/.test(plainResumeSource))
+		verify(/scopePresentationPending\s*&&\s*scopePresentationFinalizing[\s\S]*visible\s*\|\|\s*plainSourceOwned[\s\S]*item\.plainScopeResumeEligible\s*===\s*true[\s\S]*item\.messageRowMaterialized\s*===\s*true[\s\S]*continue/.test(mainSource))
+		verify(/readonly property bool plainDeferredSourceOwned:[\s\S]*plainDeferredMaterializationOwns\([\s\S]*deferredMaterializationCleanupId[\s\S]*deferredMaterializationCleanupGeneration[\s\S]*readonly property bool plainScopeResumeEligible:\s*item[\s\S]*item\.plainScopeResumeEligible\s*:\s*plainDeferredSourceOwned/.test(mainSource))
+		verify(/function\s+captureDeferredMaterializationOwnership\(\)[\s\S]*deferredMaterializationGenerationFor\([\s\S]*function\s+releaseDeferredMaterialization\(stableIdOverride,[\s\S]*generationOverride[\s\S]*completeDeferredMaterialization\(key,\s*generation\)/.test(mainSource))
+		verify(/ListView\.onPooled:[\s\S]*releaseDeferredMaterialization\([\s\S]*ListView\.onReused:[\s\S]*deferredMaterializationCleanupGeneration[\s\S]*captureDeferredMaterializationOwnership\(\)[\s\S]*onStableIdChanged:[\s\S]*retiredMaterializationGeneration[\s\S]*releaseDeferredMaterialization\(retiredMaterializationId,[\s\S]*Component\.onDestruction:[\s\S]*deferredMaterializationCleanupGeneration/.test(mainSource))
 		verify(/property string richLoaderResumeActiveId:\s*""/.test(mainSource))
-		verify(/function\s+resumeNextRichLoader\(\)[\s\S]*if\s*\(richLoaderResumeActiveId\.length\s*>\s*0\)[\s\S]*stillVisible[\s\S]*prefetchEligible[\s\S]*if\s*\(!stillVisible\s*&&\s*!prefetchEligible\)[\s\S]*break[\s\S]*richLoaderResumeActiveId\s*=\s*stableId[\s\S]*resumeRichContentAfterScroll[\s\S]*!==\s*false[\s\S]*!resumed[\s\S]*richLoaderResumeActiveId\s*=\s*""[\s\S]*item\.messageRowReady\s*===\s*true/.test(mainSource))
+		verify(/function\s+resumeNextRichLoader\(\)[\s\S]*if\s*\(richLoaderResumeActiveId\.length\s*>\s*0\)[\s\S]*stillVisible[\s\S]*prefetchEligible[\s\S]*plainSourceOwned[\s\S]*if\s*\(!stillVisible\s*&&\s*!prefetchEligible\s*&&\s*!plainSourceOwned\)[\s\S]*continue[\s\S]*if\s*\(plainAdmissions\s*>\s*0\)[\s\S]*queued\.unshift\(stableId\)[\s\S]*richLoaderResumeActiveId\s*=\s*stableId[\s\S]*resumeRichContentAfterScroll[\s\S]*!==\s*false[\s\S]*!resumed[\s\S]*richLoaderResumeActiveId\s*=\s*""[\s\S]*item\.messageRowReady\s*===\s*true/.test(mainSource))
 		verify(/function\s+completeRichLoaderResume\(stableId\)[\s\S]*richLoaderResumeActiveId\s*=\s*""[\s\S]*richLoaderResumeTimer\.start\(\)[\s\S]*Qt\.callLater[\s\S]*queueRichLoaderResumes\(\)/.test(mainSource))
 		verify(/function\s+cancelRichLoaderResume\(stableId\)[\s\S]*completeRichLoaderResume\(stableId\)/.test(mainSource))
 		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*!messageRowReady\s*\|\|\s*!previewPresentationReady[\s\S]*scheduleRichResourceActivation\(\)[\s\S]*const rowId = stableId[\s\S]*Qt\.callLater[\s\S]*timeline\.completeRichLoaderResume\(rowId\)/.test(mainSource))
@@ -814,7 +940,7 @@ TestCase {
 		const activationPendingGuard =
 			completeResumeSource.indexOf("if (richResourceActivationPending)")
 		const deferredCompletion = completeResumeSource.indexOf(
-			"timeline.completeDeferredMaterialization(stableId)")
+			"timeline.completeDeferredMaterialization(stableId,")
 		const nearViewportCompletion = completeResumeSource.indexOf(
 			"timeline.completeNearViewportPrefetchIfReady(stableId)")
 		verify(activationPendingGuard >= 0
@@ -845,8 +971,8 @@ TestCase {
 			&& activationElse > activationSettleRestart
 			&& activationDeferredCompletion > activationElse
 			&& activationCompletion > activationDeferredCompletion)
-		verify(/id:\s*richResourceActivationSettleTimer[\s\S]*interval:\s*48[\s\S]*onTriggered:\s*Qt\.callLater\(function\(\)\s*\{\s*messageDelegate\.completeRichLoaderResumeWhenReady\(\)\s*\}\)/.test(mainSource))
-		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*messageRowReady[\s\S]*completeDeferredMaterialization\(stableId\)/.test(mainSource))
+		verify(/id:\s*richResourceActivationSettleTimer[\s\S]*interval:\s*48[\s\S]*onTriggered:\s*\{[\s\S]*activationStableId[\s\S]*activationGeneration[\s\S]*Qt\.callLater\(function\(\)[\s\S]*activationGeneration\s*===\s*timeline\.scopePresentationGeneration[\s\S]*activationStableId\s*===\s*String\(messageDelegate\.stableId[\s\S]*messageDelegate\.accessibilityPooled\s*!==\s*true[\s\S]*messageDelegate\.completeRichLoaderResumeWhenReady\(\)/.test(mainSource))
+		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*messageRowReady[\s\S]*completeDeferredMaterialization\(stableId,[\s\S]*deferredMaterializationCleanupGeneration\)/.test(mainSource))
 		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*completeNearViewportPrefetchIfReady\(stableId\)/.test(mainSource))
 		verify(/function\s+finishRichContentRecoveryIfIdle\(\)[\s\S]*Qt\.callLater[\s\S]*richLoaderResumeQueue\.length\s*>\s*0[\s\S]*deferredMaterializationQueue\.length\s*>\s*0[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		const finishRecoveryStart =
@@ -1058,7 +1184,7 @@ TestCase {
 			richResourcesChangedSource))
 		verify(/!richResourcesActive\s*&&\s*!inVisibleViewport[\s\S]*!timeline\.richScrollInProgress[\s\S]*timeline\.scheduleNearViewportPrefetch\(\)/.test(
 			richResourcesChangedSource))
-		verify(/function\s+timelinePresentationState\(\)[\s\S]*"visibleInactiveRichResourceCount":[\s\S]*inactiveRichResourceCount[\s\S]*"settled":[\s\S]*!timeline\.prependAnchorActive[\s\S]*!chatModel\.prependPending[\s\S]*inactiveRichResourceCount\s*===\s*0/.test(mainSource))
+		verify(/function\s+timelinePresentationState\(\)[\s\S]*const\s+richHydrated\s*=[\s\S]*inactiveRichResourceCount\s*===\s*0[\s\S]*"richHydrated":\s*richHydrated[\s\S]*"visibleInactiveRichResourceCount":[\s\S]*"settled":\s*visibleFrameCommittedAt\s*>\s*0[\s\S]*!timeline\.prependAnchorActive[\s\S]*!chatModel\.prependPending/.test(mainSource))
 		verify(!/"settled":[\s\S]{0,400}!timeline\.topAnchorActive/.test(mainSource))
 		verify(!/"settled":[\s\S]{0,400}!timeline\.scopePresentationObservationActive/.test(mainSource))
 		verify(/function\s+completePerformanceChatScrollWorkload\(\)[\s\S]*!timeline\.topAnchorActive[\s\S]*performanceChatScrollFullRangeToStart[\s\S]*timeline\.beginTopAnchor\(true\)/.test(mainSource))
@@ -1125,7 +1251,7 @@ TestCase {
 			mainSource.indexOf("id: messageDelegate"), mainSource.indexOf("id: messageRowLoader"))))
 		verify(/function\s+suspendRichResourcesForScroll\(\)[\s\S]*richResourceActivationTimer\.stop\(\)[\s\S]*richResourceActivationSettleTimer\.stop\(\)[\s\S]*richResourcesActive\s*=\s*false/.test(mainSource))
 		verify(/readonly property bool richResourcesRequired:[\s\S]*hasPreviewContent\s*&&\s*!previewTerminalUnavailable[\s\S]*hasAttachmentContent[\s\S]*hasInlineImageContent/.test(mainSource))
-		verify(/readonly property bool richResourceActivationReady:[\s\S]*!backendContentNeedsHydration[\s\S]*!hasPreviewContent\s*\|\|\s*previewTerminalUnavailable[\s\S]*previewMaterializationAdmitted[\s\S]*Loader\.Ready/.test(mainSource))
+		verify(/readonly property bool richResourceActivationReady:[\s\S]*!previewNeedsHydration[\s\S]*!hasPreviewContent\s*\|\|\s*previewTerminalUnavailable[\s\S]*previewMaterializationAdmitted[\s\S]*Loader\.Ready/.test(mainSource))
 		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*richResourcesRequired\s*&&\s*richResourceActivationReady[\s\S]*scheduleRichResourceActivation\(\)/.test(mainSource))
 		const richResourcesRequiredStart =
 			mainSource.indexOf("onRichResourcesRequiredChanged:")
@@ -1175,15 +1301,17 @@ TestCase {
 			&& contentHydrationChangedEnd > contentHydrationChangedStart)
 		const contentHydrationChangedSource =
 			mainSource.slice(contentHydrationChangedStart, contentHydrationChangedEnd)
-		verify(/const hydrationId\s*=\s*String\(stableId\s*\|\|\s*""\)\s*if\s*\(contentNeedsHydration\)\s*timeline\.invalidateNearViewportPrefetchReady\(\s*hydrationId\)\s*requestPreviewHydrationIfNeeded\(\)\s*if\s*\(!contentNeedsHydration\)\s*\{\s*completeRichLoaderResumeWhenReady\(\)\s*timeline\.scheduleRichContentResume\(\)\s*timeline\.scheduleNearViewportPrefetch\(\)\s*\}/.test(
+		verify(/const hydrationId\s*=\s*String\(stableId\s*\|\|\s*""\)\s*if\s*\(contentNeedsHydration\)\s*timeline\.invalidateNearViewportPrefetchReady\(\s*hydrationId\)\s*requestPreviewHydrationIfNeeded\(\)\s*if\s*\(!contentNeedsHydration\)\s*\{\s*timeline\.scheduleScopePresentationFastPath\(\)\s*completeRichLoaderResumeWhenReady\(\)\s*timeline\.scheduleRichContentResume\(\)\s*timeline\.scheduleNearViewportPrefetch\(\)\s*\}/.test(
 			contentHydrationChangedSource))
 		verify(/property bool richLoaderSuspended:\s*false[\s\S]*function\s+handleListViewPooled\(\)[\s\S]*richLoaderSuspended\s*=\s*true[\s\S]*function\s+handleListViewReused\(\)[\s\S]*richLoaderSuspended\s*=\s*timeline\.richScrollInProgress[\s\S]*timeline\.scopePresentationPending/.test(mainSource))
 		verify(/property bool messageRowMaterialized:\s*false[\s\S]*function\s+handleListViewPooled\(\)[\s\S]*messageRowMaterialized\s*=\s*false/.test(mainSource))
-		verify(/id:\s*messageRowLoader[\s\S]*active:\s*!messageDelegate\.logEntry[\s\S]*messageDelegate\.messageRowMaterialized[\s\S]*asynchronous:\s*true[\s\S]*onLoaded:[\s\S]*messageDelegate\.messageRowMaterialized\s*=\s*true/.test(mainSource))
+		verify(/id:\s*messageRowLoader[\s\S]*active:\s*!messageDelegate\.logEntry[\s\S]*messageDelegate\.messageRowMaterialized[\s\S]*asynchronous:\s*true[\s\S]*onLoaded:[\s\S]*messageDelegate\.messageRowMaterialized\s*=\s*true[\s\S]*noteScopePresentationRowLoaderLoaded\(\)/.test(mainSource))
 		verify(/property bool messagePresentationReadyLatched:\s*false[\s\S]*readonly property bool currentMessagePresentationReady:[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Error[\s\S]*messageRowLoader\.status\s*===\s*Loader\.Ready[\s\S]*previewPresentationReady[\s\S]*readonly property bool messageRowReady:[\s\S]*currentMessagePresentationReady[\s\S]*messagePresentationReadyLatched[\s\S]*onCurrentMessagePresentationReadyChanged:[\s\S]*messagePresentationReadyLatched\s*=\s*true/.test(mainSource))
 		verify(/function\s+handleListViewPooled\(\)[\s\S]*messageRowMaterialized\s*=\s*false[\s\S]*messagePresentationReadyLatched\s*=\s*false[\s\S]*onStableIdChanged:[\s\S]*messagePresentationReadyLatched\s*=\s*false/.test(mainSource))
 		verify(/id:\s*messageRowLoader[\s\S]*onLoaded:[\s\S]*messageDelegate\.completeRichLoaderResumeWhenReady\(\)[\s\S]*onStatusChanged:[\s\S]*status\s*===\s*Loader\.Error/.test(mainSource))
-		verify(/readonly property real richPresentationMetadataHeight:[\s\S]*hasReplyContent\s*\?\s*44[\s\S]*hasEmbeddedFooterContent\s*\?\s*34[\s\S]*previewReservedHeight:[\s\S]*previewTerminalUnavailable\s*\?\s*previewStagingHeight[\s\S]*previewPlaceholderHeight[\s\S]*lightweightMessageRowHeight:[\s\S]*hasPreviewContent\s*\?\s*previewReservedHeight\s*\+\s*72[\s\S]*richPresentationMetadataHeight[\s\S]*hasAttachmentContent\s*\?\s*attachmentPlaceholderHeight\s*\+\s*72[\s\S]*richPresentationMetadataHeight[\s\S]*hasInlineImageContent\s*\?\s*360\s*\+\s*richPresentationMetadataHeight/.test(mainSource))
+		verify(/readonly property real richPresentationMetadataHeight:[\s\S]*hasReplyContent\s*\?\s*44[\s\S]*hasEmbeddedFooterContent\s*\?\s*34[\s\S]*previewReservedHeight:[\s\S]*previewNeedsHydration\s*\|\|\s*previewTerminalUnavailable[\s\S]*\?\s*previewStagingHeight[\s\S]*previewPlaceholderHeight[\s\S]*richPresentationContentHeight:[\s\S]*hasPreviewContent\s*\?\s*previewReservedHeight\s*:\s*0[\s\S]*hasAttachmentContent\s*\?\s*attachmentPlaceholderHeight\s*:\s*0[\s\S]*hasPreviewContent\s*&&\s*hasAttachmentContent[\s\S]*Theme\.chatContentSpacing[\s\S]*lightweightMessageRowHeight:[\s\S]*hasPreviewContent\s*\|\|\s*hasAttachmentContent[\s\S]*richPresentationContentHeight\s*\+\s*72[\s\S]*richPresentationMetadataHeight[\s\S]*hasInlineImageContent\s*\?\s*360\s*\+\s*richPresentationMetadataHeight/.test(mainSource))
+		verify(/previewStagingPresentationReady:[\s\S]*previewHydrationPlaceholderLoader\.status[\s\S]*Loader\.Ready[\s\S]*attachmentPresentationReady:[\s\S]*attachmentLoader\.status\s*===\s*Loader\.Ready[\s\S]*boundedRichGeometryReady:[\s\S]*previewNeedsHydration\s*\|\|\s*previewTerminalUnavailable[\s\S]*previewStagingPresentationReady[\s\S]*attachmentPresentationReady[\s\S]*!hasInlineImageContent/.test(mainSource))
+		verify(/richGeometrySettling:[\s\S]*item\.richResourcesRequired[\s\S]*!item\.richResourcesActive[\s\S]*!item\.boundedRichGeometryReady/.test(mainSource))
 		verify(/readonly property string previewPlaceholderKind:[\s\S]*preview\.metadata[\s\S]*previewKind/.test(mainSource))
 		const previewMediaClassification =
 			/readonly property bool previewPlaceholderHasMedia:[\s\S]{0,420}/.exec(mainSource)
@@ -1345,15 +1473,15 @@ TestCase {
 		const asyncDelegateSource = mainSource.slice(
 			mainSource.indexOf("id: asyncMessageDelegate"),
 			mainSource.indexOf("id: messageDelegate"))
-		verify(/property string deferredMaterializationCleanupId:\s*""[\s\S]*function releaseDeferredMaterialization\(stableIdOverride\)[\s\S]*timeline\.completeDeferredMaterialization\(key\)/.test(
+		verify(/property string deferredMaterializationCleanupId:\s*""[\s\S]*property int deferredMaterializationCleanupGeneration:\s*-1[\s\S]*function releaseDeferredMaterialization\(stableIdOverride,[\s\S]*generationOverride[\s\S]*timeline\.completeDeferredMaterialization\(key,\s*generation\)/.test(
 			asyncDelegateSource))
 		verify(/function recoverOuterLoaderIncubationTimeout\(\)[\s\S]*cancelRichLoaderResume\(ownedStableId\)[\s\S]*releaseDeferredMaterialization\(ownedStableId\)/.test(
 			asyncDelegateSource))
 		verify(/ListView\.onPooled:\s*\{[\s\S]*const retiredStableId[\s\S]*releaseDeferredMaterialization\(retiredStableId\)/.test(
 			asyncDelegateSource))
-		verify(/onStableIdChanged:\s*\{[\s\S]*deferredMaterializationCleanupId[\s\S]*releaseDeferredMaterialization\(retiredMaterializationId\)/.test(
+		verify(/onStableIdChanged:\s*\{[\s\S]*deferredMaterializationCleanupId[\s\S]*retiredMaterializationGeneration[\s\S]*releaseDeferredMaterialization\(retiredMaterializationId,[\s\S]*retiredMaterializationGeneration\)/.test(
 			asyncDelegateSource))
-		verify(/Component\.onDestruction:\s*\{[\s\S]*releaseDeferredMaterialization\(retiredStableId\)/.test(
+		verify(/Component\.onDestruction:\s*\{[\s\S]*releaseDeferredMaterialization\([\s\S]*deferredMaterializationCleanupId,[\s\S]*deferredMaterializationCleanupGeneration\)/.test(
 			asyncDelegateSource))
 		verify(/property string viewportProbeStableId:\s*""[\s\S]*property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*property bool inVisibleViewport:\s*false[\s\S]*property bool inHydrationWindow:\s*false/.test(
 			asyncDelegateSource))
@@ -1402,7 +1530,7 @@ TestCase {
 		const membershipSettlingStart = asyncDelegateSource.indexOf(
 			"onRichGeometrySettlingChanged:")
 		const membershipPinnedHeightStart = asyncDelegateSource.indexOf(
-			"height: stationaryThumbWarmPinned", membershipSettlingStart)
+			"height: deadlinePresentationFallback", membershipSettlingStart)
 		const membershipHeightChangedStart = asyncDelegateSource.indexOf(
 			"onHeightChanged:", membershipPinnedHeightStart)
 		const membershipClipStart = asyncDelegateSource.indexOf(
@@ -1419,7 +1547,7 @@ TestCase {
 			membershipHeightChangedStart, membershipClipStart)
 		verify(/onRichGeometrySettlingChanged:\s*\{\s*if\s*\(!richGeometrySettling\)\s*scheduleViewportProbeHeightUpdate\(\)\s*schedulePresentationHeightObservation\(\)\s*\}/.test(
 			membershipSettlingSource))
-		verify(/height:\s*stationaryThumbWarmPinned\s*\?\s*stationaryThumbPinnedOuterHeight\s*:\s*presentationHeightCommittedHeight\s*>\s*0\s*\?\s*presentationHeightCommittedHeight\s*:\s*Math\.max\(/.test(
+		verify(/height:\s*deadlinePresentationFallback\s*\?\s*timeline\.deferredMessageRowHeight\s*:\s*stationaryThumbWarmPinned\s*\?\s*stationaryThumbPinnedOuterHeight\s*:\s*presentationHeightCommittedHeight\s*>\s*0\s*\?\s*presentationHeightCommittedHeight\s*:\s*Math\.max\(/.test(
 			membershipPinnedHeightSource))
 		verify(/onHeightChanged:\s*\{\s*if\s*\(item\)\s*\{\s*scheduleViewportProbeHeightUpdate\(\)\s*schedulePresentationHeightObservation\(\)\s*\}\s*\}/.test(
 			membershipHeightChangedSource))
@@ -1427,7 +1555,7 @@ TestCase {
 			asyncDelegateSource))
 		verify(/onViewportProbeHeightChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*onYChanged:\s*timeline\.scheduleViewportMembershipUpdate\(\)/.test(
 			asyncDelegateSource))
-		verify(/ListView\.onPooled:\s*\{\s*accessibilityPooled\s*=\s*true\s*updateViewportMembership\(\)[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*ListView\.onReused:\s*\{[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)\s*resetViewportProbeHeight\(\)[\s\S]*if\s*\(item\)\s*item\.handleListViewReused\(\)\s*accessibilityPooled\s*=\s*false\s*updateViewportMembership\(\)\s*scheduleViewportProbeHeightUpdate\(\)/.test(
+		verify(/ListView\.onPooled:\s*\{\s*retireStationaryThumbWarmForDelegate\("delegate-pooled"\)\s*deadlinePresentationRecoveryActive\s*=\s*false\s*accessibilityPooled\s*=\s*true\s*updateViewportMembership\(\)[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)[\s\S]*ListView\.onReused:\s*\{\s*releaseDeferredMaterialization\([\s\S]*deferredMaterializationCleanupGeneration\)\s*retireStationaryThumbWarmForDelegate\("delegate-reused"\)[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*viewportProbeUpdateTimer\.stop\(\)\s*resetViewportProbeHeight\(\)[\s\S]*if\s*\(item\)\s*item\.handleListViewReused\(\)\s*accessibilityPooled\s*=\s*false\s*updateViewportMembership\(\)\s*scheduleViewportProbeHeightUpdate\(\)[\s\S]*captureDeferredMaterializationOwnership\(\)/.test(
 			asyncDelegateSource))
 		verify(/onStableIdChanged:\s*\{[\s\S]*resetPresentationHeightIdentity\(\)[\s\S]*resetViewportProbeHeight\(\)[\s\S]*scheduleViewportProbeReset\(\)[\s\S]*timeline\.scheduleViewportMembershipUpdate\(\)[\s\S]*Component\.onCompleted:\s*\{[\s\S]*scheduleViewportProbeReset\(\)[\s\S]*updateViewportMembership\(\)[\s\S]*schedulePresentationHeightObservation\(\)[\s\S]*onLoaded:[\s\S]*scheduleViewportProbeHeightUpdate\(\)[\s\S]*schedulePresentationHeightObservation\(\)/.test(
 			asyncDelegateSource))
@@ -1455,7 +1583,7 @@ TestCase {
 			&& asyncRichHandoffSummaryStart > asyncRichHandoffStart)
 		const asyncRichHandoffOuterSource = asyncDelegateSource.slice(
 			asyncRichHandoffStart, asyncRichHandoffSummaryStart)
-		verify(/visible:\s*asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
+		verify(/visible:\s*asyncMessageDelegate\.deadlinePresentationFallback\s*\|\|\s*\(asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
 			asyncRichHandoffOuterSource))
 		verify(/radius:\s*0[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
 			asyncRichHandoffOuterSource))
@@ -1486,7 +1614,7 @@ TestCase {
 			&& previewPlaceholderVisibilityEnd > previewPlaceholderLoaderStart)
 		const previewPlaceholderVisibilitySource = mainSource.slice(
 			previewPlaceholderLoaderStart, previewPlaceholderVisibilityEnd)
-		verify(/active:\s*messageDelegate\.hasPreviewContent[\s\S]{0,100}messageDelegate\.previewTerminalUnavailable[\s\S]*visible:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\s*\|\|\s*!messageDelegate\.previewMaterializationAdmitted\s*\|\|\s*messagePreviewLoader\.status\s*!==\s*Loader\.Ready\)/.test(
+		verify(/active:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\)[\s\S]*visible:\s*messageDelegate\.hasPreviewContent\s*&&\s*\(messageDelegate\.previewNeedsHydration\s*\|\|\s*messageDelegate\.previewTerminalUnavailable\)/.test(
 			previewPlaceholderVisibilitySource))
 		verify(!previewPlaceholderVisibilitySource.includes(
 			"previewLoaderSurfaceNonBlank"))
@@ -1509,12 +1637,14 @@ TestCase {
 		verify(/onRichContentViewportEligibleChanged:[\s\S]*!richContentViewportEligible[\s\S]*cancelRichLoaderResume\(stableId\)[\s\S]*suspendRichResourcesForScroll\(\)[\s\S]*scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/cancelRichLoaderResume\(stableId\)[\s\S]{0,320}previewMaterializationAdmitted\s*=\s*false[\s\S]{0,160}suspendRichResourcesForScroll\(\)/.test(mainSource))
 		verify(/function\s+suspendRichResourcesForScroll\(\)[\s\S]*resetPreviewLoaderIncubationWatchdog\(\)[\s\S]*richResourceActivationTimer\.stop\(\)/.test(mainSource))
-		verify(/function\s+requestPreviewHydrationIfNeeded\(allowDuringFinalization\)[\s\S]*!backendHydrationRequested[\s\S]*richContentViewportEligible[\s\S]*!timeline\.scopePresentationPending\s*\|\|\s*pendingAllowed[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration\(stableId,\s*inVisibleViewport\)[\s\S]*backendHydrationRequested\s*=\s*true/.test(mainSource))
+		verify(/function\s+requestPreviewHydrationIfNeeded\(allowDuringFinalization\)[\s\S]*!backendHydrationRequested[\s\S]*richContentViewportEligible[\s\S]*!timeline\.scopePresentationPending\s*\|\|\s*pendingAllowed[\s\S]*!timeline\.richScrollInProgress[\s\S]*queuePreviewHydration\(stableId,\s*inVisibleViewport,[\s\S]*hydrationOwnerScopeToken,\s*hydrationOwnerGeneration\)[\s\S]*backendHydrationRequested\s*=\s*true/.test(mainSource))
 		verify(/ListView\.onPooled:[\s\S]*backendHydrationRequested\s*=\s*false[\s\S]*onStableIdChanged:[\s\S]*backendHydrationRequested\s*=\s*false/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*function\s+finishScopePresentation\(forcedByDeadline\)[\s\S]*scopePresentationFinalizeStartTimer\.restart\(\)/.test(mainSource))
 		verify(!mainSource.includes("scopeReuseResetActive"))
-		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*!messageDelegate\.attachmentNeedsHydration[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{[\s\S]*resourceActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
-		verify(/id:\s*messageAttachmentHydrationPlaceholder[\s\S]*visible:\s*messageDelegate\.hasAttachmentContent[\s\S]*messageDelegate\.attachmentNeedsHydration/.test(mainSource))
+		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*!messageDelegate\.richLoaderSuspended[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*AttachmentGallery\s*\{[\s\S]*resourceActive:\s*messageDelegate\.richResourcesActive/.test(mainSource))
+		verify(/id:\s*messageAttachmentHydrationPlaceholder[\s\S]*visible:\s*messageAttachmentLoader\.active[\s\S]*messageAttachmentLoader\.status\s*!==\s*Loader\.Ready/.test(mainSource))
+		verify(/AttachmentGallery\s*\{[\s\S]*accessibilitySuppressed:\s*messageDelegate\.accessibilitySuppressed[\s\S]*messageDelegate\.accessibilityPooled[\s\S]*!messageDelegate\.accessibilityViewportVisible[\s\S]*accessibilityViewportItem:\s*timeline[\s\S]*accessibilityViewportOffset:\s*timeline\.contentY/.test(mainSource))
+		verify(/id:\s*messageAttachmentHydrationPlaceholder[\s\S]*Accessible\.ignored:\s*messageDelegate\.accessibilitySuppressed[\s\S]*messageDelegate\.accessibilityPooled[\s\S]*!messageDelegate\.itemContainedInViewport\([\s\S]*messageAttachmentHydrationPlaceholder\)/.test(mainSource))
 		verify(/function\s+deferPrependedRichRows\(first,\s*last\)[\s\S]*row\.deferredPresentation\s*!==\s*true[\s\S]*deferred\[stableId\]\s*=\s*true[\s\S]*deferredPrependRichIds\s*=\s*deferred/.test(mainSource))
 		verify(/function\s+onPrependPendingChanged\(\)[\s\S]*if\s*\(chatModel\.prependPending\)[\s\S]*chatModel\.presentationBusy\s*=\s*true[\s\S]*if\s*\(!timeline\.deferredPrependAnchorActive\)[\s\S]*timeline\.scheduleRichContentResume\(\)/.test(mainSource))
 		verify(/function\s+onRowsAboutToBePrepended\(count\)[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
@@ -1529,7 +1659,7 @@ TestCase {
 		verify(/id:\s*prependAnchorSettleTimer[\s\S]*interval:\s*48[\s\S]*correctionPending[\s\S]*prependAnchorCorrectionFrames\s*>\s*0[\s\S]*restoreDeferredPrependAnchor\(\)[\s\S]*restorePrependAnchor\(\)[\s\S]*releasePrependAnchor\(true\)/.test(mainSource))
 		verify(!/id:\s*prependAnchorSettleTimer[\s\S]{0,900}pendingScopeHydrationCount\(\)/.test(mainSource))
 		verify(/function\s+onRowsAboutToChange\(first,\s*last\)[\s\S]*!chatModel\.presentationBusy[\s\S]*!timeline\.topAnchorActive[\s\S]*!timeline\.prependAnchorActive[\s\S]*!timeline\.viewportAnchorActive[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
-		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]{0,100}messageDelegate\.previewTerminalUnavailable[\s\S]*visible:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*!messageDelegate\.previewMaterializationAdmitted[\s\S]*messagePreviewLoader\.status\s*!==\s*Loader\.Ready[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))
+		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*messageDelegate\.previewTerminalUnavailable[\s\S]*visible:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*messageDelegate\.previewTerminalUnavailable[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))
 		verify(/readonly property bool previewPaintPending:[\s\S]*previewVisualPresentationPending[\s\S]*readonly property bool previewOnlyPaintPending:[\s\S]*previewSourceOnly[\s\S]*id:\s*messageBubble[\s\S]*color:[\s\S]*previewOnlyPaintPending[\s\S]*\?\s*"transparent"/.test(mainSource))
 		const outerPreviewGateStart = mainSource.indexOf(
 			"readonly property bool hasPreviewContent:")
@@ -1543,10 +1673,27 @@ TestCase {
 		verify(!/\bmessagePreviewLoader\.(status|item)\b/.test(outerPreviewGate))
 		verify(/Layout\.preferredWidth:[\s\S]*Theme\.avatarMedium[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending[\s\S]*\?\s*0[\s\S]*id:\s*messageSenderLabel/.test(mainSource))
 		verify(/visible:\s*\(messageDelegate\.startsGroup[\s\S]*messageDelegate\.systemMessage[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending\s*\?\s*0\s*:\s*1/.test(mainSource))
-		verify(/accessibilitySuppressed:[\s\S]*timeline\.scopePresentationPending\s*\|\|\s*previewOnlyPaintPending[\s\S]*hoverEffectsEnabled:[\s\S]*!previewOnlyPaintPending/.test(mainSource))
-		verify(/TapHandler\s*\{[\s\S]*enabled:\s*!messageDelegate\.logEntry[\s\S]*!messageDelegate\.previewOnlyPaintPending[\s\S]*id:\s*messageRow[\s\S]*enabled:\s*!messageDelegate\.previewOnlyPaintPending[\s\S]*Accessible\.ignored:\s*messageDelegate\.previewOnlyPaintPending/.test(mainSource))
+		const messageFrameStart = mainSource.lastIndexOf("ChatMessageFrame {",
+			innerDelegateStart)
+		const messageFrameGateEnd = mainSource.indexOf(
+			"function openAutomationActions", messageFrameStart)
+		const messageFrameGateSource = mainSource.slice(messageFrameStart,
+			messageFrameGateEnd)
+		verify(/accessibilitySuppressed:[\s\S]*timeline\.scopePresentationPending[\s\S]*hoverEffectsEnabled:[\s\S]*!previewOnlyPaintPending/.test(
+			messageFrameGateSource))
+		const messageFrameAccessibilityStart = messageFrameGateSource.indexOf(
+			"accessibilitySuppressed:")
+		const messageFrameAccessibilityEnd = messageFrameGateSource.indexOf(
+			"accessibilityBarrierEnabled:", messageFrameAccessibilityStart)
+		verify(messageFrameAccessibilityStart >= 0
+			&& messageFrameAccessibilityEnd > messageFrameAccessibilityStart)
+		verify(!/previewOnlyPaintPending/.test(messageFrameGateSource.slice(
+			messageFrameAccessibilityStart, messageFrameAccessibilityEnd)))
+		verify(/TapHandler\s*\{[\s\S]*enabled:\s*!messageDelegate\.logEntry[\s\S]*!messageDelegate\.previewOnlyPaintPending[\s\S]*id:\s*messageRow[\s\S]*enabled:\s*true[\s\S]*Accessible\.ignored:\s*false/.test(mainSource))
 		verify(/id:\s*compactMessageActionTray[\s\S]*visible:\s*messageDelegate\.usesCompactActionOverlay[\s\S]*!messageDelegate\.previewOnlyPaintPending/.test(mainSource))
 		verify(/id:\s*deferredHistoryRow[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*color:\s*richPresentationReserved\s*\?\s*Theme\.withAlpha[\s\S]*Label\s*{[\s\S]*visible:\s*true/.test(
+			deferredHistorySource))
+		verify(/deadlinePresentationFallbackGeneration:[\s\S]*function\s+forceDeadlinePresentationFallback\(\)[\s\S]*Accessible\.ignored:\s*richPresentationReserved[\s\S]*!deadlinePresentationFallback/.test(
 			deferredHistorySource))
 		const paintedDeferredInlineStart = mainSource.indexOf(
 			"id: deferredInlineMessageDelegate")
@@ -1558,6 +1705,13 @@ TestCase {
 			paintedDeferredInlineStart, paintedDeferredInlineEnd)
 		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*richPresentationReserved:[\s\S]*deferredPresentationHeight\s*>\s*180[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible\s*\?\s*1\s*:\s*0[\s\S]*RowLayout\s*{[\s\S]*visible:\s*true/.test(
 			paintedDeferredInlineSource))
+		verify(/height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*function\s+forceDeadlinePresentationFallback/.test(
+			paintedDeferredInlineSource))
+		verify(/function\s+forceVisibleDeadlineFallbacks\(\)[\s\S]*forceDeadlinePresentationFallback[\s\S]*forceLayout\(\)[\s\S]*positionTailImmediately\(\)[\s\S]*forceLayout\(\)/.test(mainSource))
+		verify(/function\s+forceDeadlinePresentationFallback\(\)[\s\S]*deadlinePresentationFallbackGeneration[\s\S]*stopPresentationHeightObservation\(\)[\s\S]*resetOuterLoaderIncubationWatchdog\(true\)[\s\S]*releaseDeferredMaterialization\(\)/.test(
+			asyncDelegateSource))
+		verify(/id:\s*messageAttachmentLoader[\s\S]*AttachmentGallery\s*{[\s\S]*resourceActive:\s*messageDelegate\.richResourcesActive[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*messageDelegate\.richContentViewportEligible[\s\S]*!messageDelegate\.richLoaderSuspended/.test(mainSource))
+		verify(/RichMessageBody\s*{[\s\S]*segments:\s*messageDelegate\.bodySegments\s*\|\|\s*\[\][\s\S]*contentIdentity:\s*messageDelegate\.stableId/.test(mainSource))
 		const previewOnlyAtomicHandoffStart = asyncDelegateSource.indexOf(
 			"readonly property bool previewOnlyAtomicHandoff:")
 		const previewOnlyAtomicHandoffEnd = asyncDelegateSource.indexOf(
@@ -1576,8 +1730,10 @@ TestCase {
 			&& asyncRichHandoffSummaryEnd > asyncRichHandoffSummaryStart)
 		const asyncRichHandoffSummarySource = asyncDelegateSource.slice(
 			asyncRichHandoffSummaryStart, asyncRichHandoffSummaryEnd)
-		verify(/objectName:\s*"asyncRichHandoffSummary"[\s\S]*visible:\s*true[\s\S]*anchors\.top:\s*parent\.top[\s\S]*anchors\.topMargin:\s*Theme\.space2[\s\S]*height:\s*Math\.min\(48,\s*Math\.max\(1,\s*parent\.height\s*-\s*Theme\.space2\s*\*\s*2\)\)[\s\S]*anchors\.leftMargin:\s*Theme\.space3[\s\S]*anchors\.rightMargin:\s*Theme\.space3/.test(
+		verify(/objectName:\s*"asyncRichHandoffSummary"[\s\S]*visible:\s*!asyncMessageDelegate\.accessibilityPooled[\s\S]*anchors\.top:\s*parent\.top[\s\S]*anchors\.topMargin:\s*Theme\.space2[\s\S]*height:\s*Math\.min\(48,\s*Math\.max\(1,\s*parent\.height\s*-\s*Theme\.space2\s*\*\s*2\)\)[\s\S]*anchors\.leftMargin:\s*Theme\.space3[\s\S]*anchors\.rightMargin:\s*Theme\.space3/.test(
 			asyncRichHandoffSummarySource))
+		compare((asyncRichHandoffSummarySource.match(
+			/Accessible\.ignored:\s*true/g) || []).length, 3)
 		verify(!/visible:\s*!asyncMessageDelegate\.previewOnlyAtomicHandoff/.test(
 			asyncRichHandoffSummarySource))
 		const cachedStaticHandoffStart = asyncDelegateSource.indexOf(
@@ -1632,9 +1788,11 @@ TestCase {
 			previewHydrationPlaceholderStart, previewHydrationPlaceholderEnd)
 		verify(/objectName:\s*"previewHydrationPlaceholder"[\s\S]*objectName:\s*"previewHydrationCompactRow"[\s\S]*objectName:\s*"previewHydrationProviderBadge"[\s\S]*objectName:\s*"previewHydrationOpenButton"/.test(
 			previewHydrationPlaceholderSource))
-		verify(/previewTerminalUnavailable[\s\S]*previewStagingHeight[\s\S]*previewPlaceholderHeight/.test(
+		verify(/Layout\.preferredHeight:\s*visible[\s\S]*previewStagingHeight\s*:\s*0/.test(
 			previewHydrationPlaceholderSource))
-		verify(/active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewTerminalUnavailable[\s\S]*opacity:\s*messageDelegate\.previewTerminalUnavailable\s*\?\s*1\s*:\s*0[\s\S]*enabled:\s*active[\s\S]*Accessible\.ignored:\s*!active/.test(
+		verify(/active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*messageDelegate\.previewTerminalUnavailable[\s\S]*opacity:\s*active\s*\?\s*1\s*:\s*0[\s\S]*enabled:\s*active[\s\S]*Accessible\.ignored:\s*!active/.test(
+			previewHydrationPlaceholderSource))
+		verify(/Accessible\.role:\s*Accessible\.Grouping[\s\S]*Accessible\.name:\s*messageDelegate\.previewTitleLabel[\s\S]*objectName:\s*"previewHydrationOpenButton"[\s\S]*Accessible\.role:\s*Accessible\.Link[\s\S]*preview\.openLabel/.test(
 			previewHydrationPlaceholderSource))
 		verify(!previewHydrationPlaceholderSource.includes("ModernBusyIndicator"))
 		verify(!previewHydrationPlaceholderSource.includes("previewHydrationMediaSkeleton"))
@@ -1658,15 +1816,16 @@ TestCase {
 			messageRowPreviewSurfaceSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*active:\s*messageDelegate\.hasAttachmentContent[\s\S]*!messageDelegate\.richLoaderSuspended[\s\S]*timeline\.prependRichContentActive\(/.test(mainSource))
 		verify(/previewPlaceholderHeight[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
-		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*Layout\.preferredHeight:\s*visible[\s\S]*previewTerminalUnavailable[\s\S]*previewStagingHeight[\s\S]*previewPlaceholderHeight/.test(mainSource))
-		verify(/id:\s*messageAttachmentLoader[\s\S]*Layout\.preferredHeight:[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
+		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*Layout\.preferredHeight:\s*visible[\s\S]*previewStagingHeight\s*:\s*0/.test(mainSource))
+		verify(/id:\s*messageAttachmentPresentation[\s\S]*Layout\.preferredHeight:\s*visible[\s\S]*messageAttachmentLoader\.status\s*===\s*Loader\.Ready[\s\S]*messageAttachmentLoader\.item\.implicitHeight[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewMaterializationAdmitted[\s\S]*visible:\s*active\s*&&\s*status\s*===\s*Loader\.Ready\s*&&\s*!!item[\s\S]*Layout\.preferredHeight:\s*visible\s*&&\s*item[\s\S]*item\.implicitHeight\s*:\s*0/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*onActiveChanged:[\s\S]*resetPreviewLoaderIncubationWatchdog\(\)[\s\S]*onLoaded:[\s\S]*armPreviewLoaderIncubationWatchdog\(\)[\s\S]*onStatusChanged:[\s\S]*Loader\.Error[\s\S]*Loader\.Ready/.test(mainSource))
 		verify(/"visibleInactiveRichResourceCount":[\s\S]*visiblePresentation\.inactiveRichResourceCount/.test(mainSource))
 		verify(/"richResourcesActive":[\s\S]*item\.richResourcesActive\s*===\s*true[\s\S]*"inactiveRichResources":\s*inactiveRichResources/.test(mainSource))
-		verify(/"settled":[\s\S]*visiblePresentation\.inactiveRichResourceCount\s*===\s*0/.test(mainSource))
+		verify(/"richHydrated":\s*richHydrated/.test(mainSource))
+		verify(!/"settled":[\s\S]{0,1800}visiblePresentation\.inactiveRichResourceCount\s*===\s*0/.test(mainSource))
 		verify(/objectName:\s*"previewHydrationStateLabel"[\s\S]*previewTerminalUnavailable[\s\S]*qsTr\("Preview unavailable"\)[\s\S]*objectName:\s*"previewHydrationStateIcon"[\s\S]*\?\s*"warning"\s*:\s*"link"[\s\S]*objectName:\s*"previewHydrationOpenButton"/.test(mainSource))
-		verify(/id:\s*messageAttachmentLoader[\s\S]*visible:\s*messageDelegate\.hasAttachmentContent[\s\S]*Layout\.preferredHeight:[\s\S]*attachmentPlaceholderHeight/.test(mainSource))
+		verify(/id:\s*messageAttachmentPresentation[\s\S]*visible:\s*messageDelegate\.hasAttachmentContent[\s\S]*Layout\.preferredHeight:[\s\S]*attachmentPlaceholderHeight[\s\S]*id:\s*messageAttachmentLoader[\s\S]*anchors\.fill:\s*parent/.test(mainSource))
 		verify(/id:\s*messageAttachmentLoader[\s\S]*asynchronous:\s*true/.test(mainSource))
 		verify(/id:\s*messagePreviewLoader[\s\S]*asynchronous:\s*true/.test(mainSource))
 		verify(!/RichPreviewCard\s*\{\s*id:\s*messagePreviewCard/.test(mainSource))
@@ -1734,6 +1893,7 @@ TestCase {
 		verify(/"visiblePresentationHeightPendingCount":[\s\S]*visiblePresentation\.presentationHeightPendingCount[\s\S]*"maximumVisiblePresentationHeightError":[\s\S]*visiblePresentation\.maximumPresentationHeightError/.test(mainSource))
 		verify(/"settled":[\s\S]*!timeline\.explicitNavigationMovement[\s\S]*!timeline\.scrollbarDragActive[\s\S]*visiblePresentation\.presentationHeightPendingCount\s*===\s*0/.test(mainSource))
 		verify(/"deferredMaterializationActiveId":\s*timeline\.deferredMaterializationActiveId/.test(mainSource))
+		verify(/"deferredMaterializationActiveGeneration":\s*[\s\S]*timeline\.deferredMaterializationActiveGeneration[\s\S]*"plainDeferredMaterializationActiveCount":\s*[\s\S]*timeline\.plainDeferredMaterializationActiveCount\(\)[\s\S]*"plainDeferredSourceAdmissionCount":\s*[\s\S]*timeline\.plainDeferredSourceAdmissionCount[\s\S]*"serializedDeferredSourceAdmissionCount":\s*[\s\S]*timeline\.serializedDeferredSourceAdmissionCount/.test(mainSource))
 		verify(/function\s+timelineDelegateDiagnostics\(\)[\s\S]*"materialized"[\s\S]*"previewItems"[\s\S]*"attachmentItems"[\s\S]*"pooledEvents"[\s\S]*"reusedEvents"[\s\S]*"visibleFullMessageCount"[\s\S]*"visibleBlankPresentationCount"/.test(mainSource))
 		verify(/function\s+performanceChatFixtureState\(\)[\s\S]*"delegateDiagnostics":\s*timelineDelegateDiagnostics\(\)/.test(mainSource))
 		verify(/function\s+performanceChatScrollState\(\)[\s\S]*"delegateDiagnosticsDelta"[\s\S]*"previewsLoaded"[\s\S]*"attachmentsLoaded"/.test(mainSource))
@@ -1752,18 +1912,19 @@ TestCase {
 		const visibleStart = mainSource.indexOf("function stationaryThumbVisibleStableIds")
 		const visibleEnd = mainSource.indexOf(
 			"function stationaryThumbWarmCanAdmit", visibleStart)
-		const updateStart = mainSource.indexOf("function updateStationaryThumbWarmPin", visibleStart)
+		const clearPinStart = mainSource.indexOf(
+			"function clearStationaryThumbWarmPin", visibleStart)
 		verify(visibleStart >= 0 && visibleEnd > visibleStart
-			&& updateStart > visibleEnd)
+			&& clearPinStart > visibleEnd)
 		const visibleSource = mainSource.slice(visibleStart, visibleEnd)
-		const admissionSource = mainSource.slice(visibleStart, updateStart)
+		const admissionSource = mainSource.slice(visibleStart, clearPinStart)
 		verify(/contentItem\s*\?\s*contentItem\.children[\s\S]*stationaryThumbDelegateActuallyVisible[\s\S]*candidates\.sort/.test(
 			visibleSource))
 		verify(!/lightweightDeferredPresentation\s*===\s*true/.test(visibleSource))
 		const pinBudgetStart = mainSource.indexOf(
 			"readonly property int stationaryThumbWarmCurrentDwellPinCount")
 		verify(pinBudgetStart >= 0 && pinBudgetStart < visibleStart)
-		const pinBudgetSource = mainSource.slice(pinBudgetStart, updateStart)
+		const pinBudgetSource = mainSource.slice(pinBudgetStart, clearPinStart)
 		verify(/stationaryThumbWarmCurrentDwellPinCount[\s\S]*pressEpoch[\s\S]*dwellGeneration/.test(
 			pinBudgetSource))
 		verify(/stationaryThumbWarmCurrentDwellPinCount[\s\S]*maximumAdmissionsPerDwell/.test(
@@ -1777,9 +1938,15 @@ TestCase {
 			installSource), "geometry pin must publish before deferred role materialization")
 		verify(/rolledBackPins[\s\S]*delete\s+rolledBackPins\[key\][\s\S]*stationaryThumbWarmPins\s*=\s*rolledBackPins/.test(
 			installSource))
+		verify(/"scopeToken"[\s\S]*"scopeGeneration"[\s\S]*"serial"[\s\S]*"outerHeight"[\s\S]*"probeHeight"[\s\S]*"pressEpoch"[\s\S]*"dwellGeneration"/.test(
+			installSource))
+		verify(!/paintedSummary|paintedSurface|loading|terminal|materializationPending|materializationRevalidated/.test(
+			installSource), "pin records must contain immutable identity and geometry only")
 		const revalidateSource = admissionSource.slice(revalidateStart)
-		verify(/pressEpoch[\s\S]*dwellGeneration[\s\S]*stationaryThumbDelegateActuallyVisible\(item\)[\s\S]*lightweightDeferredPresentation\s*===\s*true[\s\S]*materializationRevalidated":\s*true/.test(
+		verify(/stationaryThumbWarmPinMatchesCurrentScope[\s\S]*pressEpoch[\s\S]*dwellGeneration[\s\S]*stationaryThumbDelegateActuallyVisible\(item\)[\s\S]*lightweightDeferredPresentation\s*===\s*true[\s\S]*return\s+true/.test(
 			revalidateSource))
+		verify(!/stationaryThumbWarmPins\s*=/.test(revalidateSource),
+			"revalidation must never replace the immutable pin snapshot")
 
 		const ownerStart = mainSource.indexOf(
 			"readonly property bool stationaryThumbWarmOwned:")
@@ -1791,8 +1958,10 @@ TestCase {
 			&& eligibleEnd > ownerEnd)
 		const ownerSource = mainSource.slice(ownerStart, ownerEnd)
 		const eligibleSource = mainSource.slice(ownerEnd, eligibleEnd)
-		verify(/paintedSurface\s*===\s*true[\s\S]*terminal\s*===\s*true[\s\S]*stationaryThumbWarmGate\.retains[\s\S]*stationaryThumbWarmGate\.owns/.test(
-			ownerSource), "pending/loading ownership must require exact owns; only painted/terminal may retain")
+		verify(/stationaryThumbWarmPinned[\s\S]*stationaryThumbWarmGate\.owns[\s\S]*stationaryThumbWarmGate\.retains/.test(
+			ownerSource), "the gate alone must own or retain the exact immutable pin identity")
+		verify(!/paintedSummary|paintedSurface|paintedLoading|paintedTerminal/.test(
+			ownerSource), "painted state must not participate in ownership derivation")
 		verify(/state\s*!==\s*"error"[\s\S]*statusValue\s*!==\s*"error"/.test(
 			eligibleSource))
 		verify(!/state\s*!==\s*"loading"|value\.loading\s*!==\s*true/.test(
@@ -1818,9 +1987,9 @@ TestCase {
 			normalResumeStart)
 		verify(/!timeline\.richScrollInProgress/.test(normalHydrationSource),
 			"global hydration must remain blocked while the physical thumb owns scrolling")
-		verify(/stationaryThumbWarmOwned[\s\S]*pin\.pressEpoch[\s\S]*pin\.dwellGeneration[\s\S]*previewNeedsHydration[\s\S]*inVisibleViewport[\s\S]*queuePreviewHydration\(stableId,\s*true\)[\s\S]*stationaryThumbHydrationStableId[\s\S]*stationaryThumbHydrationPressEpoch[\s\S]*stationaryThumbHydrationDwellGeneration/.test(
+		verify(/stationaryThumbWarmOwned[\s\S]*stationaryThumbWarmPinMatchesCurrentScope[\s\S]*pin\.pressEpoch[\s\S]*pin\.dwellGeneration[\s\S]*previewNeedsHydration[\s\S]*inVisibleViewport[\s\S]*queuePreviewHydration\(stableId,\s*true,\s*hydrationOwnerScopeToken,\s*hydrationOwnerGeneration\)[\s\S]*stationaryThumbHydrationStableId[\s\S]*stationaryThumbHydrationScopeToken[\s\S]*stationaryThumbHydrationScopeGeneration[\s\S]*stationaryThumbHydrationPressEpoch[\s\S]*stationaryThumbHydrationDwellGeneration[\s\S]*stationaryThumbHydrationPinSerial/.test(
 			stationaryHydrationSource))
-		verify(/stationaryThumbHydrationStableId[\s\S]*stationaryThumbHydrationPressEpoch[\s\S]*stationaryThumbHydrationDwellGeneration[\s\S]*stationaryThumbWarmOwned[\s\S]*stationaryThumbWarmGate\.owns[\s\S]*admitStationaryThumbWarm[\s\S]*reopenAdmission/.test(
+		verify(/stationaryThumbWarmPinMatchesCurrentScope[\s\S]*stationaryThumbHydrationStableId[\s\S]*stationaryThumbHydrationScopeToken[\s\S]*stationaryThumbHydrationScopeGeneration[\s\S]*stationaryThumbHydrationPressEpoch[\s\S]*stationaryThumbHydrationDwellGeneration[\s\S]*stationaryThumbHydrationPinSerial[\s\S]*stationaryThumbWarmOwned[\s\S]*stationaryThumbWarmGate\.owns[\s\S]*admitStationaryThumbWarm[\s\S]*reopenAdmission/.test(
 			stationaryResumeSource), "late hydration may reveal or requeue only its matching current generation")
 		verify(/admitStationaryThumbWarm[\s\S]*if\s*\(resumed\)[\s\S]*stationaryThumbWarmGate\.noteAdmissionProgress/.test(
 			stationaryResumeSource), "matching hydration must renew the visual watchdog before clearing ownership")
@@ -1835,10 +2004,46 @@ TestCase {
 			stationaryAdmitEnd)
 		verify(/messageRowMaterialized\s*=\s*true[\s\S]*if\s*\(previewNeedsHydration\)[\s\S]*requestStationaryThumbHydration[\s\S]*previewMaterializationAdmitted\s*=\s*true/.test(
 			stationaryAdmitSource))
-		verify(/onPreviewPrewarmVisualReadyChanged:[\s\S]*refreshStationaryThumbWarmState\(\)/.test(
-			mainSource), "terminal thumbnail warming must finish the active row without waiting for its watchdog")
+		const observationStart = mainSource.indexOf(
+			"function observeStationaryThumbWarmPaintedState")
+		const progressStart = mainSource.indexOf(
+			"function noteStationaryThumbWarmProgress", observationStart)
+		verify(observationStart >= 0 && progressStart > observationStart)
+		const observationSource = mainSource.slice(observationStart, progressStart)
+		verify(/stationaryThumbWarmObservationMatchesPin[\s\S]*queueStationaryThumbWarmReceipt/.test(
+			observationSource))
+		verify(!/stationaryThumbWarmPins\s*=|finishAdmission|retireAdmission/.test(
+			observationSource), "painted observation must only enqueue an identity-stamped receipt")
+		verify(/onPreviewPrewarmVisualReadyChanged:[\s\S]*observeStationaryThumbWarmPaintedState\(\)/.test(
+			mainSource), "terminal thumbnail warming must enqueue completion without waiting for its watchdog")
 		verify(/previewPrewarmProgressRevision[\s\S]*onPreviewPrewarmProgressRevisionChanged:[\s\S]*noteStationaryThumbWarmProgress\(\)/.test(
 			mainSource), "serial gallery progress must keep only its matching active row alive")
+		const receiptQueueStart = mainSource.indexOf(
+			"function queueStationaryThumbWarmReceipt")
+		const receiptDrainStart = mainSource.indexOf(
+			"function drainStationaryThumbWarmReceipts", receiptQueueStart)
+		const receiptDrainEnd = mainSource.indexOf(
+			"function stationaryThumbDelegateActuallyVisible", receiptDrainStart)
+		verify(receiptQueueStart >= 0 && receiptDrainStart > receiptQueueStart
+			&& receiptDrainEnd > receiptDrainStart)
+		const receiptQueueSource = mainSource.slice(receiptQueueStart,
+			receiptDrainStart)
+		const receiptDrainSource = mainSource.slice(receiptDrainStart,
+			receiptDrainEnd)
+		verify(/receiptEpoch[\s\S]*scopeToken[\s\S]*scopeGeneration[\s\S]*pressEpoch[\s\S]*dwellGeneration[\s\S]*pinSerial[\s\S]*stationaryThumbWarmReceiptTimer\.restart/.test(
+			receiptQueueSource))
+		verify(/stationaryThumbWarmPinMatchesReceipt[\s\S]*stationaryThumbWarmGate\.owns[\s\S]*stationaryThumbWarmGate\.retains[\s\S]*finishAdmission[\s\S]*retireAdmission/.test(
+			receiptDrainSource), "only the next-turn controller may transition exact gate ownership")
+		verify(/id:\s*scrollbarReleaseGuardTimer[\s\S]*scrollbarReleasePending\s*=\s*false[\s\S]*clearStationaryThumbWarmPins\("thumb-release"\)/.test(
+			mainSource), "release must retain geometry through the guard and then clear every pin")
+		verify(/function\s+beginScopeChange\(\)[\s\S]*scopePresentationPending\s*=\s*true[\s\S]*clearStationaryThumbWarmPins\("scope-change"\)/.test(
+			mainSource))
+		verify(/ListView\.onPooled:[\s\S]*retireStationaryThumbWarmForDelegate\("delegate-pooled"\)[\s\S]*handleListViewPooled/.test(
+			mainSource))
+		verify(/ListView\.onReused:[\s\S]*retireStationaryThumbWarmForDelegate\("delegate-reused"\)[\s\S]*handleListViewReused/.test(
+			mainSource))
+		verify(/onStableIdChanged:[\s\S]*retiredStationaryThumbId[\s\S]*clearStationaryThumbWarmObservation[\s\S]*retireStationaryThumbWarmPin/.test(
+			mainSource), "delegate reuse must retire the old identity before enabling the new row")
 
 		const reconcileStart = mainSource.indexOf(
 			"function reconcileStationaryThumbWarmPins")
@@ -1911,8 +2116,16 @@ TestCase {
 		const paintedDiagnosticsSource = mainSource.slice(diagnosticsStart,
 			readyStart)
 		const paintedReadySource = mainSource.slice(readyStart, readyEnd)
-		verify(/"paintedSummaryCount"[\s\S]*"paintedSurfaceCount"[\s\S]*"paintedCompleteCount"[\s\S]*"paintedLoadingCount"[\s\S]*"paintedTerminalCount"/.test(
+		verify(/"deadlineFallbackCount"[\s\S]*"paintedSummaryCount"[\s\S]*"paintedSurfaceCount"[\s\S]*"paintedCompleteCount"[\s\S]*"paintedLoadingCount"[\s\S]*"paintedTerminalCount"/.test(
 			paintedDiagnosticsSource))
+		verify(/const\s+deadlineFallback[\s\S]*deadlinePresentationFallback[\s\S]*\+\+diagnostics\.deadlineFallbackCount[\s\S]*"deadlineFallback":\s*deadlineFallback/.test(
+			paintedDiagnosticsSource))
+		verify(/function\s+forceVisibleDeadlineFallbacks\(\)[\s\S]*paintedComplete[\s\S]*item\.messageRowReady\s*===\s*true[\s\S]*forceDeadlinePresentationFallback\(\)/.test(mainSource))
+		verify(/function\s+beginDeadlinePresentationFallbackRecovery\(\)[\s\S]*timeline\.scopePresentationPending[\s\S]*timeline\.scopePresentationFinalizing[\s\S]*timeline\.richScrollInProgress[\s\S]*deadlinePresentationFallbackPreviewIdentity[\s\S]*deadlinePresentationRecoveryActive\s*=\s*true[\s\S]*scheduleViewportMembershipUpdate\(\)/.test(mainSource))
+		verify(/function\s+resumeRichContentAfterScroll\(allowDuringFinalization,[\s\S]*beginDeadlinePresentationFallbackRecovery\(\)[\s\S]*resumeOwnedStableId\s*=\s*stableId/.test(mainSource))
+		verify(/function\s+commitPresentationHeight\(identity,\s*measuredHeight\)[\s\S]*commitsDeadlineRecovery[\s\S]*clearDeadlinePresentationFallback\(\)[\s\S]*completeRichLoaderResumeWhenReady\(\)/.test(mainSource))
+		verify(/active:\s*!deferredPresentation[\s\S]*!deadlinePresentationFallback[\s\S]*deadlinePresentationRecoveryActive/.test(mainSource))
+		verify(/const\s+resumeGeneration\s*=\s*timeline\.scopePresentationGeneration[\s\S]*resumeGeneration[\s\S]*timeline\.scopePresentationGeneration[\s\S]*!messageDelegate\.accessibilityPooled[\s\S]*!asyncMessageDelegate\.deadlinePresentationFallback/.test(mainSource))
 		verify(/const\s+paintedComplete\s*=\s*paintedSurface\s*\|\|\s*paintedTerminal[\s\S]*paintedCompleteCount[\s\S]*messageRowReady\s*===\s*true\s*&&\s*paintedComplete/.test(
 			paintedDiagnosticsSource))
 		verify(/function\s+visiblePresentationReady\(diagnostics\)[\s\S]*paintedCompleteCount\s*===\s*diagnostics\.visibleCount/.test(
@@ -1924,7 +2137,9 @@ TestCase {
 		verify(timelineStateStart >= 0 && timelineStateEnd > timelineStateStart)
 		const timelineStateSource = mainSource.slice(timelineStateStart,
 			timelineStateEnd)
-		verify(/"settled":[\s\S]*stationaryThumbWarmPinCount\s*===\s*0[\s\S]*paintedCompleteCount[\s\S]*paintedLoadingCount\s*===\s*0[\s\S]*pendingVisibleHydrationCount\s*===\s*0/.test(
+		verify(/const\s+visiblePresentationComplete[\s\S]*visiblePresentationDeadlineReady[\s\S]*"settled":\s*visibleFrameCommittedAt\s*>\s*0[\s\S]*visiblePresentationComplete[\s\S]*stationaryThumbWarmPinCount\s*===\s*0/.test(
+			timelineStateSource))
+		verify(/const\s+richHydrated\s*=[\s\S]*pendingVisibleHydrationCount\s*===\s*0[\s\S]*paintedLoadingCount\s*===\s*0/.test(
 			timelineStateSource))
 	}
 }

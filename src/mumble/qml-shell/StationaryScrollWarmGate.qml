@@ -135,6 +135,41 @@ Item {
 		return true
 	}
 
+	function retireAdmission(stableId, epoch, generation, reason) {
+		const key = String(stableId || "")
+		const expectedEpoch = Number(epoch)
+		const expectedGeneration = Number(generation)
+		if (key.length === 0)
+			return false
+
+		let retired = false
+		if (activeStableId === key && activePressEpoch === expectedEpoch
+				&& activeDwellGeneration === expectedGeneration)
+			retired = invalidateActiveAdmission(String(reason || "retired"))
+
+		const retained = retainedAdmissions[key]
+		if (retained && Number(retained.pressEpoch) === expectedEpoch
+				&& Number(retained.dwellGeneration) === expectedGeneration) {
+			const nextRetained = Object.assign({}, retainedAdmissions)
+			delete nextRetained[key]
+			retainedAdmissions = nextRetained
+			retentionsCleared()
+			retired = true
+		}
+		if (retired && admittedStableIds[key] === true) {
+			const nextAdmitted = Object.assign({}, admittedStableIds)
+			delete nextAdmitted[key]
+			admittedStableIds = nextAdmitted
+		}
+
+		if (retired && inputEligible && activeStableId.length === 0
+				&& admittedCount < maximumAdmissionsPerDwell) {
+			resetPendingSnapshot()
+			serialTimer.restart()
+		}
+		return retired
+	}
+
 	function snapshotVisibleStableIds() {
 		if (typeof visibleStableIdProvider !== "function")
 			return []
@@ -173,6 +208,16 @@ Item {
 		serialTimer.stop()
 		resetPendingSnapshot()
 		invalidateActiveAdmission("press-ended")
+		clearRetentions()
+	}
+
+	function invalidateIdentity(reason) {
+		++dwellGeneration
+		dwellTimer.stop()
+		serialTimer.stop()
+		membershipRevalidationTimer.stop()
+		resetPendingSnapshot()
+		invalidateActiveAdmission(String(reason || "identity-invalidated"))
 		clearRetentions()
 	}
 

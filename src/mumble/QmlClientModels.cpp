@@ -1503,13 +1503,23 @@ namespace {
 								   const QVariantList &bodySegments,
 								   const bool bodyHydrationPending,
 								   const bool hasReplyContent,
-								   const bool hasEmbeddedFooterContent) {
+								   const bool hasEmbeddedFooterContent,
+								   const bool timestampOnlyFooterContent) {
 		// Reply context adds a 44 px block. Reactions, delivery state and an
 		// outgoing timestamp can independently enable the embedded 34 px footer.
 		// Keep both in every estimate so materializing the real row cannot move
 		// the viewport after the cold placeholder was exposed.
 		const int richMetadataHeight = (hasReplyContent ? 44 : 0)
 			+ (hasEmbeddedFooterContent ? 34 : 0);
+		// A lone outgoing timestamp is absorbed by the compact plain-row layout:
+		// its real footer and incoming author/avatar geometry settle at the same
+		// measured height. Rich cards still need the separate metadata reservation,
+		// as do reactions, replies, and delivery state in an otherwise plain row.
+		const int plainMetadataHeight = (hasReplyContent ? 44 : 0)
+			+ (hasEmbeddedFooterContent && !timestampOnlyFooterContent ? 34 : 0);
+		constexpr int attachmentPlaceholderHeight = 320;
+		// Theme.chatContentSpacing at the normal density used by these estimates.
+		constexpr int mixedRichContentSpacing = 6;
 		// Keep cold/offscreen rows childless, but give ListView a provider-aware
 		// geometry estimate. The previous universal 58 px estimate let an entire
 		// rich page appear to fit in the cold viewport; replacing one summary with
@@ -1517,6 +1527,7 @@ namespace {
 		// These values mirror Main.qml's lightweight card geometry at the normal
 		// 580 px rich-card width without copying the full preview map into QML.
 		if (!preview.isEmpty()) {
+			int previewHeight = 0;
 			const QVariantMap metadata = preview.value(QStringLiteral("metadata")).toMap();
 			const QString provider =
 				metadata.value(QStringLiteral("provider"),
@@ -1535,12 +1546,12 @@ namespace {
 			// Steam's provider details expand the complete production card to this
 			// measured height. Reserve it for both the URL-only loading DTO and the
 			// hydrated metadata/media DTO so the handoff cannot move the viewport.
-			if (steamPreview) return 741 + richMetadataHeight;
+			if (steamPreview) previewHeight = 741;
 			// Blocket's marketplace facts and gallery expand the complete production
 			// card beyond the generic provider hero. The URL-only loading stub already
 			// carries provider identity, so reserve the same measured 737 px for both
 			// sides of the hydration handoff.
-			if (blocketPreview) return 737 + richMetadataHeight;
+			else if (blocketPreview) previewHeight = 737;
 			const QString aspect =
 				preview.value(QStringLiteral("embedAspect")).toString().trimmed().toLower();
 			const QString presentationKind =
@@ -1559,18 +1570,27 @@ namespace {
 			// provider header and footer. Reserve that complete stable geometry so
 			// the cached preview handoff cannot add the observed final 18 px after
 			// the cold scope has already been exposed.
-			if (!hasMedia) return 285 + richMetadataHeight;
-			// Real PROD rows include the complete message/provider chrome around
-			// the media surface. Reserve the measured final geometry rather than
-			// the poster-only fixture height: otherwise the first hydrated
-			// Instagram post grows by up to 174 px after a full scroll.
-			if (aspect == QLatin1String("short")) return 727 + richMetadataHeight;
-			if (aspect == QLatin1String("square")) return 838 + richMetadataHeight;
-			if (aspect == QLatin1String("compact-audio")) return 370 + richMetadataHeight;
-			if (aspect == QLatin1String("audio")) return 504 + richMetadataHeight;
-			return 548 + richMetadataHeight;
+			if (previewHeight == 0) {
+				if (!hasMedia) previewHeight = 285;
+				// Real PROD rows include the complete message/provider chrome around
+				// the media surface. Reserve the measured final geometry rather than
+				// the poster-only fixture height: otherwise the first hydrated
+				// Instagram post grows by up to 174 px after a full scroll.
+				else if (aspect == QLatin1String("short")) previewHeight = 727;
+				else if (aspect == QLatin1String("square")) previewHeight = 838;
+				else if (aspect == QLatin1String("compact-audio")) previewHeight = 370;
+				else if (aspect == QLatin1String("audio")) previewHeight = 504;
+				else previewHeight = 548;
+			}
+			// The preview estimate already owns the message chrome. A sibling
+			// attachment gallery adds only its bounded content surface and the
+			// ColumnLayout spacing between the two rich presentations.
+			if (!attachments.isEmpty()) {
+				previewHeight += attachmentPlaceholderHeight + mixedRichContentSpacing;
+			}
+			return previewHeight + richMetadataHeight;
 		}
-		if (!attachments.isEmpty()) return 392 + richMetadataHeight;
+		if (!attachments.isEmpty()) return attachmentPlaceholderHeight + 72 + richMetadataHeight;
 		for (const QVariant &segmentValue : bodySegments) {
 			const QVariantMap segment = segmentValue.toMap();
 			if (segment.value(QStringLiteral("kind")).toString().compare(
@@ -1580,8 +1600,25 @@ namespace {
 		}
 		if (bodyHydrationPending) return 180;
 		const int lightweightBodyHeight = 48 + bodySegments.size() * 22
-			+ richMetadataHeight;
+			+ plainMetadataHeight;
 		return std::clamp(lightweightBodyHeight, 58, 180);
+	}
+
+	bool plainDeferredPresentationRow(const QVariantMap &row) {
+		if (row.value(QStringLiteral("bodyHydrationPending")).toBool()
+			|| !row.value(QStringLiteral("preview")).toMap().isEmpty()
+			|| !row.value(QStringLiteral("attachments")).toList().isEmpty()) {
+			return false;
+		}
+		for (const QVariant &segmentValue :
+			 row.value(QStringLiteral("bodySegments")).toList()) {
+			if (segmentValue.toMap().value(QStringLiteral("kind")).toString().compare(
+					QLatin1String("image"), Qt::CaseInsensitive)
+				== 0) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	QVariantList normalizedReactions(const QVariant &value) {
@@ -3454,10 +3491,13 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 		|| deliveryState == QLatin1String("cancelled");
 	const bool own = message.value(QStringLiteral("own")).toBool();
 	const QString timeLabel = message.value(QStringLiteral("timeLabel")).toString();
+	const bool hasTimestampFooterContent = own
+		&& !message.value(QStringLiteral("system")).toBool()
+		&& !timeLabel.isEmpty();
+	const bool timestampOnlyFooterContent = hasTimestampFooterContent
+		&& reactions.isEmpty() && !hasReplyContent && !hasDeliveryStatus;
 	const bool hasEmbeddedFooterContent = !reactions.isEmpty() || hasReplyContent
-		|| hasDeliveryStatus
-		|| (own && !message.value(QStringLiteral("system")).toBool()
-			&& !timeLabel.isEmpty());
+		|| hasDeliveryStatus || hasTimestampFooterContent;
 	QVariantMap source = message;
 	// Preview payloads can contain base64 audio/video data. The normalized preview
 	// role below is the single QML-facing copy; retaining the original payload in
@@ -3494,7 +3534,8 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("deferredPresentationHeight"),
 			   deferredPresentationHeight(
 				   preview, attachments, bodySegments, bodyHydrationPending,
-				   hasReplyContent, hasEmbeddedFooterContent) },
+				   hasReplyContent, hasEmbeddedFooterContent,
+				   timestampOnlyFooterContent) },
 			 { QStringLiteral("bodyHydrationPending"), bodyHydrationPending },
 			 { QStringLiteral("source"), source } };
 }
@@ -3551,10 +3592,13 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyAcceptedMessage(const
 			// must not emit dataChanged and rebuild an invisible QML delegate.
 			// Retain only the newest real DTO and consume it when QML admits the
 			// row into the materialized viewport.
-			const QVariantMap retained =
-				m_deferredRowUpdates.value(id, current.value(QStringLiteral("source")).toMap());
+			const auto retainedUpdate = m_deferredRowUpdates.constFind(id);
+			const QVariantMap retained = retainedUpdate == m_deferredRowUpdates.cend()
+				? current.value(QStringLiteral("source")).toMap()
+				: retainedUpdate->message;
 			if (retained == message) return MessageMutation::Unchanged;
-			m_deferredRowUpdates.insert(id, message);
+			m_deferredRowUpdates.insert(
+				id, DeferredRowUpdate { message, plainDeferredPresentationRow(row) });
 			return MessageMutation::Updated;
 		}
 		row.insert(QStringLiteral("modelStartsGroup"),
@@ -3929,21 +3973,32 @@ void ChatTimelineModel::drainQueuedAppend() {
 		return;
 	}
 
-	// Cold history keeps a complete newest tail, but constructing several rich
-	// delegates in the same GUI turn can exceed the heartbeat budget. Admit one
-	// real row per presentation interval so every frame remains responsive.
-	const QVariant message = m_pendingAppendMessages.takeFirst();
-	const QVariantMap messageMap = message.toMap();
-	const QVariantMap preview = messageMap.value(QStringLiteral("preview")).toMap();
-	const QVariantList attachments = messageMap.value(QStringLiteral("attachments")).toList();
-	mumble::chatperf::recordNote("qml.chat.append_drain",
-		QStringLiteral("id=%1 preview=%2 attachments=%3 body_segments=%4 remaining=%5")
-			.arg(messageMap.value(QStringLiteral("id")).toString())
-			.arg(preview.isEmpty() ? 0 : 1)
-			.arg(attachments.size())
-			.arg(messageMap.value(QStringLiteral("bodySegments")).toList().size())
-			.arg(m_pendingAppendMessages.size()));
-	if (appendMessages(QVariantList { message }, m_appendInlineDeferredPresentation) != 1) {
+	// The cold-scope path inserts childless fixed-height summaries. A strict
+	// one-row cadence made a plain 24-row history spend roughly 384 ms in this
+	// queue before QML could even prove its first stable frame. Keep source work
+	// bounded, but admit a small cohort of those lightweight summaries per frame;
+	// visible rich rows remain serialized by the QML materialization/resume queues.
+	constexpr qsizetype DeferredRowsPerFrame = 4;
+	const qsizetype rowsThisFrame = m_appendInlineDeferredPresentation
+		? std::min(DeferredRowsPerFrame, m_pendingAppendMessages.size()) : 1;
+	QVariantList batch;
+	batch.reserve(rowsThisFrame);
+	for (qsizetype row = 0; row < rowsThisFrame; ++row) {
+		const QVariant message = m_pendingAppendMessages.takeFirst();
+		const QVariantMap messageMap = message.toMap();
+		const QVariantMap preview = messageMap.value(QStringLiteral("preview")).toMap();
+		const QVariantList attachments = messageMap.value(QStringLiteral("attachments")).toList();
+		mumble::chatperf::recordNote("qml.chat.append_drain",
+			QStringLiteral("id=%1 preview=%2 attachments=%3 body_segments=%4 remaining=%5 batch=%6")
+				.arg(messageMap.value(QStringLiteral("id")).toString())
+				.arg(preview.isEmpty() ? 0 : 1)
+				.arg(attachments.size())
+				.arg(messageMap.value(QStringLiteral("bodySegments")).toList().size())
+				.arg(m_pendingAppendMessages.size())
+				.arg(rowsThisFrame));
+		batch.push_back(message);
+	}
+	if (appendMessages(batch, m_appendInlineDeferredPresentation) != batch.size()) {
 		cancelQueuedAppend();
 		return;
 	}
@@ -4156,6 +4211,21 @@ void ChatTimelineModel::forgetRichBodyMessage(const QString &messageId) {
 	if (consumers->isEmpty()) m_richBodyConsumers.erase(consumers);
 }
 
+bool ChatTimelineModel::deferredMessagePlainForMaterialization(
+	const QString &messageId) const {
+	const QString id = messageId.trimmed();
+	if (id.isEmpty()) return false;
+	const int rowIndex = indexOf(id);
+	if (rowIndex < 0) return false;
+	const QVariantMap row = get(rowIndex);
+	if (!row.value(QStringLiteral("deferredPresentation")).toBool()) return false;
+	if (const auto update = m_deferredRowUpdates.constFind(id);
+		update != m_deferredRowUpdates.cend()) {
+		return update->plainForMaterialization;
+	}
+	return plainDeferredPresentationRow(row);
+}
+
 bool ChatTimelineModel::materializeDeferredMessage(const QString &messageId) {
 	const QString id = messageId.trimmed();
 	if (!acceptsFrontendStateMutation(this) || id.isEmpty()) return false;
@@ -4165,7 +4235,7 @@ bool ChatTimelineModel::materializeDeferredMessage(const QString &messageId) {
 	if (!row.value(QStringLiteral("deferredPresentation")).toBool()) return false;
 	if (const auto update = m_deferredRowUpdates.find(id); update != m_deferredRowUpdates.end()) {
 		QList< RichBodyParseRequest > requests;
-		QVariantMap updatedRow = messageRow(update.value(), &requests);
+		QVariantMap updatedRow = messageRow(update->message, &requests);
 		m_deferredRowUpdates.erase(update);
 		if (!updatedRow.isEmpty()) {
 			updatedRow.insert(QStringLiteral("modelStartsGroup"),

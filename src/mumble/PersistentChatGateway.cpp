@@ -19,11 +19,23 @@ PersistentChatGateway::PersistentChatGateway(QObject *parent) : QObject(parent) 
 }
 
 void PersistentChatGateway::setServerHandler(ServerHandler *serverHandler) {
-	m_serverHandler = serverHandler;
+	const quint64 runEpoch = serverHandler ? serverHandler->connectionRunEpoch() : 0;
+	if (m_serverHandler.data() == serverHandler && m_serverHandlerRunEpoch == runEpoch) {
+		return;
+	}
+	m_serverHandler         = serverHandler;
+	m_serverHandlerRunEpoch = runEpoch;
+	if (++m_connectionGeneration == 0) {
+		++m_connectionGeneration;
+	}
 }
 
 ServerHandler *PersistentChatGateway::serverHandler() const {
 	return m_serverHandler.data();
+}
+
+quint64 PersistentChatGateway::connectionGeneration() const {
+	return m_connectionGeneration;
 }
 
 bool PersistentChatGateway::isReady() const {
@@ -96,7 +108,7 @@ void PersistentChatGateway::markRead(MumbleProto::ChatScope scope, unsigned int 
 }
 
 void PersistentChatGateway::handleIncomingHistory(const MumbleProto::ChatHistoryResponse &response) {
-	emit historyReceived(response);
+	emit historyReceived(response, m_connectionGeneration);
 }
 
 void PersistentChatGateway::handleIncomingMessage(const MumbleProto::ChatMessage &message) {

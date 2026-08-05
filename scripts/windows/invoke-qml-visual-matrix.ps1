@@ -112,6 +112,52 @@ function New-IsolatedVisualConfig {
 	)
 }
 
+function Assert-QmlVisualProcessLogs {
+	param(
+		[Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$ProcessId,
+		[Parameter(Mandatory = $true)][string]$StandardOutputPath,
+		[Parameter(Mandatory = $true)][string]$StandardErrorPath
+	)
+	$streams = [ordered]@{
+		stdout = [IO.Path]::GetFullPath($StandardOutputPath)
+		stderr = [IO.Path]::GetFullPath($StandardErrorPath)
+	}
+	$bindingLoops = [Collections.Generic.List[object]]::new()
+	foreach ($entry in $streams.GetEnumerator()) {
+		if (-not [IO.File]::Exists($entry.Value)) {
+			throw "Exact visual fixture PID $ProcessId did not preserve its $($entry.Key) log at '$($entry.Value)'."
+		}
+		$content = [IO.File]::ReadAllText($entry.Value)
+		foreach ($line in @($content -split "`r?`n")) {
+			if ($line -notmatch '(?i)Binding loop detected for property') { continue }
+			$component = "unknown"
+			$property = "unknown"
+			if ($line -match '(?i)QML\s+(?<component>[^:]+):\s+Binding loop detected for property\s+"(?<property>[^"]+)"') {
+				$component = [string]$Matches.component
+				$property = [string]$Matches.property
+			}
+			$bindingLoops.Add([pscustomobject]@{
+				stream = [string]$entry.Key
+				component = $component
+				property = $property
+				line = $line
+			})
+		}
+	}
+	if ($bindingLoops.Count -gt 0) {
+		$summary = @($bindingLoops | ForEach-Object {
+			"$($_.stream): component=$($_.component), property=$($_.property)"
+		} | Sort-Object -Unique) -join '; '
+		throw "Exact visual fixture PID $ProcessId emitted $($bindingLoops.Count) QML binding loop warning(s): $summary. Logs: '$($streams.stdout)', '$($streams.stderr)'."
+	}
+	return [pscustomobject]@{
+		process_id = $ProcessId
+		stdout_sha256 = Get-QmlVisualFileSha256 $streams.stdout
+		stderr_sha256 = Get-QmlVisualFileSha256 $streams.stderr
+		binding_loop_count = 0
+	}
+}
+
 $root = [IO.Path]::GetFullPath($OutputDirectory)
 $rootParent = Split-Path -Parent $root
 $rootLeaf = Split-Path -Leaf $root
@@ -147,6 +193,7 @@ $saved = @{
 }
 $combinedCases = [Collections.Generic.List[object]]::new()
 $automationPorts = [Collections.Generic.List[int]]::new()
+$processLogs = [Collections.Generic.List[object]]::new()
 $published = $false
 $fixtureStarted = $false
 try {
@@ -212,25 +259,27 @@ try {
 		$env:MUMBLE_MODERN_AUTOMATION_TOKEN = $token
 		$process = $null
 		$portReservation = $null
+		$groupManifest = $null
+		$stdoutPath = Join-Path $groupDirectory 'fixture.stdout.log'
+		$stderrPath = Join-Path $groupDirectory 'fixture.stderr.log'
 		try {
 			if ($AutomationPortBase -gt 0) { $portReservation = Enter-AutomationPortReservation -Port $port }
 			$process = Start-Process -FilePath $executablePath -ArgumentList @('--multiple', '--config', $configCopy) `
-				-RedirectStandardOutput (Join-Path $groupDirectory 'fixture.stdout.log') `
-				-RedirectStandardError (Join-Path $groupDirectory 'fixture.stderr.log') -PassThru
+				-RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
 			$fixtureStarted = $true
 			Wait-AutomationPort -Port $port -Process $process -TimeoutSeconds $StartupTimeoutSeconds
 			$workerArguments = @{
 				AutomationPort = $port; AutomationToken = $token; MatrixPath = $matrixFile
 				OutputDirectory = $groupDirectory; ExpectedDevicePixelRatio = $dpr
+				ExpectedProcessId = $process.Id
 			}
 			if ($CandidateOnly) { $workerArguments.CandidateOnly = $true }
 			else { $workerArguments.BaselineManifestPath = $baselineFile }
 			& "$PSScriptRoot\invoke-qml-visual-gate.ps1" @workerArguments
 			$groupManifest = Get-Content -Raw -LiteralPath (Join-Path $groupDirectory 'manifest.json') | ConvertFrom-Json
-			foreach ($case in @($groupManifest.cases)) {
-				Copy-Item -LiteralPath (Join-Path $groupDirectory "$($case.id).png") -Destination $workingRoot -Force
-				Copy-Item -LiteralPath (Join-Path $groupDirectory "$($case.id).accessibility.json") -Destination $workingRoot -Force
-				$combinedCases.Add($case)
+			if (-not ($groupManifest.PSObject.Properties.Name -contains 'process_id') -or
+					[int]$groupManifest.process_id -ne $process.Id) {
+				throw "Visual worker manifest did not attest exact fixture PID $($process.Id)."
 			}
 		} finally {
 			if ($null -ne $process -and -not $process.HasExited) {
@@ -241,6 +290,27 @@ try {
 				$portReservation.ReleaseMutex()
 				$portReservation.Dispose()
 			}
+		}
+		$logReceipt = Assert-QmlVisualProcessLogs -ProcessId $process.Id `
+			-StandardOutputPath $stdoutPath -StandardErrorPath $stderrPath
+		$publishedStdoutName = "$groupId.fixture.stdout.log"
+		$publishedStderrName = "$groupId.fixture.stderr.log"
+		Copy-Item -LiteralPath $stdoutPath -Destination (Join-Path $workingRoot $publishedStdoutName) -Force
+		Copy-Item -LiteralPath $stderrPath -Destination (Join-Path $workingRoot $publishedStderrName) -Force
+		$processLogs.Add([pscustomobject]@{
+			group_id = $groupId
+			device_pixel_ratio = $dpr
+			process_id = [int]$logReceipt.process_id
+			stdout_file = $publishedStdoutName
+			stdout_sha256 = [string]$logReceipt.stdout_sha256
+			stderr_file = $publishedStderrName
+			stderr_sha256 = [string]$logReceipt.stderr_sha256
+			binding_loop_count = [int]$logReceipt.binding_loop_count
+		})
+		foreach ($case in @($groupManifest.cases)) {
+			Copy-Item -LiteralPath (Join-Path $groupDirectory "$($case.id).png") -Destination $workingRoot -Force
+			Copy-Item -LiteralPath (Join-Path $groupDirectory "$($case.id).accessibility.json") -Destination $workingRoot -Force
+			$combinedCases.Add($case)
 		}
 	}
 
@@ -266,6 +336,7 @@ try {
 		matrix_sha256 = Get-QmlVisualFileSha256 $matrixFile
 		executable_sha256 = Get-QmlVisualFileSha256 $executablePath
 		source_git_sha = $gitSha
+		process_logs = @($processLogs)
 		cases = $combinedCases
 	}
 	if ($isShard) {
@@ -290,6 +361,10 @@ try {
 	foreach ($case in $combinedCases) {
 		Copy-Item -LiteralPath (Join-Path $workingRoot "$($case.id).png") -Destination $publishRoot
 		Copy-Item -LiteralPath (Join-Path $workingRoot "$($case.id).accessibility.json") -Destination $publishRoot
+	}
+	foreach ($processLog in $processLogs) {
+		Copy-Item -LiteralPath (Join-Path $workingRoot $processLog.stdout_file) -Destination $publishRoot
+		Copy-Item -LiteralPath (Join-Path $workingRoot $processLog.stderr_file) -Destination $publishRoot
 	}
 	Copy-Item -LiteralPath (Join-Path $workingRoot 'manifest.json') -Destination $publishRoot
 	Move-Item -LiteralPath $publishRoot -Destination $root

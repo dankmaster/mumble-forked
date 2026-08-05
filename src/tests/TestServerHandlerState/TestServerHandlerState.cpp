@@ -128,6 +128,21 @@ void TestServerHandlerState::publishesConnectionAndTlsSnapshotsSafely() {
 
 void TestServerHandlerState::publishesAtomicConnectionStateTransitions() {
 	ServerHandler handler;
+	const quint64 initialRunEpoch = handler.connectionRunEpoch();
+	QVERIFY(initialRunEpoch != 0);
+	ServerHandler replacementHandler;
+	const quint64 replacementRunEpoch = replacementHandler.connectionRunEpoch();
+	QVERIFY(replacementRunEpoch != 0);
+	QVERIFY(replacementRunEpoch != initialRunEpoch);
+	ServerHandlerMessageEvent currentRunEvent(
+		QByteArray(), Mumble::Protocol::TCPMessageType::UDPTunnel, false, 0, initialRunEpoch);
+	ServerHandlerMessageEvent replacementRunEvent(
+		QByteArray(), Mumble::Protocol::TCPMessageType::UDPTunnel, false, 0, replacementRunEpoch);
+	ServerHandlerMessageEvent unstampedEvent(
+		QByteArray(), Mumble::Protocol::TCPMessageType::UDPTunnel);
+	QVERIFY(handler.acceptsMessageEventForCurrentRun(currentRunEvent));
+	QVERIFY(!handler.acceptsMessageEventForCurrentRun(replacementRunEvent));
+	QVERIFY(!handler.acceptsMessageEventForCurrentRun(unstampedEvent));
 	QCOMPARE(handler.stateSnapshot(), ServerHandlerState::Idle);
 	QVERIFY(handler.isUdpEnabled());
 	QVERIFY(!handler.isStrong());
@@ -146,6 +161,13 @@ void TestServerHandlerState::publishesAtomicConnectionStateTransitions() {
 	QCOMPARE(handler.stateSnapshot(), ServerHandlerState::Aborted);
 
 	handler.refreshStartConfiguration();
+	const quint64 reconnectRunEpoch = handler.connectionRunEpoch();
+	QVERIFY(reconnectRunEpoch != initialRunEpoch);
+	QVERIFY(reconnectRunEpoch != replacementRunEpoch);
+	QVERIFY(!handler.acceptsMessageEventForCurrentRun(currentRunEvent));
+	ServerHandlerMessageEvent reconnectRunEvent(
+		QByteArray(), Mumble::Protocol::TCPMessageType::UDPTunnel, false, 0, reconnectRunEpoch);
+	QVERIFY(handler.acceptsMessageEventForCurrentRun(reconnectRunEvent));
 	QCOMPARE(handler.stateSnapshot(), ServerHandlerState::Idle);
 	handler.setServerSynchronized(false);
 	QVERIFY(!handler.hasSynchronized());

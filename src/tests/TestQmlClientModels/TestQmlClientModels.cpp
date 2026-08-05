@@ -6,6 +6,7 @@
 #include "ModernShellPreviewPublicationPolicy.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaProperty>
@@ -27,7 +28,7 @@ private slots:
 	void largeSynchronizationsStayResetFree();
 	void chatTimelineDirectPrependDoesNotTouchExistingRows();
 	void chatTimelineInlineDeferredRowsMaterializeWithoutProxyMoves();
-	void chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame();
+	void chatTimelineQueuedAppendBatchesDeferredRowsPerFrame();
 	void chatTimelineQueuedPrependUsesSingleDeferredBatch();
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
@@ -550,6 +551,9 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
 	QVERIFY(model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
 	QVERIFY(model.get(0).value(QStringLiteral("deferredPresentationInline")).toBool());
+	QVERIFY(model.deferredMessagePlainForMaterialization(QStringLiteral("cold:1")));
+	QVERIFY(model.deferredMessagePlainForMaterialization(QStringLiteral("cold:2")));
+	QVERIFY(!model.deferredMessagePlainForMaterialization(QStringLiteral("missing")));
 
 	QSignalSpy insertedSpy(model.presentationModel(), &QAbstractItemModel::rowsInserted);
 	QSignalSpy removedSpy(model.presentationModel(), &QAbstractItemModel::rowsRemoved);
@@ -570,6 +574,17 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(changedSpy.count(), 0);
 	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
 			 QStringLiteral("Cold one"));
+	QVERIFY(model.deferredMessagePlainForMaterialization(QStringLiteral("cold:1")));
+	const QVariantMap retainedRichPreview {
+		{ QStringLiteral("url"), QStringLiteral("https://example.test/retained") },
+		{ QStringLiteral("title"), QStringLiteral("Retained rich preview") }
+	};
+	QCOMPARE(model.applyMessage(QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("cold:2") },
+		{ QStringLiteral("plainText"), QStringLiteral("Cold two became rich") },
+		{ QStringLiteral("preview"), retainedRichPreview }
+	}), ChatTimelineModel::MessageMutation::Updated);
+	QVERIFY(!model.deferredMessagePlainForMaterialization(QStringLiteral("cold:2")));
 	QVERIFY(model.materializeDeferredMessage(QStringLiteral("cold:1")));
 	QCOMPARE(model.presentationModel()->rowCount(), 2);
 	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
@@ -580,8 +595,35 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(changedSpy.count(), 1);
 	QVERIFY(!model.get(0).value(QStringLiteral("deferredPresentation")).toBool());
 	QVERIFY(!model.get(0).value(QStringLiteral("deferredPresentationInline")).toBool());
+	QVERIFY(!model.deferredMessagePlainForMaterialization(QStringLiteral("cold:1")));
 	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(),
 			 QStringLiteral("Cold one updated"));
+
+	ChatTimelineModel classificationModel;
+	QCOMPARE(classificationModel.appendMessages(
+		{ QVariantMap {
+			  { QStringLiteral("messageKey"), QStringLiteral("classify:attachment") },
+			  { QStringLiteral("plainText"), QStringLiteral("Attachment") },
+			  { QStringLiteral("attachments"),
+				QVariantList { QVariantMap {
+					{ QStringLiteral("id"), QStringLiteral("attachment:1") },
+					{ QStringLiteral("assetId"), 1 },
+					{ QStringLiteral("kind"), QStringLiteral("file") },
+					{ QStringLiteral("name"), QStringLiteral("notes.txt") },
+					{ QStringLiteral("url"), QStringLiteral("https://example.test/notes.txt") }
+				} } } },
+		  QVariantMap {
+			  { QStringLiteral("messageKey"), QStringLiteral("classify:pending-body") },
+			  { QStringLiteral("plainText"), QStringLiteral("Pending formatted body") },
+			  { QStringLiteral("bodyHtml"),
+				QStringLiteral("<strong>Pending formatted body</strong>") }
+		  } },
+		true),
+		2);
+	QVERIFY(!classificationModel.deferredMessagePlainForMaterialization(
+		QStringLiteral("classify:attachment")));
+	QVERIFY(!classificationModel.deferredMessagePlainForMaterialization(
+		QStringLiteral("classify:pending-body")));
 
 	const QString inlineImageBodyText =
 		QStringLiteral("Open the inline estimate artwork.");
@@ -693,6 +735,15 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 			  { QStringLiteral("previewKind"), QStringLiteral("marketplaceListing") }
 		  } }
 	};
+	const QVariantList mixedAttachments {
+		QVariantMap {
+			{ QStringLiteral("id"), QStringLiteral("mixed-image") },
+			{ QStringLiteral("kind"), QStringLiteral("image") },
+			{ QStringLiteral("name"), QStringLiteral("mixed.png") },
+			{ QStringLiteral("url"), QStringLiteral("image://mumble/mixed-rich?g=1") },
+			{ QStringLiteral("state"), QStringLiteral("ready") }
+		}
+	};
 	QCOMPARE(estimateModel.appendMessages(
 				 { QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:rich") },
@@ -769,9 +820,14 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 				   QVariantMap {
 					 { QStringLiteral("messageKey"), QStringLiteral("estimate:false-blocket-host") },
 					 { QStringLiteral("plainText"), QStringLiteral("Not Blocket") },
-					 { QStringLiteral("preview"), falseBlocketHostPreview } } },
+					 { QStringLiteral("preview"), falseBlocketHostPreview } },
+				   QVariantMap {
+					 { QStringLiteral("messageKey"), QStringLiteral("estimate:mixed-rich") },
+					 { QStringLiteral("plainText"), QStringLiteral("Mixed rich") },
+					 { QStringLiteral("preview"), richPreview },
+					 { QStringLiteral("attachments"), mixedAttachments } } },
 				 true),
-			 17);
+			 18);
 	QCOMPARE(estimateModel.get(0).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 548);
@@ -857,9 +913,70 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(estimateModel.get(16).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 548);
+	QCOMPARE(estimateModel.get(17).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 874);
+
+	ChatTimelineModel timestampEstimateModel;
+	QCOMPARE(timestampEstimateModel.appendMessages(
+				 { QVariantMap {
+					   { QStringLiteral("messageKey"), QStringLiteral("estimate:plain-own-timestamp") },
+					   { QStringLiteral("plainText"), QStringLiteral("Plain outgoing") },
+					   { QStringLiteral("own"), true },
+					   { QStringLiteral("timeLabel"), QStringLiteral("12:34") } },
+				   QVariantMap {
+					   { QStringLiteral("messageKey"), QStringLiteral("estimate:rich-own-timestamp") },
+					   { QStringLiteral("plainText"), QStringLiteral("Rich outgoing") },
+					   { QStringLiteral("preview"), richPreview },
+					   { QStringLiteral("own"), true },
+					   { QStringLiteral("timeLabel"), QStringLiteral("12:35") } } },
+				 true),
+			 2);
+	QCOMPARE(timestampEstimateModel.get(0).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 70);
+	QCOMPARE(timestampEstimateModel.get(1).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 582);
+
+	QVERIFY(!estimateModel.deferredMessagePlainForMaterialization(
+		QStringLiteral("estimate:rich")));
+	QVERIFY(estimateModel.deferredMessagePlainForMaterialization(
+		QStringLiteral("estimate:plain")));
+	QVERIFY(!estimateModel.deferredMessagePlainForMaterialization(
+		QStringLiteral("estimate:metadata-only")));
+	QVERIFY(!estimateModel.deferredMessagePlainForMaterialization(
+		QStringLiteral("estimate:inline-image")));
+	QVERIFY(!estimateModel.deferredMessagePlainForMaterialization(
+		QStringLiteral("estimate:mixed-rich")));
+	QVERIFY(estimateModel.materializeDeferredMessage(
+		QStringLiteral("estimate:mixed-rich")));
+	QVariantMap mixedLoadingPreview = metadataOnlyPreview;
+	mixedLoadingPreview.insert(QStringLiteral("state"), QStringLiteral("loading"));
+	mixedLoadingPreview.insert(QStringLiteral("loading"), true);
+	QCOMPARE(estimateModel.applyMessage(QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("estimate:mixed-rich") },
+		{ QStringLiteral("plainText"), QStringLiteral("Mixed rich") },
+		{ QStringLiteral("preview"), mixedLoadingPreview },
+		{ QStringLiteral("attachments"), mixedAttachments }
+	}), ChatTimelineModel::MessageMutation::Updated);
+	QCOMPARE(estimateModel.get(17).value(QStringLiteral("id")).toString(),
+			 QStringLiteral("estimate:mixed-rich"));
+	QCOMPARE(estimateModel.get(17).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 611);
+	QCOMPARE(estimateModel.applyMessage(QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("estimate:mixed-rich") },
+		{ QStringLiteral("plainText"), QStringLiteral("Mixed rich") },
+		{ QStringLiteral("preview"), richPreview },
+		{ QStringLiteral("attachments"), mixedAttachments }
+	}), ChatTimelineModel::MessageMutation::Updated);
+	QCOMPARE(estimateModel.get(17).value(
+				 QStringLiteral("deferredPresentationHeight")).toInt(),
+			 874);
 }
 
-void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame() {
+void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() {
 	ChatTimelineModel model;
 	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
 	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
@@ -892,11 +1009,29 @@ void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame()
 	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
 	QCOMPARE(resetSpy.count(), 0);
 
+	QVariantList coldMessages = messages;
+	for (int row = 3; row < 6; ++row) {
+		coldMessages.push_back(QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("tail:%1").arg(row) },
+			{ QStringLiteral("plainText"), QStringLiteral("Tail %1").arg(row) }
+		});
+	}
 	ChatTimelineModel coldModel;
-	QCOMPARE(coldModel.enqueueAppendMessages(messages, true), 3);
+	QEventLoop firstDeferredBatch;
+	connect(&coldModel, &QAbstractItemModel::rowsInserted, &firstDeferredBatch,
+		[&coldModel, &firstDeferredBatch](const QModelIndex &, int, int) {
+			if (coldModel.rowCount() == 4) firstDeferredBatch.quit();
+		});
+	QCOMPARE(coldModel.enqueueAppendMessages(coldMessages, true), 6);
+	QTimer::singleShot(5000, &firstDeferredBatch, &QEventLoop::quit);
+	firstDeferredBatch.exec();
+	// The first presentation turn admits one bounded four-row cohort. The
+	// remaining two rows stay queued for the next 16 ms turn.
+	QCOMPARE(coldModel.rowCount(), 4);
+	QVERIFY(coldModel.appendPending());
 	QTRY_VERIFY_WITH_TIMEOUT(!coldModel.appendPending(), 5000);
-	QCOMPARE(coldModel.rowCount(), 3);
-	QCOMPARE(coldModel.presentationModel()->rowCount(), 3);
+	QCOMPARE(coldModel.rowCount(), 6);
+	QCOMPARE(coldModel.presentationModel()->rowCount(), 6);
 	QCOMPARE(coldModel.deferredPresentationModel()->rowCount(), 0);
 	for (int row = 0; row < coldModel.rowCount(); ++row) {
 		QVERIFY(coldModel.get(row).value(QStringLiteral("deferredPresentation")).toBool());
@@ -936,9 +1071,17 @@ void TestQmlClientModels::chatTimelineQueuedAppendAdmitsOneCompleteRowPerFrame()
 			{ QStringLiteral("plainText"), QStringLiteral("Cancel %1").arg(row) }
 		});
 	}
+	QEventLoop cancellationAfterFirstBatch;
+	connect(&cancelledColdModel, &QAbstractItemModel::rowsInserted,
+		&cancellationAfterFirstBatch,
+		[&cancelledColdModel, &cancellationAfterFirstBatch](const QModelIndex &, int, int) {
+			if (cancelledColdModel.rowCount() == 4) cancellationAfterFirstBatch.quit();
+		});
 	QCOMPARE(cancelledColdModel.enqueueAppendMessages(cancellableMessages, true), 8);
-	QTRY_VERIFY_WITH_TIMEOUT(
-		cancelledColdModel.rowCount() > 0 && cancelledColdModel.appendPending(), 5000);
+	QTimer::singleShot(5000, &cancellationAfterFirstBatch, &QEventLoop::quit);
+	cancellationAfterFirstBatch.exec();
+	QCOMPARE(cancelledColdModel.rowCount(), 4);
+	QVERIFY(cancelledColdModel.appendPending());
 	cancelledColdModel.replaceMessages({});
 	QCOMPARE(cancelledColdModel.rowCount(), 0);
 	QCOMPARE(cancellationSignalOrder,
@@ -1203,6 +1346,16 @@ void TestQmlClientModels::connectionHandoffBlocksRetiringServerSnapshots() {
 	QFile sourceFile(sourcePath);
 	QVERIFY(sourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
 	const QString source = QString::fromUtf8(sourceFile.readAll());
+	const QString serverHandlerHeaderPath = QFINDTESTDATA("../../mumble/ServerHandler.h");
+	const QString serverHandlerSourcePath = QFINDTESTDATA("../../mumble/ServerHandler.cpp");
+	QVERIFY2(!serverHandlerHeaderPath.isEmpty(), "ServerHandler.h test data was not found");
+	QVERIFY2(!serverHandlerSourcePath.isEmpty(), "ServerHandler.cpp test data was not found");
+	QFile serverHandlerHeaderFile(serverHandlerHeaderPath);
+	QFile serverHandlerSourceFile(serverHandlerSourcePath);
+	QVERIFY(serverHandlerHeaderFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	QVERIFY(serverHandlerSourceFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString serverHandlerHeader = QString::fromUtf8(serverHandlerHeaderFile.readAll());
+	const QString serverHandlerSource = QString::fromUtf8(serverHandlerSourceFile.readAll());
 	const auto methodBody = [&source](const QString &startMarker, const QString &endMarker) {
 		const qsizetype start = source.indexOf(startMarker);
 		const qsizetype end   = source.indexOf(endMarker, start);
@@ -1264,6 +1417,19 @@ void TestQmlClientModels::connectionHandoffBlocksRetiringServerSnapshots() {
 		connectedMethod.indexOf(QStringLiteral("clearQmlConnectionState()"));
 	QVERIFY(releaseHandoff >= 0);
 	QVERIFY(resetNewConnection > releaseHandoff);
+
+	QVERIFY(serverHandlerHeader.contains(QStringLiteral("quintptr sourceHandlerIdentity = 0")));
+	QVERIFY(serverHandlerSource.contains(
+		QStringLiteral("reinterpret_cast< quintptr >(this)")));
+	const QString customEventMethod =
+		methodBody(QStringLiteral("void MainWindow::customEvent(QEvent *evt)"),
+				   QStringLiteral("void MainWindow::context_triggered()"));
+	QVERIFY(!customEventMethod.isEmpty());
+	QVERIFY(customEventMethod.contains(QStringLiteral("shme->sourceHandlerIdentity != 0")));
+	QVERIFY(customEventMethod.contains(
+		QStringLiteral("reinterpret_cast< quintptr >(currentHandler.get())")));
+	QVERIFY(customEventMethod.contains(
+		QStringLiteral("server.message.retired_source_dropped")));
 
 	const QString recreationMethod =
 		methodBody(QStringLiteral("void MainWindow::finishServerHandlerRecreation()"),
@@ -3135,6 +3301,17 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(source.contains(QStringLiteral("m_deferredModernShellChatMessages.insert")));
 	QVERIFY(source.contains(QStringLiteral("void MainWindow::drainDeferredModernShellChatMessages")));
 	QVERIFY(source.contains(QStringLiteral("qml.chat.dto_build.deferred_source")));
+	const qsizetype chatPublishStart =
+		source.indexOf(QStringLiteral("void MainWindow::publishQmlChatMessage"));
+	const qsizetype chatPublishEnd =
+		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellChatMessageDrain"),
+					   chatPublishStart);
+	QVERIFY(chatPublishStart >= 0);
+	QVERIFY(chatPublishEnd > chatPublishStart);
+	const QString chatPublishBody = source.mid(chatPublishStart, chatPublishEnd - chatPublishStart);
+	QVERIFY(chatPublishBody.contains(QStringLiteral("messageScope != target.scope")));
+	QVERIFY(chatPublishBody.contains(QStringLiteral("messageScopeID != target.scopeID")));
+	QVERIFY(chatPublishBody.contains(QStringLiteral("qml.chat.dto_build.stale_scope_dropped")));
 	QVERIFY(source.contains(QStringLiteral("constexpr int ModernShellPreviewUpdateDrainMs = 50")));
 	const qsizetype previewDrainScheduleStart =
 		source.indexOf(QStringLiteral("void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain"));
@@ -3151,17 +3328,22 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(navigateStart >= 0);
 	QVERIFY(navigateEnd > navigateStart);
 	const QString navigateBody = source.mid(navigateStart, navigateEnd - navigateStart);
-	QVERIFY(navigateBody.contains(QStringLiteral("scopeKeyChanges && hasRetiringTimeline")));
+	QVERIFY(navigateBody.contains(QStringLiteral("const bool scopeKeyChanges")));
+	QVERIFY(navigateBody.contains(
+		QStringLiteral("(scopeKeyChanges || forceReload) && !m_deferredModernShellChatMessages.isEmpty()")));
+	QVERIFY(navigateBody.contains(QStringLiteral("m_deferredModernShellChatMessages.clear()")));
+	QVERIFY(navigateBody.contains(
+		QStringLiteral("qml.chat.scope_navigation.deferred_source_dropped")));
 	QVERIFY(navigateBody.contains(
 		QStringLiteral("m_deferredPersistentChatNavigationGeneration = navigationGeneration")));
 	QCOMPARE(navigateBody.count(
 				 QStringLiteral("schedulePersistentChatNavigationAfterPresentedFrame(")),
-			 2);
-	QVERIFY(navigateBody.contains(QStringLiteral("QStringLiteral(\"preclear\")")));
+			 1);
+	QVERIFY(!navigateBody.contains(QStringLiteral("QStringLiteral(\"preclear\")")));
 	QVERIFY(navigateBody.contains(QStringLiteral("QStringLiteral(\"selection\")")));
 	QVERIFY(!navigateBody.contains(
 		QStringLiteral("QTimer::singleShot(PersistentChatNavigationFrameMs")));
-	QVERIFY(navigateBody.contains(QStringLiteral("chatModel->replaceMessages({})")));
+	QVERIFY(!navigateBody.contains(QStringLiteral("replaceMessages({})")));
 	QVERIFY(navigateBody.contains(QStringLiteral("currentSelection->applySelection(targetScopeToken")));
 	QVERIFY(navigateBody.contains(
 		QStringLiteral("requestScopeReplacementPresentation()")));
@@ -3268,11 +3450,11 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 		QStringLiteral("qml.chat.snapshot_append.deferred_fallback")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("if (switchingScope)")));
 	QVERIFY(snapshotApplyBody.contains(QStringLiteral("chatModel()->replaceMessages({})")));
-	QVERIFY(snapshotApplyBody.contains(QStringLiteral("if (!modelPreclearedForSnapshot)")));
-	QVERIFY(snapshotApplyBody.contains(
+	QVERIFY(!snapshotApplyBody.contains(QStringLiteral("modelPreclearedForSnapshot")));
+	QVERIFY(!snapshotApplyBody.contains(
 		QStringLiteral("qml.chat.scope_navigation.preclear_reused")));
 	QVERIFY(snapshotApplyBody.contains(
-		QStringLiteral("qml.chat.scope_navigation.retiring_rows_cleared")));
+		QStringLiteral("qml.chat.scope_navigation.retiring_rows_replaced_hidden")));
 	QVERIFY(snapshotApplyBody.contains(
 		QStringLiteral("enqueueAppendMessages(messages, true)")));
 	QVERIFY(!snapshotApplyBody.contains(QStringLiteral("prependMessages(messages, true)")));

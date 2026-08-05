@@ -11,6 +11,11 @@ Item {
 	// Pooled chat delegates keep their geometry so ListView scroll anchoring stays
 	// stable, but they must release decoded image resources until reused.
 	property bool resourceActive: true
+	property bool accessibilitySuppressed: false
+	property Item accessibilityViewportItem: null
+	// mapToItem() does not reliably invalidate a binding for every Flickable
+	// movement. The timeline passes contentY through this dependency token.
+	property real accessibilityViewportOffset: 0
     signal attachmentRequested(var attachment)
 	signal attachmentDownloadRequested(var attachment)
 	signal attachmentRetryRequested(var attachment)
@@ -123,11 +128,34 @@ Item {
 		return false
 	}
 
+	function itemContainedInAccessibilityViewport(item) {
+		if (accessibilitySuppressed || !accessibilityViewportItem || !item || !item.visible)
+			return false
+		const viewportOffset = Number(accessibilityViewportOffset)
+		const itemX = Number(item.x)
+		const itemY = Number(item.y)
+		const itemWidth = Number(item.width)
+		const itemHeight = Number(item.height)
+		const viewportWidth = Number(accessibilityViewportItem.width)
+		const viewportHeight = Number(accessibilityViewportItem.height)
+		if (!isFinite(viewportOffset) || !isFinite(itemX) || !isFinite(itemY)
+				|| !isFinite(itemWidth) || !isFinite(itemHeight)
+				|| !isFinite(viewportWidth) || !isFinite(viewportHeight)
+				|| itemWidth <= 0 || itemHeight <= 0
+				|| viewportWidth <= 0 || viewportHeight <= 0)
+			return false
+		const point = item.mapToItem(accessibilityViewportItem, 0, 0)
+		return point && isFinite(point.x) && isFinite(point.y)
+			&& point.x >= -0.5 && point.x + itemWidth <= viewportWidth + 0.5
+			&& point.y >= -0.5 && point.y + itemHeight <= viewportHeight + 0.5
+	}
+
     implicitHeight: gallery.implicitHeight
 	visible: visibleAttachments.length > 0
     Accessible.role: Accessible.List
     Accessible.name: qsTr("Message attachments")
 	Accessible.description: qsTr("%1 attachments").arg(visibleAttachments.length)
+	Accessible.ignored: accessibilitySuppressed || !accessibilityViewportItem
 
     Flow {
         id: gallery
@@ -173,6 +201,8 @@ Item {
 				readonly property string stableId: root.safeText(
 					modelData.id !== undefined ? modelData.id : modelData.assetId, 128)
 					|| String(attachmentTile.index)
+				readonly property bool accessibilityExposed:
+					root.itemContainedInAccessibilityViewport(attachmentTile)
                 readonly property real requestedWidth: Number(modelData.width) > 0 ? Number(modelData.width) : 240
                 readonly property real requestedHeight: Number(modelData.height) > 0 ? Number(modelData.height) : 160
 				readonly property real aspectRatio: Math.max(0.2, Math.min(5,
@@ -231,6 +261,7 @@ Item {
 					height: implicitHeight
                     visible: running
 					Accessible.name: qsTr("Loading %1").arg(attachmentTile.label)
+					Accessible.ignored: !attachmentTile.accessibilityExposed
 
 					Row {
 						id: loadingIndicatorRow
@@ -245,10 +276,12 @@ Item {
 						}
 
 						Label {
+							objectName: "attachmentLoadingLabel_" + attachmentTile.stableId
 							textFormat: Text.PlainText
 							text: qsTr("Loading preview")
 							color: Theme.textMuted
 							font.pixelSize: Theme.fontLabel
+							Accessible.ignored: !attachmentTile.accessibilityExposed
 						}
 					}
                 }
@@ -275,6 +308,7 @@ Item {
 						Accessible.role: Accessible.AlertMessage
 						Accessible.name: text
 						Accessible.description: attachmentTile.label
+						Accessible.ignored: !attachmentTile.accessibilityExposed
 					}
 
 					ModernButton {
@@ -285,6 +319,8 @@ Item {
 						tone: "retry"
 						text: qsTr("Retry preview")
 						Accessible.name: qsTr("Retry preview for %1").arg(attachmentTile.label)
+						Accessible.ignored: !attachmentTile.accessibilityExposed
+						activeFocusOnTab: attachmentTile.accessibilityExposed
 						onClicked: root.attachmentRetryRequested(attachmentTile.modelData)
 					}
 				}
@@ -325,6 +361,7 @@ Item {
 							font.pixelSize: Theme.fontBody
 							font.weight: Font.DemiBold
 							elide: Text.ElideMiddle
+							Accessible.ignored: !attachmentTile.accessibilityExposed
 						}
 						Label {
 							objectName: "attachmentFileMetadata_" + attachmentTile.stableId
@@ -334,6 +371,7 @@ Item {
 							color: Theme.textMuted
 							font.pixelSize: Theme.fontCaption
 							elide: Text.ElideRight
+							Accessible.ignored: !attachmentTile.accessibilityExposed
 						}
 					}
 					ModernIcon {
@@ -376,7 +414,9 @@ Item {
 						: qsTr("%1 %2").arg(actionVerb).arg(attachmentTile.label)
 					Accessible.description: qsTr("Attachment %1 of %2")
 						.arg(attachmentTile.index + 1).arg(root.visibleAttachments.length)
-					ToolTip.visible: hovered
+					Accessible.ignored: !attachmentTile.accessibilityExposed
+					activeFocusOnTab: attachmentTile.accessibilityExposed
+					ToolTip.visible: hovered && attachmentTile.accessibilityExposed
 					ToolTip.text: qsTr("%1 %2").arg(actionVerb).arg(attachmentTile.label)
                     onClicked: root.attachmentRequested(attachmentTile.modelData)
                 }
@@ -396,7 +436,9 @@ Item {
 					iconName: "download"
 					text: qsTr("Save original")
 					Accessible.name: qsTr("Save original %1").arg(attachmentTile.label)
-					ToolTip.visible: hovered
+					Accessible.ignored: !attachmentTile.accessibilityExposed
+					activeFocusOnTab: attachmentTile.accessibilityExposed
+					ToolTip.visible: hovered && attachmentTile.accessibilityExposed
 					ToolTip.text: text
 					onClicked: root.attachmentDownloadRequested(attachmentTile.modelData)
 				}

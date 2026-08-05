@@ -21,6 +21,8 @@ Item {
 	property bool resourceActive: true
 	property bool animationsEnabled: true
 	property bool hoverEffectsEnabled: true
+	// Stable owner identity distinguishes delegate reuse from same-message hydration.
+	property string contentIdentity: ""
 	// Modal parents keep the product surface visible behind drawers/dialogs, but
 	// their promoted semantic children must leave the accessibility tree.
 	property bool accessibilitySuppressed: false
@@ -48,8 +50,16 @@ Item {
 	implicitHeight: root.hasImages ? structuredBody.implicitHeight : body.implicitHeight
 	Accessible.ignored: true
 	onSegmentsChanged: {
-		keyboardLinkIndex = Math.min(keyboardLinkIndex, Math.max(0, keyboardLinks.length - 1))
+		keyboardLinkIndex = keyboardLinks.length > 0
+			? Math.max(0, Math.min(keyboardLinkIndex, keyboardLinks.length - 1)) : 0
 		if (keyboardLinks.length === 0 && plainLinkTarget.activeFocus)
+			plainLinkTarget.focus = false
+	}
+	onContentIdentityChanged: resetForReuse()
+
+	function resetForReuse() {
+		keyboardLinkIndex = 0
+		if (plainLinkTarget.activeFocus)
 			plainLinkTarget.focus = false
 	}
 
@@ -308,6 +318,8 @@ Item {
 					objectName: "richMessageTextBlock_" + index
 					width: parent.width
 					property int keyboardLinkIndex: 0
+					property string keyboardContentIdentity:
+						root.contentIdentity + "|" + String(index)
 					readonly property var keyboardLinkEntries: parent.imageBlock
 						? [] : (parent.modelData.links || [])
 					readonly property var currentKeyboardLinkEntry: keyboardLinkEntries.length > 0
@@ -337,9 +349,11 @@ Item {
 						if (keyboardLinkEntries.length > 0)
 							root.linkRequested(String(currentKeyboardLinkEntry.url || ""))
 					}
+					onKeyboardContentIdentityChanged: keyboardLinkIndex = 0
 					onKeyboardLinkEntriesChanged: {
-						keyboardLinkIndex = Math.min(keyboardLinkIndex,
-							Math.max(0, keyboardLinkEntries.length - 1))
+						keyboardLinkIndex = keyboardLinkEntries.length > 0
+							? Math.max(0, Math.min(keyboardLinkIndex,
+								keyboardLinkEntries.length - 1)) : 0
 						if (keyboardLinkEntries.length === 0 && activeFocus)
 							focus = false
 					}

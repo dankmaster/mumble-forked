@@ -1967,7 +1967,9 @@ FocusScope {
 				id: steamLayout
 				anchors.fill: parent
 				anchors.margins: Theme.space3
-				spacing: Theme.space3
+				// The default store card must fit the canonical chat viewport without
+				// dropping its media rail, pricing, reviews, or deal action above the fold.
+				spacing: Theme.space2
 
 				RowLayout {
 					Layout.fillWidth: true
@@ -2020,7 +2022,7 @@ FocusScope {
 					id: steamHero
 					objectName: "providerSteamHero"
 					Layout.fillWidth: true
-					Layout.preferredHeight: visible ? (root.compactLayout ? 132 : 176) : 0
+					Layout.preferredHeight: visible ? (root.compactLayout ? 116 : 140) : 0
 					visible: root.safeManagedImageSource(root.previewImageSource).length > 0
 					radius: Theme.innerRadius
 					color: Theme.embedSurface
@@ -2151,7 +2153,7 @@ FocusScope {
 					id: steamMediaRail
 					objectName: "previewSteamMediaRail"
 					Layout.fillWidth: true
-					Layout.preferredHeight: visible ? 56 : 0
+					Layout.preferredHeight: visible ? 52 : 0
 					visible: root.steamMediaItems.length > 1
 					orientation: ListView.Horizontal
 					spacing: Theme.space1

@@ -197,7 +197,8 @@ Control {
 							required property int index
 							required property var modelData
 							Layout.fillWidth: true
-							Layout.preferredHeight: 28
+							Layout.preferredHeight: Math.max(28,
+								followButton.visible ? followButton.implicitHeight : 0)
 							color: modelData.followed === true ? Theme.surfaceHover : "transparent"
 							radius: 6
 							Accessible.role: Accessible.ListItem
@@ -234,6 +235,7 @@ Control {
 									font.weight: Font.DemiBold
 								}
 								ModernButton {
+									id: followButton
 									objectName: "stonksRoomFollow_" + String(modelData.userId || 0)
 									visible: Number(modelData.userId) !== Number(root.stonks.selfUserId)
 									enabled: root.stonks.registered === true

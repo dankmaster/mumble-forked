@@ -19,8 +19,9 @@ TestCase {
         id: bodyLoader
         width: parent.width
 		height: item ? item.implicitHeight : 0
-        Component.onCompleted: setSource("qrc:/qml-shell/RichMessageBody.qml", {
-            "segments": [
+		Component.onCompleted: setSource("qrc:/qml-shell/RichMessageBody.qml", {
+			"contentIdentity": "fixture-default",
+			"segments": [
                 { "text": "<img src=x onerror=alert(1)>" },
                 { "text": " bad", "href": "javascript:alert(2)" },
                 { "text": " safe", "href": "https://example.com/path?q=1", "bold": true }
@@ -127,6 +128,18 @@ TestCase {
 				return gate && gate.finishAdmission(lastStableId, lastPressEpoch,
 					lastDwellGeneration, outcome)
 			}
+			function invalidateScope(reason) {
+				if (gate)
+					gate.invalidateIdentity(reason)
+				geometryPinActive = false
+			}
+			function retireDelegate(stableId, pressEpoch, dwellGeneration, reason) {
+				const retired = gate && gate.retireAdmission(stableId, pressEpoch,
+					dwellGeneration, reason)
+				if (retired)
+					geometryPinActive = false
+				return retired
+			}
 			function finishCardIfReady() {
 				if (card && card.paintedSurface && card.prewarmVisualReady)
 					finishActive("painted")
@@ -176,11 +189,24 @@ TestCase {
 					objectName: "stationaryWarmFixtureScrollBar"
 					policy: ScrollBar.AlwaysOn
 					onPressedChanged: {
-						if (pressed)
+						if (pressed) {
+							warmReleaseGuard.stop()
 							warmFixture.releasePending = false
-						else
+						} else {
 							warmFixture.releasePending = true
+							warmReleaseGuard.restart()
+						}
 					}
+				}
+			}
+
+			Timer {
+				id: warmReleaseGuard
+				interval: 128
+				repeat: false
+				onTriggered: {
+					warmFixture.releasePending = false
+					warmFixture.geometryPinActive = false
 				}
 			}
 
@@ -342,6 +368,77 @@ TestCase {
 		}
 	}
 
+	Component {
+		id: attachmentAccessibilityFixtureComponent
+
+		Item {
+			id: attachmentAccessibilityFixture
+			width: 400
+			height: 170
+			property alias viewport: attachmentAccessibilityViewport
+			readonly property var gallery: attachmentAccessibilityLoader.item
+
+			Flickable {
+				id: attachmentAccessibilityViewport
+				anchors.fill: parent
+				clip: true
+				contentWidth: width
+				contentHeight: attachmentAccessibilityLoader.item
+					? attachmentAccessibilityLoader.item.implicitHeight + 20 : height
+				boundsBehavior: Flickable.StopAtBounds
+
+				Loader {
+					id: attachmentAccessibilityLoader
+					width: attachmentAccessibilityViewport.width
+					height: item ? item.implicitHeight : 0
+					Component.onCompleted: setSource(
+						"qrc:/qml-shell/AttachmentGallery.qml", {
+							"attachments": [{
+								"id": "ready-doc",
+								"assetId": "ready-asset",
+								"kind": "document",
+								"mime": "application/pdf",
+								"fileName": "ready.pdf",
+								"byteSize": 4096
+							}, {
+								"id": "loading-image",
+								"assetId": "loading-asset",
+								"kind": "image",
+								"state": "loading",
+								"width": 240,
+								"height": 160,
+								"alt": "Loading image"
+							}, {
+								"id": "error-image",
+								"assetId": "error-asset",
+								"kind": "image",
+								"state": "error",
+								"previewCanRetry": true,
+								"previewError": "Preview failed",
+								"width": 240,
+								"height": 160,
+								"alt": "Error image"
+							}]
+						})
+				}
+			}
+
+			Binding {
+				target: attachmentAccessibilityLoader.item
+				property: "accessibilityViewportItem"
+				value: attachmentAccessibilityViewport
+				when: !!attachmentAccessibilityLoader.item
+			}
+
+			Binding {
+				target: attachmentAccessibilityLoader.item
+				property: "accessibilityViewportOffset"
+				value: attachmentAccessibilityViewport.contentY
+				when: !!attachmentAccessibilityLoader.item
+			}
+		}
+	}
+
     Loader {
         id: attachmentLoader
         anchors.top: previewLoader.bottom
@@ -356,7 +453,9 @@ TestCase {
                 "url": "image://mumble/fixture-attachment?g=1",
                 "thumbnailUrl": "image://mumble/fixture-attachment?g=1",
                 "alt": "Test attachment"
-            }]
+            }],
+			"accessibilityViewportItem": testCase,
+			"accessibilityViewportOffset": 0
         })
     }
 
@@ -565,6 +664,8 @@ TestCase {
 		watchTogetherSpy.clear()
 		linkSpy.clear()
 		modelBackedSegments.clear()
+		bodyLoader.item.resetForReuse()
+		bodyLoader.item.contentIdentity = "fixture-default"
 		bodyLoader.item.segments = [
 			{ "text": "<img src=x onerror=alert(1)>" },
 			{ "text": " bad", "href": "javascript:alert(2)" },
@@ -922,6 +1023,27 @@ TestCase {
 		compare(linkSpy.signalArguments[0][0], "https://example.com/support")
 	}
 
+	function test_same_message_hydration_preserves_keyboard_target_and_reuse_resets_it() {
+		const body = bodyLoader.item
+		body.contentIdentity = "message-a"
+		body.segments = [
+			{ "text": "Documentation", "href": "https://example.com/docs" },
+			{ "text": "Support", "href": "https://example.com/support" }
+		]
+		tryCompare(body, "keyboardLinkIndex", 0)
+		body.keyboardLinkIndex = 1
+		body.segments = [
+			{ "text": "Documentation updated", "href": "https://example.com/docs" },
+			{ "text": "Support ready", "href": "https://example.com/support" },
+			{ "text": " hydrated" }
+		]
+		compare(body.keyboardLinks.length, 2)
+		compare(body.keyboardLinkIndex, 1)
+
+		body.contentIdentity = "message-b"
+		compare(body.keyboardLinkIndex, 0)
+	}
+
 	function test_modal_owner_suppresses_promoted_rich_message_semantics() {
 		const body = bodyLoader.item
 		body.segments = [ { "text": "Background message", "href": "https://example.com/background" } ]
@@ -1237,7 +1359,7 @@ TestCase {
 		findChild(card, "previewOverflowMenu").close()
 	}
 
-    function test_preview_identity_and_delegate_reuse_reset_transient_state() {
+	function test_preview_identity_and_delegate_reuse_reset_transient_state() {
         const card = previewLoader.item
         card.preview = {
             "state": "ready",
@@ -1284,7 +1406,29 @@ TestCase {
 		compare(card.savedSizePreset, "large")
 		compare(card.effectiveSizePreset, "large")
 		compare(card.selectedMediaIndex, 0)
-    }
+	}
+
+	function test_reused_preview_rejects_old_poster_recovery_callback() {
+		const card = previewLoader.item
+		card.previewIdentity = "message:poster-owner-a"
+		card.preview = {
+			"state": "ready", "title": "Poster owner A",
+			"url": "https://example.com/poster-a"
+		}
+		card.embedPosterFallbackActive = true
+		card.embedPosterHydrationRetryCount = 0
+		// Schedule A's deferred hydration recovery, then reuse the same card
+		// before that callback can run.
+		card.preview = {
+			"state": "ready", "title": "Poster owner A refreshed",
+			"url": "https://example.com/poster-a-refreshed"
+		}
+		card.previewIdentity = "message:poster-owner-b"
+		card.embedPosterFallbackActive = true
+		wait(0)
+		compare(card.previewIdentity, "message:poster-owner-b")
+		compare(card.embedPosterFallbackActive, true)
+	}
 
     function test_preview_images_never_render_remote_or_data_urls_directly() {
         const card = previewLoader.item
@@ -3238,8 +3382,11 @@ TestCase {
 
 		const gallery = findChild(card, "previewDocumentMediaGallery")
 		const primaryAction = findChild(card, "embedDocumentMediaPrimaryAction")
+		const playbackPrompt = findChild(card, "embedDocumentPlaybackPrompt")
 		const mediaSlot = findChild(card, "previewEmbedMediaSlot")
-		verify(gallery !== null && gallery.visible && primaryAction !== null)
+		verify(gallery !== null && gallery.visible && primaryAction !== null
+			&& playbackPrompt !== null && playbackPrompt.visible)
+		compare(primaryAction.Accessible.name, "Play YouTube Developers Live")
 		verify(!mediaSlot.visible)
 		const restingHeight = card.implicitHeight
 		primaryAction.clicked()
@@ -3815,6 +3962,38 @@ TestCase {
 		verify(!inlineSession.active)
 		tryCompare(card, "inlinePlaybackActive", false)
 		tryCompare(findChild(card, "previewPlayButton"), "activeFocus", true)
+	}
+
+	function test_inline_component_retry_rebind_restores_current_owner_source() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Rebound provider clip",
+			"url": "https://www.youtube.com/watch?v=rebind",
+			"embedUrl": "https://www.youtube.com/embed/rebind",
+			"embedKind": "youtube"
+		}
+		card.previewIdentity = "message:component-rebind-a"
+		card.mediaSessionId = "message:component-rebind"
+		card.mediaSessionController = inlineSession
+		card.inlinePlayerComponentUrl = Qt.resolvedUrl(
+			"DefinitelyMissingInlineMediaPlayer.qml")
+		inlineSession.sessionId = card.mediaSessionId
+		inlineSession.url = "https://www.youtube.com/embed/rebind"
+		inlineSession.detached = false
+		inlineSession.active = true
+		const loader = findChild(card, "previewInlineMediaLoader")
+		verify(loader !== null)
+		tryCompare(loader, "status", Loader.Error)
+
+		card.retryInlinePlayerComponent()
+		compare(loader.source.toString(), "")
+		card.previewIdentity = "message:component-rebind-b"
+		tryVerify(function() {
+			return loader.source.toString().indexOf(
+				"DefinitelyMissingInlineMediaPlayer.qml") >= 0
+		})
+		compare(card.previewIdentity, "message:component-rebind-b")
 	}
 
 	function test_structured_image_link_has_mouse_keyboard_and_accessible_activation() {
@@ -5679,6 +5858,64 @@ TestCase {
 		})
 		tryCompare(fixture, "card", null)
 		compare(fixture.admissionCount, 1)
+		tryCompare(fixture, "geometryPinActive", false, 256)
+	}
+
+	function test_stationary_scope_identity_invalidation_drops_late_completion() {
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": ["retiring-scope-row"],
+				"admissibleStableIds": ["retiring-scope-row"] })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		tryCompare(fixture, "admissionCount", 1)
+		const oldId = fixture.lastStableId
+		const oldEpoch = fixture.lastPressEpoch
+		const oldGeneration = fixture.lastDwellGeneration
+
+		fixture.invalidateScope("scope-change")
+		compare(fixture.gate.activeStableId, "")
+		compare(fixture.geometryPinActive, false)
+		compare(fixture.gate.retains(oldId, oldEpoch, oldGeneration), false)
+		compare(fixture.gate.finishAdmission(oldId, oldEpoch, oldGeneration,
+			"painted"), false)
+		compare(fixture.gate.reopenAdmission(oldId, oldEpoch, oldGeneration), false)
+		verify(fixture.gate.dwellGeneration > oldGeneration)
+		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+	}
+
+	function test_stationary_delegate_retirement_clears_exact_retention() {
+		const fixture = createTemporaryObject(stationaryThumbWarmInputFixtureComponent,
+			testCase, { "syntheticCandidates": true,
+				"visibleStableIds": ["delegate-a"],
+				"admissibleStableIds": ["delegate-a"] })
+		verify(fixture !== null)
+		const bar = fixture.scrollBar
+		const thumbCenter = bar.position * bar.height + bar.size * bar.height / 2
+		mousePress(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
+		tryCompare(fixture, "admissionCount", 1)
+		const retiredId = fixture.lastStableId
+		const retiredEpoch = fixture.lastPressEpoch
+		const retiredGeneration = fixture.lastDwellGeneration
+		verify(fixture.finishActive("painted"))
+		verify(fixture.gate.retains(retiredId, retiredEpoch, retiredGeneration))
+
+		fixture.visibleStableIds = ["delegate-b"]
+		fixture.admissibleStableIds = ["delegate-b"]
+		verify(fixture.retireDelegate(retiredId, retiredEpoch,
+			retiredGeneration, "delegate-reused"))
+		compare(fixture.geometryPinActive, false)
+		compare(fixture.gate.retains(retiredId, retiredEpoch,
+			retiredGeneration), false)
+		compare(fixture.gate.reopenAdmission(retiredId, retiredEpoch,
+			retiredGeneration), false)
+		compare(fixture.gate.finishAdmission(retiredId, retiredEpoch,
+			retiredGeneration, "terminal"), false)
+		tryCompare(fixture, "admissionCount", 2)
+		compare(fixture.lastStableId, "delegate-b")
+		mouseRelease(bar, bar.width / 2, thumbCenter, Qt.LeftButton)
 	}
 
 	function test_stationary_watchdog_retires_unpainted_source_and_stale_release() {
@@ -5865,4 +6102,120 @@ TestCase {
 		compare(tile.border.color, Theme.divider)
 		action.enabled = true
     }
+
+	function test_attachment_accessibility_tracks_contained_tile() {
+		const fixture = createTemporaryObject(attachmentAccessibilityFixtureComponent,
+			testCase)
+		verify(fixture !== null)
+		tryVerify(function() { return fixture.gallery !== null })
+		const gallery = fixture.gallery
+		const viewport = fixture.viewport
+		tryVerify(function() {
+			return findChild(gallery, "attachmentAction_ready-doc") !== null
+				&& findChild(gallery, "attachmentBusyIndicator_loading-image") !== null
+				&& findChild(gallery, "attachmentRetry_error-image") !== null
+		})
+
+		const readyTile = findChild(gallery, "attachment_ready-doc")
+		const readyAction = findChild(gallery, "attachmentAction_ready-doc")
+		const readySave = findChild(gallery, "attachmentDownload_ready-doc")
+		const readyName = findChild(gallery, "attachmentFileName_ready-doc")
+		const readyMetadata = findChild(gallery, "attachmentFileMetadata_ready-doc")
+		const loadingTile = findChild(gallery, "attachment_loading-image")
+		const loadingBusy = findChild(gallery, "attachmentBusyIndicator_loading-image")
+		const loadingLabel = findChild(gallery, "attachmentLoadingLabel_loading-image")
+		const loadingAction = findChild(gallery, "attachmentAction_loading-image")
+		const loadingSave = findChild(gallery, "attachmentDownload_loading-image")
+		const errorTile = findChild(gallery, "attachment_error-image")
+		const errorLabel = findChild(gallery, "attachmentError_error-image")
+		const errorRetry = findChild(gallery, "attachmentRetry_error-image")
+		const errorAction = findChild(gallery, "attachmentAction_error-image")
+		const errorSave = findChild(gallery, "attachmentDownload_error-image")
+		verify(readyTile && readyAction && readySave && readyName && readyMetadata)
+		verify(loadingTile && loadingBusy && loadingLabel && loadingAction && loadingSave)
+		verify(errorTile && errorLabel && errorRetry && errorAction && errorSave)
+
+		tryCompare(viewport, "contentY", 0)
+		compare(gallery.Accessible.ignored, false)
+		compare(readyAction.Accessible.ignored, false)
+		compare(readySave.Accessible.ignored, false)
+		compare(readyName.Accessible.ignored, false)
+		compare(readyMetadata.Accessible.ignored, false)
+		compare(readyAction.activeFocusOnTab, true)
+		compare(readySave.activeFocusOnTab, true)
+		compare(loadingBusy.Accessible.ignored, true)
+		compare(loadingLabel.Accessible.ignored, true)
+		compare(loadingAction.Accessible.ignored, true)
+		compare(loadingSave.Accessible.ignored, true)
+		compare(errorLabel.Accessible.ignored, true)
+		compare(errorRetry.Accessible.ignored, true)
+		compare(errorAction.Accessible.ignored, true)
+		compare(errorSave.Accessible.ignored, true)
+
+		viewport.contentY = loadingTile.y
+		tryCompare(viewport, "contentY", loadingTile.y)
+		tryCompare(loadingBusy.Accessible, "ignored", false)
+		compare(loadingLabel.Accessible.ignored, false)
+		compare(loadingAction.Accessible.ignored, false)
+		compare(loadingSave.Accessible.ignored, false)
+		compare(loadingAction.activeFocusOnTab, true)
+		compare(readyAction.Accessible.ignored, true)
+		compare(readySave.Accessible.ignored, true)
+		compare(errorRetry.Accessible.ignored, true)
+
+		viewport.contentY = errorTile.y
+		tryCompare(viewport, "contentY", errorTile.y)
+		tryCompare(errorLabel.Accessible, "ignored", false)
+		compare(errorRetry.Accessible.ignored, false)
+		compare(errorAction.Accessible.ignored, false)
+		compare(errorSave.Accessible.ignored, false)
+		compare(errorRetry.activeFocusOnTab, true)
+		compare(loadingBusy.Accessible.ignored, true)
+
+		viewport.contentY = errorTile.y + 1
+		tryCompare(viewport, "contentY", errorTile.y + 1)
+		tryCompare(errorLabel.Accessible, "ignored", true)
+		compare(errorRetry.Accessible.ignored, true)
+		compare(errorAction.Accessible.ignored, true)
+		compare(errorSave.Accessible.ignored, true)
+		compare(errorRetry.activeFocusOnTab, false)
+
+		gallery.attachments = [{
+			"id": "ready-doc",
+			"assetId": "ready-asset",
+			"kind": "document",
+			"mime": "application/pdf",
+			"fileName": "ready.pdf"
+		}, {
+			"id": "loading-image",
+			"assetId": "loading-asset",
+			"kind": "image",
+			"state": "loading",
+			"width": 240,
+			"height": 160,
+			"alt": "Loading image"
+		}, {
+			"id": "replacement-error",
+			"assetId": "replacement-asset",
+			"kind": "image",
+			"state": "error",
+			"previewCanRetry": true,
+			"previewError": "Replacement failed",
+			"width": 240,
+			"height": 160,
+			"alt": "Replacement error"
+		}]
+		tryVerify(function() {
+			return findChild(gallery, "attachmentAction_error-image") === null
+				&& findChild(gallery, "attachmentAction_replacement-error") !== null
+		})
+		const replacementAction = findChild(gallery,
+			"attachmentAction_replacement-error")
+		compare(replacementAction.Accessible.name, "Replacement error")
+		compare(replacementAction.Accessible.ignored, true)
+
+		gallery.accessibilitySuppressed = true
+		tryCompare(gallery.Accessible, "ignored", true)
+		compare(replacementAction.Accessible.ignored, true)
+	}
 }

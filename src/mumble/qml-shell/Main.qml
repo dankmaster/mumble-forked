@@ -7,6 +7,7 @@ import Mumble.Theme 1.0
 ApplicationWindow {
 	id: root
 	onClosing: close => close.accepted = false
+	onFrameSwapped: timeline.observeScopePresentationFrame()
 	onActiveChanged: {
 		if (active)
 			timeline.markVisibleScopeReadIfEligible()
@@ -476,6 +477,27 @@ ApplicationWindow {
 		return []
 	}
 
+	function richPreviewPresentationIdentity(messageId, previewValue) {
+		const value = previewValue || ({})
+		const metadata = value.metadata || ({})
+		const mediaItems = value.mediaItems || []
+		const mediaItemCount = Number(mediaItems.length !== undefined
+			? mediaItems.length : (mediaItems.count || 0))
+		return [
+			String(messageId || ""),
+			String(value.url || value.sourceUrl || ""),
+			String(value.embedUrl || value.mediaUrl || ""),
+			String(value.state || ""),
+			String(value.failed === true ? "failed" : ""),
+			String(value.title || ""),
+			String(value.thumbnailUrl || value.posterUrl || ""),
+			String(metadata.provider || metadata.previewProvider || ""),
+			mediaItemCount,
+			String(value.revision || value.updatedAt || value.cacheKey
+				|| metadata.revision || "")
+		].join("|")
+	}
+
 	function estimatedMessageTextWidth(segments, replyActor, replySnippet) {
 		let longestLine = 0
 		for (const segment of normalizedModelList(segments)) {
@@ -550,11 +572,12 @@ ApplicationWindow {
 	}
 
 	function preferredOutgoingMessageWidth(segments, startsGroup, replyActor, replySnippet,
-			deliveryVisible) {
+			deliveryVisible, actionTextInset) {
 		// This only chooses a comfortable bubble width. RichMessageBody remains
 		// responsible for exact text measurement and wrapping.
 		const textEstimate = estimatedMessageTextWidth(segments, replyActor, replySnippet)
 			+ Theme.chatBubbleHorizontalPadding * 2
+			+ Math.max(0, Number(actionTextInset || 0))
 		const metadataFloor = deliveryVisible ? 300 : 176
 		return Math.max(metadataFloor, Math.min(Theme.chatPlainMaximumWidth, textEstimate))
 	}
@@ -906,17 +929,32 @@ ApplicationWindow {
         previewHydrationTimer.stop()
     }
 
-	function queuePreviewHydration(messageId, highPriority) {
+	function queuePreviewHydration(messageId, highPriority, ownerScopeToken, ownerGeneration) {
 		if (root.visualFixtureOverrideActive)
 			return false
 		const normalized = String(messageId === undefined || messageId === null ? "" : messageId).trim()
-        if (!/^[1-9][0-9]*$/.test(normalized) || String(activeScope.scopeToken || "").length === 0)
-            return false
+		const currentScopeToken = String(activeScope.scopeToken || "")
+		const currentGeneration = Number(timeline.scopePresentationGeneration || 0)
+		const requestedScopeToken = ownerScopeToken === undefined
+			? currentScopeToken : String(ownerScopeToken || "")
+		const requestedGeneration = ownerGeneration === undefined
+			? currentGeneration : Number(ownerGeneration || 0)
+		if (!/^[1-9][0-9]*$/.test(normalized) || currentScopeToken.length === 0
+				|| requestedScopeToken !== currentScopeToken
+				|| requestedGeneration !== currentGeneration)
+			return false
         // Keep protocol uint64 IDs as decimal strings. JavaScript numbers lose
         // precision above 2^53 and would hydrate a different message.
         if (normalized.length > 20)
             return false
-        pendingPreviewHydrationIds[normalized] = normalized
+		const key = requestedScopeToken + "|" + requestedGeneration + "|" + normalized
+		const previousEntry = pendingPreviewHydrationIds[key] || ({})
+		pendingPreviewHydrationIds[key] = {
+			"id": normalized,
+			"scopeToken": requestedScopeToken,
+			"generation": requestedGeneration,
+			"highPriority": previousEntry.highPriority === true || !!highPriority
+		}
         pendingPreviewHydrationHighPriority = pendingPreviewHydrationHighPriority || !!highPriority
         if (!previewHydrationTimer.running)
             previewHydrationTimer.start()
@@ -937,25 +975,33 @@ ApplicationWindow {
 			previewHydrationTimer.restart()
 			return
 		}
-        const keys = Object.keys(pendingPreviewHydrationIds)
+		const keys = Object.keys(pendingPreviewHydrationIds)
         if (keys.length === 0) {
 			coldPreviewHydrationPacingActive = false
             return
 		}
-        const batch = []
+		const batch = []
+		let highPriority = pendingPreviewHydrationHighPriority
+		const currentScopeToken = String(activeScope.scopeToken || "")
+		const currentGeneration = Number(timeline.scopePresentationGeneration || 0)
 		// Cold scope reveal is especially sensitive to several cached provider
 		// results instantiating rich trees in the same GUI turn. Admit one visible
 		// warm-up request per frame until the complete initial queue is drained;
 		// steady-state hydration keeps the wider throughput-oriented batch.
 		const maxBatch = coldPreviewHydrationPacingActive ? 1 : 32
-        for (let index = 0; index < keys.length && batch.length < maxBatch; ++index) {
-            const key = keys[index]
-            batch.push(pendingPreviewHydrationIds[key])
-            delete pendingPreviewHydrationIds[key]
-        }
-        const highPriority = pendingPreviewHydrationHighPriority
-        pendingPreviewHydrationHighPriority = false
-        uiCommands.requestPreviewHydration(String(activeScope.scopeToken || ""), batch, highPriority)
+		for (let index = 0; index < keys.length && batch.length < maxBatch; ++index) {
+			const key = keys[index]
+			const entry = pendingPreviewHydrationIds[key] || ({})
+			delete pendingPreviewHydrationIds[key]
+			if (String(entry.scopeToken || "") !== currentScopeToken
+					|| Number(entry.generation || 0) !== currentGeneration)
+				continue
+			batch.push(String(entry.id || ""))
+			highPriority = highPriority || entry.highPriority === true
+		}
+		pendingPreviewHydrationHighPriority = false
+		if (batch.length > 0)
+			uiCommands.requestPreviewHydration(currentScopeToken, batch, highPriority)
         if (Object.keys(pendingPreviewHydrationIds).length > 0)
             previewHydrationTimer.start()
 		else
@@ -1940,12 +1986,22 @@ ApplicationWindow {
 		const minimumY = timeline.originY
 		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
 		const firstVisible = timeline.firstVisibleMessageDelegate()
+		const visiblePresentation = timeline.visiblePresentationDiagnostics()
+		const visiblePresentationReady = timeline.visiblePresentationReady(
+			visiblePresentation) || (timeline.scopePresentationForcedByDeadline
+				&& timeline.visiblePresentationDeadlineReady(visiblePresentation))
+		const visibleFrameCommitted = timeline.scopePresentationStartedAt <= 0
+			|| timeline.scopePresentationVisibleFrameCommittedAt > 0
+		const visibleHeightSettled = timeline.scopePresentationForcedByDeadline
+			|| !timeline.visiblePresentationHeightConvergencePending()
 		return { "count": timeline.count, "contentHeight": timeline.contentHeight,
 			"viewportHeight": timeline.height, "originY": minimumY, "maximumY": maximumY,
 			"contentY": timeline.contentY,
 			"firstVisibleId": firstVisible ? String(firstVisible.stableId || "") : "",
 			"delegateDiagnostics": timelineDelegateDiagnostics(),
-			"settled": !bottomFollowTimer.running && !timeline.scopeResetPending
+			"settled": visibleFrameCommitted && visiblePresentationReady
+				&& visibleHeightSettled
+				&& !bottomFollowTimer.running && !timeline.scopeResetPending
 				&& !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 				&& !timeline.restoringBottom && !timeline.prependAnchorActive
 				&& !viewportMembershipTimer.running
@@ -2000,9 +2056,7 @@ ApplicationWindow {
 
 	function timelinePresentationState() {
 		try {
-			const minimumY = timeline.originY
-			const maximumY = Math.max(minimumY,
-				timeline.originY + timeline.contentHeight - timeline.height)
+			const maximumY = timeline.tailContentYTarget()
 			const firstVisible = timeline.firstVisibleMessageDelegate()
 			const visiblePresentation = timeline.visiblePresentationDiagnostics()
 			const pendingVisibleHydrationCount =
@@ -2011,7 +2065,56 @@ ApplicationWindow {
 				timeline.pendingVisibleRichRecoveryCount()
 			const completedAt = timeline.scopePresentationCompletedAt > 0
 				? timeline.scopePresentationCompletedAt : Date.now()
+			const dataReadyAt = timeline.scopePresentationDataReadyAt
+			const stableReadyAt = timeline.scopePresentationStableReadyAt
+			const stableFrameCommittedAt =
+				timeline.scopePresentationStableFrameCommittedAt
+			const visibleFrameCommittedAt =
+				timeline.scopePresentationVisibleFrameCommittedAt
 			const probeAnchor = timeline.historyLoadProbeAnchorState()
+			const timelineViewportOrigin = timeline.mapToItem(root.contentItem, 0, 0)
+			const roomHeaderOrigin = stonksRoomPanelLoader.mapToItem(
+				root.contentItem, 0, 0)
+			const composerOrigin = composerSurface.mapToItem(root.contentItem, 0, 0)
+			const jumpToLatestOrigin = jumpToLatestButton.mapToItem(
+				root.contentItem, 0, 0)
+			const aboveComposerTickerOrigin = aboveComposerStonksTickerLoader.mapToItem(
+				root.contentItem, 0, 0)
+			const currentTimelineHeader = timeline.headerItem
+			const historyLoader = currentTimelineHeader
+				? currentTimelineHeader.olderHistoryControl : null
+			const historyLoaderOrigin = historyLoader
+				? historyLoader.mapToItem(root.contentItem, 0, 0)
+				: ({ "x": 0, "y": 0 })
+			let visibleTailBottom = 0
+			for (let rowIndex = 0; rowIndex < visiblePresentation.rows.length; ++rowIndex) {
+				const row = visiblePresentation.rows[rowIndex] || ({})
+				visibleTailBottom = Math.max(visibleTailBottom,
+					Number(row.viewportY || 0) + Number(row.height || 0))
+			}
+			const expectedTailGap = timeline.footerItem
+				? Number(timeline.footerItem.height || 0) : 0
+			const visibleTailGap = visibleTailBottom > 0
+				? Math.max(0, timeline.height - visibleTailBottom) : 0
+			const sparseBottomAlignmentError = chatModel.count > 0
+				&& chatModel.count <= 10
+				? Math.abs(visibleTailBottom
+					- (timeline.height - expectedTailGap)) : 0
+			const sparseTailContentYError = timeline.sparseBottomAlignmentActive
+				? Math.abs(timeline.contentY - maximumY) : 0
+			const visiblePresentationComplete =
+				timeline.visiblePresentationReady(visiblePresentation)
+				|| (timeline.scopePresentationForcedByDeadline
+					&& timeline.visiblePresentationDeadlineReady(visiblePresentation))
+			const stablePresentationReady = stableReadyAt > 0
+				&& visibleFrameCommittedAt > 0
+				&& !timeline.scopePresentationPending
+				&& !timeline.scopePresentationFinalizing
+			const richHydrated = visibleFrameCommittedAt > 0
+				&& pendingVisibleHydrationCount === 0
+				&& pendingVisibleRichRecoveryCount === 0
+				&& visiblePresentation.paintedLoadingCount === 0
+				&& visiblePresentation.inactiveRichResourceCount === 0
 			return {
 				"scopeToken": String(activeScope.scopeToken || ""),
 				"scopeLabel": String(activeScope.label || ""),
@@ -2019,6 +2122,46 @@ ApplicationWindow {
 				"richPresentationCount": timeline.count,
 				"contentHeight": timeline.contentHeight,
 				"viewportHeight": timeline.height,
+				"viewportX": Number(timelineViewportOrigin.x || 0),
+				"viewportY": Number(timelineViewportOrigin.y || 0),
+				"viewportWidth": timeline.width,
+				"viewportBottom": Number(timelineViewportOrigin.y || 0)
+					+ Number(timeline.height || 0),
+				"roomHeaderHeight": stonksRoomPanelLoader.height,
+				"roomHeaderBottom": Number(roomHeaderOrigin.y || 0)
+					+ Number(stonksRoomPanelLoader.height || 0),
+				"composerHeight": composerSurface.height,
+				"composerTop": Number(composerOrigin.y || 0),
+				"jumpToLatestVisible": jumpToLatestButton.visible,
+				"jumpToLatestTop": Number(jumpToLatestOrigin.y || 0),
+				"jumpToLatestHeight": jumpToLatestButton.height,
+				"jumpToLatestBottom": Number(jumpToLatestOrigin.y || 0)
+					+ Number(jumpToLatestButton.height || 0),
+				"jumpToLatestTopMargin": jumpToLatestButton.timelineTopMargin,
+				"jumpToLatestBottomMargin": jumpToLatestButton.timelineBottomMargin,
+				"aboveComposerTickerVisible": aboveComposerStonksTickerLoader.height > 1,
+				"aboveComposerTickerTop": Number(aboveComposerTickerOrigin.y || 0),
+				"aboveComposerTickerHeight": aboveComposerStonksTickerLoader.height,
+				"aboveComposerTickerBottom": Number(aboveComposerTickerOrigin.y || 0)
+					+ Number(aboveComposerStonksTickerLoader.height || 0),
+				"historyLoaderVisible": !!historyLoader && historyLoader.visible,
+				"historyLoaderTop": Number(historyLoaderOrigin.y || 0),
+				"historyLoaderHeight": historyLoader ? historyLoader.height : 0,
+				"historyLoaderBottom": Number(historyLoaderOrigin.y || 0)
+					+ Number(historyLoader ? historyLoader.height : 0),
+				"timelineHeaderHeight": currentTimelineHeader
+					? currentTimelineHeader.height : 0,
+				"baseTopMargin": timeline.baseTopMargin,
+				"topMargin": timeline.topMargin,
+				"footerHeight": expectedTailGap,
+				"sparseBottomAlignmentActive":
+					timeline.sparseBottomAlignmentActive,
+				"visibleTailBottom": visibleTailBottom,
+				"visibleTailGap": visibleTailGap,
+				"sparseBottomAlignmentError": sparseBottomAlignmentError,
+				"sparseTailContentYTarget": maximumY,
+				"sparseTailContentYError": sparseTailContentYError,
+				"emptyConversationVisible": emptyConversationState.visible,
 				"originY": timeline.originY,
 				"contentY": timeline.contentY,
 				"maximumY": maximumY,
@@ -2041,8 +2184,72 @@ ApplicationWindow {
 				"presentationFinalizing": timeline.scopePresentationFinalizing,
 				"scopeResetPending": timeline.scopeResetPending,
 				"presentationFastPath": timeline.scopePresentationFastPath,
+				"presentationContentVisible":
+					timeline.scopePresentationContentVisible,
+				"fastPathAttemptCount":
+					timeline.scopePresentationFastPathAttemptCount,
+				"firstFastPathBlocker":
+					timeline.scopePresentationFirstFastPathBlocker,
+				"lastFastPathBlocker":
+					timeline.scopePresentationLastFastPathBlocker,
 				"observationActive": timeline.scopePresentationObservationActive,
 				"forcedByDeadline": timeline.scopePresentationForcedByDeadline,
+				"dataReady": dataReadyAt > 0,
+				"stablePresentationReady": stablePresentationReady,
+				"stableFrameCommitted": stableFrameCommittedAt > 0,
+				"visibleFrameCommitted": visibleFrameCommittedAt > 0,
+				"stableFrameConsecutiveCount":
+					timeline.scopePresentationStableFrameCount,
+				"richHydrated": richHydrated,
+				"dataReadyAt": dataReadyAt,
+				"stableReadyAt": stableReadyAt,
+				"stableFrameCommittedAt": stableFrameCommittedAt,
+				"visibleFrameCommittedAt": visibleFrameCommittedAt,
+				"dataReadyDurationMs": timeline.scopePresentationStartedAt > 0
+					&& dataReadyAt > 0
+					? Math.max(0, dataReadyAt - timeline.scopePresentationStartedAt) : 0,
+				"stableReadyDurationMs": timeline.scopePresentationStartedAt > 0
+					&& stableReadyAt > 0
+					? Math.max(0, stableReadyAt - timeline.scopePresentationStartedAt) : 0,
+				"stableFrameDurationMs": timeline.scopePresentationStartedAt > 0
+					&& stableFrameCommittedAt > 0
+					? Math.max(0, stableFrameCommittedAt
+						- timeline.scopePresentationStartedAt) : 0,
+				"visibleFrameDurationMs": timeline.scopePresentationStartedAt > 0
+					&& visibleFrameCommittedAt > 0
+					? Math.max(0, visibleFrameCommittedAt
+						- timeline.scopePresentationStartedAt) : 0,
+				"outerLoaderLoadedCount":
+					timeline.scopePresentationOuterLoaderLoadedCount,
+				"firstOuterLoaderLoadedDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationFirstOuterLoaderLoadedAt),
+				"lastOuterLoaderLoadedDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationLastOuterLoaderLoadedAt),
+				"plainRowAdmissionCount":
+					timeline.scopePresentationPlainRowAdmissionCount,
+				"firstPlainRowAdmissionDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationFirstPlainRowAdmissionAt),
+				"lastPlainRowAdmissionDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationLastPlainRowAdmissionAt),
+				"rowLoaderLoadedCount":
+					timeline.scopePresentationRowLoaderLoadedCount,
+				"firstRowLoaderLoadedDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationFirstRowLoaderLoadedAt),
+				"lastRowLoaderLoadedDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationLastRowLoaderLoadedAt),
+				"heightCommitCount": timeline.scopePresentationHeightCommitCount,
+				"firstHeightCommitDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationFirstHeightCommitAt),
+				"lastHeightCommitDurationMs":
+					timeline.scopePresentationPhaseDuration(
+						timeline.scopePresentationLastHeightCommitAt),
 				"generation": timeline.scopePresentationGeneration,
 				"mutationCount": timeline.scopePresentationMutationCount,
 				"tailCorrectionCount": timeline.scopePresentationTailCorrectionCount,
@@ -2118,6 +2325,16 @@ ApplicationWindow {
 					timeline.deferredMaterializationQueue.length,
 				"deferredMaterializationActiveId":
 					timeline.deferredMaterializationActiveId,
+				"deferredMaterializationActiveGeneration":
+					timeline.deferredMaterializationActiveGeneration,
+				"plainDeferredMaterializationActiveCount":
+					timeline.plainDeferredMaterializationActiveCount(),
+				"plainDeferredMaterializationActiveIds": Object.keys(
+					timeline.plainDeferredMaterializationActive).sort(),
+				"plainDeferredSourceAdmissionCount":
+					timeline.plainDeferredSourceAdmissionCount,
+				"serializedDeferredSourceAdmissionCount":
+					timeline.serializedDeferredSourceAdmissionCount,
 				"deferredMaterializationRunning": deferredMaterializationTimer.running,
 				"coldMaterializationDelayRunning":
 					coldScopeMaterializationDelayTimer.running,
@@ -2132,6 +2349,8 @@ ApplicationWindow {
 				"visiblePresentationCount": visiblePresentation.visibleCount,
 				"visibleReadyPresentationCount": visiblePresentation.readyCount,
 				"visibleFullMessageCount": visiblePresentation.fullMessageCount,
+				"visibleDeadlineFallbackCount":
+					visiblePresentation.deadlineFallbackCount,
 				"visibleDeferredSummaryCount": visiblePresentation.deferredSummaryCount,
 				"visibleBlankPresentationCount": visiblePresentation.blankCount,
 				"visibleOuterLoaderReadyCount": visiblePresentation.outerLoaderReadyCount,
@@ -2150,6 +2369,8 @@ ApplicationWindow {
 					visiblePresentation.paintedLoadingCount,
 				"visiblePaintedTerminalCount":
 					visiblePresentation.paintedTerminalCount,
+				"visibleDuplicateHandoffSummaryCount":
+					visiblePresentation.duplicateHandoffSummaryCount,
 				"stationaryThumbWarmPressEpoch": stationaryThumbWarmGate.pressEpoch,
 				"stationaryThumbWarmDwellGeneration":
 					stationaryThumbWarmGate.dwellGeneration,
@@ -2180,7 +2401,9 @@ ApplicationWindow {
 				// stable visible-row geometry independently.
 				// Observation only records late exposed corrections. It must not
 				// make an already visible and interactive scope report unready.
-				"settled": !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
+				"settled": visibleFrameCommittedAt > 0
+					&& visiblePresentationComplete
+					&& !timeline.scopePresentationPending && !timeline.scopePresentationFinalizing
 					&& !timeline.scopeResetPending && !bottomFollowTimer.running
 					&& !timeline.restoringBottom && !timeline.prependAnchorActive
 					&& !timeline.viewportAnchorReleasePending
@@ -2194,19 +2417,9 @@ ApplicationWindow {
 					&& !timeline.viewportMembershipUpdatePending
 					&& !chatModel.appendPending && !chatModel.prependPending
 					&& timeline.stationaryThumbWarmPinCount === 0
-					&& (chatModel.count === 0
-						|| (visiblePresentation.visibleCount > 0
-							&& visiblePresentation.fullMessageCount
-								=== visiblePresentation.visibleCount
-							&& visiblePresentation.paintedCompleteCount
-								=== visiblePresentation.visibleCount
-							&& visiblePresentation.paintedLoadingCount === 0
-							&& visiblePresentation.deferredSummaryCount === 0
-							&& visiblePresentation.blankCount === 0
-							&& visiblePresentation.inactiveRichResourceCount === 0
-							&& visiblePresentation.presentationHeightPendingCount === 0
-							&& pendingVisibleHydrationCount === 0
-							&& pendingVisibleRichRecoveryCount === 0))
+					&& (timeline.scopePresentationForcedByDeadline
+						|| (visiblePresentation.presentationHeightPendingCount === 0
+							&& visiblePresentation.presentationHeightMismatchCount === 0))
 			}
 		} catch (error) {
 			return { "error": String(error), "settled": false }
@@ -3397,7 +3610,17 @@ ApplicationWindow {
 					spacing: 0
 					leftMargin: root.timelineHorizontalMargin
 					rightMargin: root.timelineHorizontalMargin
-					topMargin: activeScope.activity ? Theme.space1 : root.timelineVerticalMargin
+					readonly property real baseTopMargin: activeScope.activity
+						? Theme.space1 : root.timelineVerticalMargin
+					readonly property bool sparseBottomAlignmentActive:
+						!activeScope.activity && count > 0 && count <= 10
+						&& contentHeight + baseTopMargin < height - 0.5
+					// Flickable margins stay outside contentHeight. Use that independent
+					// space to place an underfilled conversation against its inline footer,
+					// which keeps the newest sparse row directly above the composer without
+					// inventing a model row or changing scrollbar/content-height geometry.
+					topMargin: sparseBottomAlignmentActive
+						? Math.max(baseTopMargin, height - contentHeight) : baseTopMargin
 					reuseItems: true
 					boundsBehavior: Flickable.StopAtBounds
 					ScrollBar.vertical: ModernScrollBar {
@@ -3523,6 +3746,12 @@ ApplicationWindow {
 						}
 					}
 					Timer {
+						id: stationaryThumbWarmReceiptTimer
+						interval: 0
+						repeat: false
+						onTriggered: timeline.drainStationaryThumbWarmReceipts()
+					}
+					Timer {
 						id: stationaryThumbWarmReconcileTimer
 						interval: 16
 						repeat: false
@@ -3569,6 +3798,9 @@ ApplicationWindow {
 					// delegate reuse or preview-identity update cannot transfer or discard
 					// the selected viewport reservation.
 					property var stationaryThumbWarmPins: ({})
+					property int stationaryThumbWarmPinSerial: 0
+					property int stationaryThumbWarmReceiptEpoch: 0
+					property var stationaryThumbWarmReceipts: []
 					readonly property int stationaryThumbWarmPinCount:
 						Object.keys(stationaryThumbWarmPins).length
 					readonly property int stationaryThumbWarmCurrentDwellPinCount: {
@@ -3587,6 +3819,99 @@ ApplicationWindow {
 					}
 					function stationaryThumbWarmPin(stableId) {
 						return stationaryThumbWarmPins[String(stableId || "")] || null
+					}
+					function stationaryThumbWarmPinMatchesCurrentScope(pin, stableId) {
+						return !!pin && String(pin.id || "") === String(stableId || "")
+							&& String(pin.scopeToken || "")
+								=== String(activeScope.scopeToken || "")
+							&& Number(pin.scopeGeneration)
+								=== Number(scopePresentationGeneration)
+					}
+					function stationaryThumbWarmPinMatchesReceipt(pin, receipt) {
+						return stationaryThumbWarmPinMatchesCurrentScope(pin, receipt.stableId)
+							&& String(pin.scopeToken || "")
+								=== String(receipt.scopeToken || "")
+							&& Number(pin.scopeGeneration)
+								=== Number(receipt.scopeGeneration)
+							&& Number(pin.pressEpoch) === Number(receipt.pressEpoch)
+							&& Number(pin.dwellGeneration)
+								=== Number(receipt.dwellGeneration)
+							&& Number(pin.serial) === Number(receipt.pinSerial)
+					}
+					function invalidateStationaryThumbWarmReceipts() {
+						++stationaryThumbWarmReceiptEpoch
+						stationaryThumbWarmReceipts = []
+						stationaryThumbWarmReceiptTimer.stop()
+					}
+					function queueStationaryThumbWarmReceipt(stableId, scopeToken,
+							scopeGeneration, pressEpoch, dwellGeneration, pinSerial,
+							outcome, rowVisible, outerHeight, probeHeight) {
+						const completion = String(outcome || "")
+						const pin = stationaryThumbWarmPin(stableId)
+						const receipt = {
+							"receiptEpoch": stationaryThumbWarmReceiptEpoch,
+							"stableId": String(stableId || ""),
+							"scopeToken": String(scopeToken || ""),
+							"scopeGeneration": Number(scopeGeneration),
+							"pressEpoch": Number(pressEpoch),
+							"dwellGeneration": Number(dwellGeneration),
+							"pinSerial": Number(pinSerial),
+							"outcome": completion,
+							"rowVisible": rowVisible === true,
+							"outerHeight": Number(outerHeight || 0),
+							"probeHeight": Number(probeHeight || 0)
+						}
+						if ((completion !== "painted" && completion !== "terminal")
+								|| !stationaryThumbWarmPinMatchesReceipt(pin, receipt))
+							return false
+						const nextReceipts = stationaryThumbWarmReceipts.slice()
+						for (let index = 0; index < nextReceipts.length; ++index) {
+							const queued = nextReceipts[index]
+							if (Number(queued.pinSerial) === receipt.pinSerial
+									&& String(queued.outcome) === completion)
+								return true
+						}
+						nextReceipts.push(receipt)
+						stationaryThumbWarmReceipts = nextReceipts
+						stationaryThumbWarmReceiptTimer.restart()
+						return true
+					}
+					function drainStationaryThumbWarmReceipts() {
+						const receipts = stationaryThumbWarmReceipts
+						stationaryThumbWarmReceipts = []
+						for (let index = 0; index < receipts.length; ++index) {
+							const receipt = receipts[index]
+							if (Number(receipt.receiptEpoch)
+									!== Number(stationaryThumbWarmReceiptEpoch))
+								continue
+							const pin = stationaryThumbWarmPin(receipt.stableId)
+							if (!stationaryThumbWarmPinMatchesReceipt(pin, receipt))
+								continue
+							const owns = stationaryThumbWarmGate.owns(receipt.stableId,
+								Number(receipt.pressEpoch), Number(receipt.dwellGeneration))
+							const retains = stationaryThumbWarmGate.retains(receipt.stableId,
+								Number(receipt.pressEpoch), Number(receipt.dwellGeneration))
+							if (receipt.outcome === "painted") {
+								if (owns)
+									stationaryThumbWarmGate.finishAdmission(receipt.stableId,
+										Number(receipt.pressEpoch),
+										Number(receipt.dwellGeneration), "painted")
+								continue
+							}
+							if (owns)
+								stationaryThumbWarmGate.finishAdmission(receipt.stableId,
+									Number(receipt.pressEpoch),
+									Number(receipt.dwellGeneration), "terminal")
+							else if (retains)
+								stationaryThumbWarmGate.retireAdmission(receipt.stableId,
+									Number(receipt.pressEpoch),
+									Number(receipt.dwellGeneration), "terminal")
+							if (!receipt.rowVisible)
+								clearEqualStationaryThumbWarmTerminal(receipt.stableId,
+									receipt.outerHeight, receipt.probeHeight, false, true)
+						}
+						if (stationaryThumbWarmReceipts.length > 0)
+							stationaryThumbWarmReceiptTimer.restart()
 					}
 					function stationaryThumbDelegateActuallyVisible(item) {
 						if (!item || item.performanceTimelineDelegate !== true
@@ -3641,8 +3966,12 @@ ApplicationWindow {
 						const existing = stationaryThumbWarmPin(key)
 						const deferred = item.lightweightDeferredPresentation === true
 						const nextPins = Object.assign({}, stationaryThumbWarmPins)
+						const serial = ++stationaryThumbWarmPinSerial
 						nextPins[key] = {
 							"id": key,
+							"scopeToken": String(activeScope.scopeToken || ""),
+							"scopeGeneration": Number(scopePresentationGeneration),
+							"serial": serial,
 							"outerHeight": existing
 								? Number(existing.outerHeight || item.height)
 								: Number(item.height || deferredMessageRowHeight),
@@ -3651,13 +3980,7 @@ ApplicationWindow {
 								: Number(item.viewportProbeHeight || item.height
 									|| deferredMessageRowHeight),
 							"pressEpoch": Number(pressEpoch),
-							"dwellGeneration": Number(dwellGeneration),
-							"materializationPending": deferred,
-							"materializationRevalidated": !deferred,
-							"paintedSummary": false,
-							"paintedSurface": false,
-							"loading": true,
-							"terminal": false
+							"dwellGeneration": Number(dwellGeneration)
 						}
 						stationaryThumbWarmPins = nextPins
 						if (deferred && chatModel.materializeDeferredMessage(key)) {
@@ -3681,42 +4004,14 @@ ApplicationWindow {
 						const key = String(stableId || "")
 						const pin = stationaryThumbWarmPin(key)
 						const item = timelineDelegateForStableId(key)
-						if (!pin || Number(pin.pressEpoch) !== Number(pressEpoch)
+						if (!stationaryThumbWarmPinMatchesCurrentScope(pin, key)
+								|| Number(pin.pressEpoch) !== Number(pressEpoch)
 								|| Number(pin.dwellGeneration) !== Number(dwellGeneration)
 								|| !stationaryThumbDelegateActuallyVisible(item)
 								|| item.lightweightDeferredPresentation === true
 								|| item.stationaryThumbWarmEligible !== true)
 							return false
-						const nextPins = Object.assign({}, stationaryThumbWarmPins)
-						nextPins[key] = Object.assign({}, pin, {
-							"materializationPending": false,
-							"materializationRevalidated": true
-						})
-						stationaryThumbWarmPins = nextPins
 						return true
-					}
-					function updateStationaryThumbWarmPin(stableId, paintedSummary,
-							paintedSurface, loading, terminal) {
-						const key = String(stableId || "")
-						const pin = stationaryThumbWarmPin(key)
-						if (!pin)
-							return false
-						const nextPins = Object.assign({}, stationaryThumbWarmPins)
-						nextPins[key] = Object.assign({}, pin, {
-							"paintedSummary": paintedSummary === true,
-							"paintedSurface": paintedSurface === true,
-							"loading": loading === true,
-							"terminal": terminal === true
-						})
-						stationaryThumbWarmPins = nextPins
-						return true
-					}
-					function finishStationaryThumbWarm(stableId, outcome) {
-						const pin = stationaryThumbWarmPin(stableId)
-						if (!pin)
-							return false
-						return stationaryThumbWarmGate.finishAdmission(stableId,
-							Number(pin.pressEpoch), Number(pin.dwellGeneration), outcome)
 					}
 					function clearStationaryThumbWarmPin(stableId) {
 						const key = String(stableId || "")
@@ -3727,7 +4022,18 @@ ApplicationWindow {
 						stationaryThumbWarmPins = nextPins
 						return true
 					}
-					function clearStationaryThumbWarmPins() {
+					function retireStationaryThumbWarmPin(stableId, reason) {
+						const pin = stationaryThumbWarmPin(stableId)
+						if (!pin)
+							return false
+						stationaryThumbWarmGate.retireAdmission(stableId,
+							Number(pin.pressEpoch), Number(pin.dwellGeneration), reason)
+						return clearStationaryThumbWarmPin(stableId)
+					}
+					function clearStationaryThumbWarmPins(reason) {
+						invalidateStationaryThumbWarmReceipts()
+						stationaryThumbWarmGate.invalidateIdentity(
+							String(reason || "pins-cleared"))
 						stationaryThumbWarmPins = ({})
 					}
 					function clearStationaryThumbWarmPinForCommit(stableId,
@@ -3880,6 +4186,11 @@ ApplicationWindow {
 							rearmStationaryThumbWarmReconcile()
 					}
 					property var richLoaderResumeQueue: []
+					// Plain visible rows do not own provider/image resources. Admit the
+					// same bounded two-row cohort as the model's cold append drain while
+					// the replacement scope is still hidden, without claiming the
+					// serialized rich-content token.
+					readonly property int plainScopeResumeAdmissionsPerFrame: 2
 					// Asynchronous Loader incubation can span several polish turns. Do
 					// not activate another complete message tree until the previous one
 					// reports Ready (or Error), otherwise their final polish work can
@@ -3941,7 +4252,7 @@ ApplicationWindow {
 							richLoaderResumeActiveId = ""
 							deferredMaterializationTimer.stop()
 							deferredMaterializationQueue = []
-							deferredMaterializationActiveId = ""
+							clearDeferredMaterializationOwnership()
 							suspendRichContentForScroll()
 							return
 						}
@@ -3965,17 +4276,22 @@ ApplicationWindow {
 					property int prependAnchorCorrectionFrames: 0
 					property var deferredPrependRichIds: ({})
 					property var deferredMaterializationQueue: []
-					// Source promotion and asynchronous row construction are one
-					// transaction. Do not admit another fixed-height summary until the
-					// previous rich row owns its final visible geometry.
+					// Rich source promotion and asynchronous row construction are one
+					// singleton transaction. Proven plain rows use a separate bounded
+					// cohort whose complete identity set is published before mutation.
 					property string deferredMaterializationActiveId: ""
+					property int deferredMaterializationActiveGeneration: -1
+					property var plainDeferredMaterializationActive: ({})
+					readonly property int plainDeferredMaterializationsPerFrame: 2
+					property int plainDeferredSourceAdmissionCount: 0
+					property int serializedDeferredSourceAdmissionCount: 0
 					readonly property real deferredMessageRowHeight: 58
 					// The queued tail itself is the supersede window: no full row is
 					// admitted until the final append has completed. Yield one event turn
 					// here, but do not add a fixed delay to every cold room entry.
 					readonly property int coldScopeMaterializationDelayMs: 0
-					// Cold finalization admits one source row at a time so provider trees
-					// cannot converge into a startup hitch. After a real scroll, admit the
+					// Cold finalization keeps rich and unknown rows one-at-a-time so
+					// provider trees cannot converge into a startup hitch. After a real scroll, admit the
 					// two rows that can straddle the viewport together: their outer Loaders
 					// incubate asynchronously and the measured frame budget has ample
 					// headroom, while serial admission otherwise leaves a visible handoff
@@ -4023,25 +4339,53 @@ ApplicationWindow {
 					property bool scopeResetPending: false
 					property bool viewportMembershipUpdatePending: false
 					onScopeResetPendingChanged: scheduleViewportMembershipUpdate()
-					// Rich text, preview cards, and attachments refine delegate heights after
-					// a scope arrives. Hide the retiring scope only until the replacement
-					// snapshot reaches finalization, then expose its real-data summaries while
-					// the heavier rows finish inside their reserved geometry.
+					// A replacement remains private until its real visible rows own stable,
+					// measured geometry. Finalization is construction, not presentation.
 					property bool scopePresentationPending: false
 					property bool scopePresentationFinalizing: false
+					property bool scopePresentationFrameCommitPending: false
 					readonly property bool scopePresentationContentVisible:
-						!scopePresentationPending || scopePresentationFinalizing
+						scopePresentationStartedAt <= 0
+							|| scopePresentationStableFrameCommittedAt > 0
 					property bool scopePresentationFastPath: false
+					property int scopePresentationFastPathAttemptCount: 0
+					property string scopePresentationFirstFastPathBlocker: ""
+					property string scopePresentationLastFastPathBlocker: ""
 					property bool scopePresentationObservationActive: false
 					property bool scopePresentationForcedByDeadline: false
 					property int scopePresentationGeneration: 0
 					property int scopePresentationMutationCount: 0
+					property int scopePresentationTailContainedMutationCount: -1
 					property int scopePresentationTailCorrectionCount: 0
 					property int scopePresentationExposedHeightChangeCount: 0
 					property int scopePresentationExposedTailCorrectionCount: 0
 					property real scopePresentationExposedTailTravel: 0
 					property double scopePresentationStartedAt: 0
+					property double scopePresentationDeadlineAt: 0
+					property double scopePresentationDataReadyAt: 0
+					property double scopePresentationStableReadyAt: 0
+					property double scopePresentationStableFrameCommittedAt: 0
+					property double scopePresentationVisibleFrameCommittedAt: 0
 					property double scopePresentationCompletedAt: 0
+					property int scopePresentationOuterLoaderLoadedCount: 0
+					property double scopePresentationFirstOuterLoaderLoadedAt: 0
+					property double scopePresentationLastOuterLoaderLoadedAt: 0
+					property int scopePresentationPlainRowAdmissionCount: 0
+					property double scopePresentationFirstPlainRowAdmissionAt: 0
+					property double scopePresentationLastPlainRowAdmissionAt: 0
+					property int scopePresentationRowLoaderLoadedCount: 0
+					property double scopePresentationFirstRowLoaderLoadedAt: 0
+					property double scopePresentationLastRowLoaderLoadedAt: 0
+					property int scopePresentationHeightCommitCount: 0
+					property double scopePresentationFirstHeightCommitAt: 0
+					property double scopePresentationLastHeightCommitAt: 0
+					property int scopePresentationStableFrameCount: 0
+					property string scopePresentationStableFrameFirstVisibleId: ""
+					property real scopePresentationStableFrameFirstVisibleOffset: 0
+					property real scopePresentationStableFrameContentY: 0
+					property real scopePresentationStableFrameContentHeight: 0
+					property real scopePresentationStableFrameViewportHeight: 0
+					property real scopePresentationStableFrameTopMargin: 0
 					property real bottomFollowThreshold: 48
 					onStickToBottomChanged: {
 						if (stickToBottom)
@@ -4051,15 +4395,24 @@ ApplicationWindow {
 					function isNearBottom() {
 						if (count === 0 || atYEnd)
 							return true
-						const maximumY = Math.max(originY, originY + contentHeight - height)
+						const maximumY = tailContentYTarget()
 						return maximumY - contentY <= bottomFollowThreshold
 					}
 
 					function isAtBottom() {
 						if (count === 0 || atYEnd)
 							return true
-						const maximumY = Math.max(originY, originY + contentHeight - height)
+						const maximumY = tailContentYTarget()
 						return maximumY - contentY <= 0.5
+					}
+
+					function tailContentYTarget() {
+						const naturalTailY = originY + contentHeight - height
+						// ListView margins extend the legal Flickable bounds but do not
+						// translate delegates. An underfilled sparse scope therefore owns
+						// the negative margin-backed tail coordinate explicitly.
+						return sparseBottomAlignmentActive
+							? naturalTailY : Math.max(originY, naturalTailY)
 					}
 
 					function markVisibleScopeReadIfEligible() {
@@ -4130,8 +4483,7 @@ ApplicationWindow {
 						if (stickToBottom && !prependAnchorActive && !restoringBottom
 								&& !scopePresentationPending && !bottomFollowTimer.running
 								&& !root.performanceChatScrollRunning) {
-							const maximumY = Math.max(originY,
-								originY + contentHeight - height)
+							const maximumY = tailContentYTarget()
 							// Metadata-only preview updates emit dataChanged as their cache
 							// state advances. If geometry is already exactly at the tail,
 							// starting a 16 ms correction timer only makes the otherwise
@@ -4151,7 +4503,7 @@ ApplicationWindow {
 						// Publish the scope owner before cancelFlick(): Qt may synchronously
 						// emit movementEnded while retiring a native precision-wheel flick.
 						scopePresentationPending = true
-						clearStationaryThumbWarmPins()
+						clearStationaryThumbWarmPins("scope-change")
 						timelineScrollHandler.cancelNavigationForOwnershipLoss()
 						richScrollRetentionRampTimer.stop()
 						viewportMembershipTimer.stop()
@@ -4203,7 +4555,9 @@ ApplicationWindow {
 						richLoaderResumeActiveId = ""
 						deferredMaterializationTimer.stop()
 						deferredMaterializationQueue = []
-						deferredMaterializationActiveId = ""
+						clearDeferredMaterializationOwnership()
+						plainDeferredSourceAdmissionCount = 0
+						serializedDeferredSourceAdmissionCount = 0
 						coldScopeMaterializationDelayTimer.restart()
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
@@ -4217,13 +4571,44 @@ ApplicationWindow {
 						scopePresentationFastPath = false
 						scopePresentationObservationActive = false
 						scopePresentationForcedByDeadline = false
+						scopePresentationFastPathAttemptCount = 0
+						scopePresentationFirstFastPathBlocker = ""
+						scopePresentationLastFastPathBlocker = ""
 						scopePresentationMutationCount = 0
+						scopePresentationTailContainedMutationCount = -1
 						scopePresentationTailCorrectionCount = 0
 						scopePresentationExposedHeightChangeCount = 0
 						scopePresentationExposedTailCorrectionCount = 0
 						scopePresentationExposedTailTravel = 0
 						scopePresentationStartedAt = Date.now()
+						scopePresentationDeadlineAt = scopePresentationStartedAt
+							+ scopePresentationDeadlineTimer.defaultInterval
+						scopePresentationDataReadyAt = 0
+						scopePresentationStableReadyAt = 0
+						scopePresentationStableFrameCommittedAt = 0
+						scopePresentationVisibleFrameCommittedAt = 0
 						scopePresentationCompletedAt = 0
+						scopePresentationOuterLoaderLoadedCount = 0
+						scopePresentationFirstOuterLoaderLoadedAt = 0
+						scopePresentationLastOuterLoaderLoadedAt = 0
+						scopePresentationPlainRowAdmissionCount = 0
+						scopePresentationFirstPlainRowAdmissionAt = 0
+						scopePresentationLastPlainRowAdmissionAt = 0
+						scopePresentationRowLoaderLoadedCount = 0
+						scopePresentationFirstRowLoaderLoadedAt = 0
+						scopePresentationLastRowLoaderLoadedAt = 0
+						scopePresentationHeightCommitCount = 0
+						scopePresentationFirstHeightCommitAt = 0
+						scopePresentationLastHeightCommitAt = 0
+						scopePresentationFrameCommitPending = false
+						scopePresentationStableFrameCount = 0
+						scopePresentationStableFrameFirstVisibleId = ""
+						scopePresentationStableFrameFirstVisibleOffset = 0
+						scopePresentationStableFrameContentY = 0
+						scopePresentationStableFrameContentHeight = 0
+						scopePresentationStableFrameViewportHeight = 0
+						scopePresentationStableFrameTopMargin = 0
+						root.clearPreviewHydrationQueue()
 						explicitWheelInputPending = false
 						++explicitWheelInputGeneration
 						explicitWheelInputStartY = contentY
@@ -4239,8 +4624,166 @@ ApplicationWindow {
 						scopeResetPending = true
 						scheduleViewportMembershipUpdate()
 						scopePresentationQuietTimer.start()
-						scopePresentationDeadlineTimer.start()
+						armScopePresentationDeadline()
 						scheduleScopePresentationFastPath()
+					}
+
+					function noteScopePresentationDataReady() {
+						if (!scopePresentationPending || activeScope.loading
+								|| chatModel.appendPending || chatModel.prependPending)
+							return false
+						if (scopePresentationDataReadyAt <= 0)
+							scopePresentationDataReadyAt = Date.now()
+						return true
+					}
+
+					function scopePresentationDeadlineExpired() {
+						return scopePresentationDeadlineAt > 0
+							&& Date.now() >= scopePresentationDeadlineAt
+					}
+
+					function armScopePresentationDeadline() {
+						const remaining = scopePresentationDeadlineAt - Date.now()
+						if (scopePresentationDeadlineAt <= 0 || remaining <= 0) {
+							scopePresentationDeadlineTimer.stop()
+							scopePresentationForcedByDeadline = true
+							return false
+						}
+						scopePresentationDeadlineTimer.interval = Math.max(1,
+							Math.ceil(remaining))
+						scopePresentationDeadlineTimer.restart()
+						return true
+					}
+
+					function armScopePresentationStableFrameCommit() {
+						scopePresentationStableReadyAt = Date.now()
+						scopePresentationStableFrameCommittedAt = 0
+						scopePresentationVisibleFrameCommittedAt = 0
+						scopePresentationFrameCommitPending = true
+						scopePresentationStableFrameCount = 0
+						scopePresentationStableFrameFirstVisibleId = ""
+						scopePresentationStableFrameFirstVisibleOffset = 0
+						scopePresentationStableFrameContentY = contentY
+						scopePresentationStableFrameContentHeight = contentHeight
+						scopePresentationStableFrameViewportHeight = height
+						scopePresentationStableFrameTopMargin = topMargin
+						root.update()
+					}
+
+					function completeScopePresentationVisibleFrameCommit() {
+						if (!scopePresentationPending || !scopePresentationFrameCommitPending
+								|| scopePresentationStableFrameCommittedAt <= 0)
+							return
+						const generation = scopePresentationGeneration
+						scopePresentationVisibleFrameCommittedAt = Date.now()
+						scopePresentationCompletedAt = scopePresentationVisibleFrameCommittedAt
+						scopePresentationFrameCommitPending = false
+						scopePresentationPending = false
+						scopePresentationFinalizing = false
+						scopePresentationObservationActive = count > 0
+						if (scopePresentationObservationActive)
+							scopePresentationObservationTimer.restart()
+						chatModel.presentationBusy = false
+						root.coldPreviewHydrationPacingActive = true
+						scheduleRichContentResume()
+						Qt.callLater(function() {
+							if (generation === timeline.scopePresentationGeneration)
+								timeline.queueVisiblePreviewHydration()
+						})
+						markVisibleScopeReadIfEligible()
+					}
+
+					function recoverScopePresentationFrameRegression() {
+						if (!scopePresentationPending || !scopePresentationFrameCommitPending)
+							return false
+						// Finalization proved a complete hidden frame, but readiness or geometry
+						// changed before the visible-frame transaction could commit. Retire that
+						// snapshot as one cohort so the next frame cannot inherit stale evidence.
+						scopePresentationFrameCommitPending = false
+						scopePresentationStableReadyAt = 0
+						scopePresentationStableFrameCommittedAt = 0
+						scopePresentationVisibleFrameCommittedAt = 0
+						scopePresentationStableFrameCount = 0
+						scopePresentationStableFrameFirstVisibleId = ""
+						scopePresentationStableFrameFirstVisibleOffset = 0
+						scopePresentationForcedByDeadline = scopePresentationForcedByDeadline
+							|| scopePresentationDeadlineExpired()
+						if (scopePresentationForcedByDeadline) {
+							// The absolute scope deadline has already elapsed. Re-enter bounded
+							// fallback finalization immediately; a readiness-only regression need
+							// not emit another model/content-height mutation that could wake us.
+							scopePresentationQuietTimer.stop()
+							scopePresentationDeadlineTimer.stop()
+							finishScopePresentation(true)
+						} else {
+							scopePresentationQuietTimer.restart()
+							if (!armScopePresentationDeadline()) {
+								// The deadline can cross between the expired probe above and
+								// timer rearming. Do not leave that boundary case waiting for
+								// another mutation that may never arrive.
+								scopePresentationQuietTimer.stop()
+								finishScopePresentation(true)
+							}
+						}
+						root.update()
+						return true
+					}
+
+					function observeScopePresentationFrame() {
+						if (scopePresentationStableReadyAt <= 0
+								|| !scopePresentationFrameCommitPending
+								|| !scopePresentationPending || scopePresentationFinalizing
+								|| scopeResetPending || chatModel.appendPending
+								|| chatModel.prependPending) {
+							return
+						}
+						const diagnostics = visiblePresentationDiagnostics()
+						const presentationReady = visiblePresentationReady(diagnostics)
+							|| (scopePresentationForcedByDeadline
+								&& visiblePresentationDeadlineReady(diagnostics))
+						if (!presentationReady
+								|| (!scopePresentationForcedByDeadline
+									&& visiblePresentationHeightConvergencePending())) {
+							recoverScopePresentationFrameRegression()
+							return
+						}
+						// This callback follows the first frame that contained visible rows
+						// with the loading pane removed. Only now may input, UIA, and
+						// presentationBusy ownership be released.
+						if (scopePresentationStableFrameCommittedAt > 0) {
+							completeScopePresentationVisibleFrameCommit()
+							return
+						}
+						const firstVisible = firstVisibleMessageDelegate()
+						const firstVisibleId = firstVisible
+							? String(firstVisible.stableId || "") : ""
+						const firstVisibleOffset = firstVisible
+							? Number(firstVisible.mapToItem(timeline, 0, 0).y) : 0
+						const stableWithPrevious = scopePresentationStableFrameCount > 0
+							&& firstVisibleId === scopePresentationStableFrameFirstVisibleId
+							&& Math.abs(firstVisibleOffset
+								- scopePresentationStableFrameFirstVisibleOffset) <= 0.5
+							&& Math.abs(contentY - scopePresentationStableFrameContentY) <= 0.5
+							&& Math.abs(contentHeight
+								- scopePresentationStableFrameContentHeight) <= 0.5
+							&& Math.abs(height
+								- scopePresentationStableFrameViewportHeight) <= 0.5
+							&& Math.abs(topMargin
+								- scopePresentationStableFrameTopMargin) <= 0.5
+						scopePresentationStableFrameCount = stableWithPrevious
+							? scopePresentationStableFrameCount + 1 : 1
+						scopePresentationStableFrameFirstVisibleId = firstVisibleId
+						scopePresentationStableFrameFirstVisibleOffset = firstVisibleOffset
+						scopePresentationStableFrameContentY = contentY
+						scopePresentationStableFrameContentHeight = contentHeight
+						scopePresentationStableFrameViewportHeight = height
+						scopePresentationStableFrameTopMargin = topMargin
+						if (scopePresentationStableFrameCount >= 2) {
+							scopePresentationStableFrameCommittedAt = Date.now()
+							root.update()
+							return
+						}
+						root.update()
 					}
 
 					function scheduleScopePresentationFastPath() {
@@ -4260,20 +4803,40 @@ ApplicationWindow {
 						return attachments.length > 0
 					}
 
+					function rejectScopePresentationFastPath(reason) {
+						const blocker = String(reason || "unknown")
+						if (scopePresentationFirstFastPathBlocker.length === 0)
+							scopePresentationFirstFastPathBlocker = blocker
+						scopePresentationLastFastPathBlocker = blocker
+						return false
+					}
+
 					function canCompleteScopePresentationFastPath() {
-						if (!scopePresentationPending || scopePresentationFinalizing
-								|| activeScope.loading || chatModel.appendPending)
-							return false
+						++scopePresentationFastPathAttemptCount
+						scopePresentationLastFastPathBlocker = ""
+						if (!scopePresentationPending)
+							return rejectScopePresentationFastPath("not-pending")
+						if (scopePresentationFinalizing)
+							return rejectScopePresentationFastPath("finalizing")
+						if (activeScope.loading)
+							return rejectScopePresentationFastPath("scope-loading")
+						if (chatModel.appendPending)
+							return rejectScopePresentationFastPath("append-pending")
 						// Activity rows are already materialized client log entries. They do
 						// not need the rich-message hydration gate used by conversations.
 						if (activeScope.activity)
 							return true
 						if (chatModel.count === 0)
 							return true
+						// Large histories must reject before touching the ListView or
+						// probing individual model rows. The normal bounded presentation
+						// path owns those scopes.
+						if (chatModel.count > 10)
+							return rejectScopePresentationFastPath("model-count")
 						if (count === 0)
-							return false
+							return rejectScopePresentationFastPath("timeline-empty")
 						if (height <= 1)
-							return false
+							return rejectScopePresentationFastPath("viewport-height")
 						// Reject rich, hydrating rows from the lightweight path before
 						// forceLayout(). A cold attachment-heavy room can otherwise make
 						// that synchronous probe construct and polish the entire visible
@@ -4281,16 +4844,14 @@ ApplicationWindow {
 						// fast path was never eligible.
 						for (let index = 0; index < count; ++index) {
 							if (rowNeedsDeferredPresentation(chatModel.get(index)))
-								return false
+								return rejectScopePresentationFastPath(
+									"deferred-row:" + String(index))
 						}
 						forceLayout()
-						if (contentHeight > height + 0.5 || pendingScopeHydrationCount() > 0)
-							return false
-						// Both endpoints exist only when the complete lightweight conversation
-						// has been materialized. Scrollable or still-estimated histories retain
-						// the stabilization gate even if their current height estimate is small.
-						if (!itemAtIndex(0) || !itemAtIndex(count - 1))
-							return false
+						const pendingHydration = pendingScopeHydrationCount()
+						if (pendingHydration > 0)
+							return rejectScopePresentationFastPath(
+								"pending-hydration:" + String(pendingHydration))
 						return true
 					}
 
@@ -4310,15 +4871,10 @@ ApplicationWindow {
 							restoringBottom = false
 						}
 						scopeResetPending = false
-						scopePresentationCompletedAt = Date.now()
+						noteScopePresentationDataReady()
 						scopePresentationFastPath = true
-						scopePresentationPending = false
 						scopePresentationFinalizing = false
-						scopePresentationObservationActive = count > 0
-						if (scopePresentationObservationActive)
-							scopePresentationObservationTimer.restart()
-						chatModel.presentationBusy = false
-						markVisibleScopeReadIfEligible()
+						armScopePresentationStableFrameCommit()
 						return true
 					}
 
@@ -4326,6 +4882,13 @@ ApplicationWindow {
 						if (!scopePresentationPending)
 							return
 						++scopePresentationMutationCount
+						if (scopePresentationFrameCommitPending) {
+							// A mutation between the hidden stability observations and the
+							// first visible swap invalidates that reveal transaction. Re-enter
+							// bounded finalization instead of exposing a stale height map.
+							recoverScopePresentationFrameRegression()
+							return
+						}
 						if (scopePresentationFinalizing)
 							scopePresentationFinalizeQuietTimer.restart()
 						else
@@ -4388,8 +4951,17 @@ ApplicationWindow {
 					function finishScopePresentation(forcedByDeadline) {
 						if (!scopePresentationPending || scopePresentationFinalizing)
 							return
+						if (!noteScopePresentationDataReady()) {
+							scopePresentationQuietTimer.restart()
+							armScopePresentationDeadline()
+							return
+						}
+						const deadlineMode = !!forcedByDeadline
+							|| scopePresentationForcedByDeadline
+							|| scopePresentationDeadlineExpired()
 						scopePresentationFinalizing = true
-						scopePresentationForcedByDeadline = !!forcedByDeadline
+						scopePresentationForcedByDeadline =
+							scopePresentationForcedByDeadline || deadlineMode
 						scopePresentationFastPathTimer.stop()
 						scopePresentationQuietTimer.stop()
 						scopePresentationDeadlineTimer.stop()
@@ -4417,11 +4989,23 @@ ApplicationWindow {
 					function completeScopePresentationFinalization(forcedByDeadline) {
 						if (!scopePresentationPending || !scopePresentationFinalizing)
 							return
-						if (!forcedByDeadline) {
-							if (coldScopeMaterializationDelayTimer.running) {
+						const deadlineMode = !!forcedByDeadline
+							|| scopePresentationForcedByDeadline
+						if (deadlineMode) {
+							scopePresentationForcedByDeadline = true
+							coldScopeMaterializationDelayTimer.stop()
+							deferredMaterializationTimer.stop()
+							deferredMaterializationQueue = []
+							clearDeferredMaterializationOwnership()
+							richLoaderResumeTimer.stop()
+							richLoaderResumeQueue = []
+							richLoaderResumeActiveId = ""
+							forceVisibleDeadlineFallbacks()
+						}
+						if (!deadlineMode && coldScopeMaterializationDelayTimer.running) {
 								scopePresentationFinalizeQuietTimer.restart()
 								return
-							}
+						}
 							forceLayout()
 							// Re-evaluate the tail after each paced source-row promotion.
 							// Replacing a 58 px summary with a rich card can move the
@@ -4432,26 +5016,31 @@ ApplicationWindow {
 							restoringBottom = true
 							containTailMessageWhenPossible()
 							restoringBottom = false
-							if (viewportMembershipTimer.running
-									|| viewportMembershipUpdatePending) {
+							if (!deadlineMode && (viewportMembershipTimer.running
+									|| viewportMembershipUpdatePending)) {
 								scopePresentationFinalizeQuietTimer.restart()
 								return
 							}
-							queueVisibleDeferredMaterialization(true)
+							if (!deadlineMode)
+								queueVisibleDeferredMaterialization(true)
 							// Source materialization activates the asynchronous outer
 							// delegate, but its message tree still enters as a geometry
 							// shell. Promote only the newly visible shells through the
 							// existing one-at-a-time recovery queue before declaring ready.
-							queueRichLoaderResumes()
+							if (!deadlineMode)
+								queueRichLoaderResumes()
 							const diagnostics = visiblePresentationDiagnostics()
 							// Offscreen/stale source rows may remain in the paced queue after
 							// the real viewport is complete. They are background work and must
 							// not keep the hidden loading surface up until its deadline.
-							if (!visiblePresentationReady(diagnostics)) {
+							const presentationReady = visiblePresentationReady(diagnostics)
+								|| (deadlineMode && visiblePresentationDeadlineReady(diagnostics))
+							if (!presentationReady
+									|| (!deadlineMode
+										&& visiblePresentationHeightConvergencePending())) {
 								scopePresentationFinalizeQuietTimer.restart()
 								return
 							}
-						}
 						const generation = scopePresentationGeneration
 						const mutationCount = scopePresentationMutationCount
 						scopePresentationFinalizeQuietTimer.stop()
@@ -4468,27 +5057,33 @@ ApplicationWindow {
 							timeline.restoringBottom = true
 							timeline.containTailMessageWhenPossible()
 							timeline.restoringBottom = false
-							// The deadline is the hard input-liveness boundary. Membership
-							// reconciliation is non-positional background work and may still
-							// be queued in this callLater turn; it must not turn the consumed
-							// single-shot deadline into an unbounded quiet-timer loop.
-							if (!forcedByDeadline && (viewportMembershipTimer.running
+							// An ordinary quiet pass waits for membership reconciliation. The
+							// hard deadline instead owns bounded real-row fallbacks, so stale
+							// membership work cannot extend the liveness bound.
+							if (deadlineMode)
+								timeline.forceVisibleDeadlineFallbacks()
+							if (!deadlineMode && (viewportMembershipTimer.running
 									|| timeline.viewportMembershipUpdatePending)) {
 								scopePresentationFinalizeQuietTimer.restart()
 								return
 							}
-							if (!forcedByDeadline) {
-								timeline.forceLayout()
-								const settledDiagnostics =
-									timeline.visiblePresentationDiagnostics()
-								if (mutationCount !== timeline.scopePresentationMutationCount
-										|| !timeline.visiblePresentationReady(
-											settledDiagnostics)) {
-									timeline.queueVisibleDeferredMaterialization(true)
-									timeline.queueRichLoaderResumes()
+							timeline.forceLayout()
+							const settledDiagnostics =
+								timeline.visiblePresentationDiagnostics()
+							const settledReady = timeline.visiblePresentationReady(
+								settledDiagnostics) || (deadlineMode
+									&& timeline.visiblePresentationDeadlineReady(settledDiagnostics))
+							if ((!deadlineMode
+									&& mutationCount !== timeline.scopePresentationMutationCount)
+									|| !settledReady
+									|| (!deadlineMode
+										&& timeline.visiblePresentationHeightConvergencePending())) {
+									if (!deadlineMode) {
+										timeline.queueVisibleDeferredMaterialization(true)
+										timeline.queueRichLoaderResumes()
+									}
 									scopePresentationFinalizeQuietTimer.restart()
 									return
-								}
 							}
 							scopePresentationFinalizeDeadlineTimer.stop()
 							// The visible viewport has passed the settled full-row gate.
@@ -4513,18 +5108,8 @@ ApplicationWindow {
 							timeline.scopePresentationForcedByDeadline =
 								timeline.scopePresentationForcedByDeadline || !!forcedByDeadline
 							timeline.scopeResetPending = false
-							timeline.scopePresentationCompletedAt = Date.now()
-							timeline.scopePresentationPending = false
+							timeline.armScopePresentationStableFrameCommit()
 							timeline.scopePresentationFinalizing = false
-							timeline.scopePresentationObservationActive = true
-							scopePresentationObservationTimer.restart()
-							root.coldPreviewHydrationPacingActive = true
-							timeline.scheduleRichContentResume()
-							Qt.callLater(function() {
-								if (generation === timeline.scopePresentationGeneration)
-									timeline.queueVisiblePreviewHydration()
-							})
-							timeline.markVisibleScopeReadIfEligible()
 						})
 					}
 
@@ -4543,8 +5128,9 @@ ApplicationWindow {
 						if (scrollbarDragActive || scrollbarReleasePending
 								|| timelineScrollBar.pressed)
 							return
-						const minimumY = originY
-						const maximumY = Math.max(minimumY, originY + contentHeight - height)
+						const minimumY = sparseBottomAlignmentActive
+							? tailContentYTarget() : originY
+						const maximumY = tailContentYTarget()
 						const boundedY = Math.max(minimumY, Math.min(maximumY, nextY))
 						if (Math.abs(contentY - boundedY) <= 0.5)
 							return
@@ -4557,7 +5143,17 @@ ApplicationWindow {
 						if (!stickToBottom || prependAnchorActive || scrollbarDragActive
 								|| scrollbarReleasePending || timelineScrollBar.pressed)
 							return
-						const maximumY = Math.max(originY, originY + contentHeight - height)
+						// A fully contained rich tail can sit above the absolute Flickable
+						// maximum because its inline footer is intentionally traded for the
+						// complete card. Reapplying the maximum on every quiet pass would
+						// undo containment, schedule another viewport-membership scan, and
+						// starve finalization until its hard deadline. A real row/height
+						// mutation increments the generation below and reopens positioning.
+						if (scopePresentationFinalizing
+								&& scopePresentationTailContainedMutationCount
+									=== scopePresentationMutationCount)
+							return
+						const maximumY = tailContentYTarget()
 						restoringBottom = true
 						setTailContentY(maximumY)
 						restoringBottom = false
@@ -4603,6 +5199,7 @@ ApplicationWindow {
 							"visibleCount": 0,
 							"readyCount": 0,
 							"fullMessageCount": 0,
+							"deadlineFallbackCount": 0,
 							"deferredSummaryCount": 0,
 							"blankCount": 0,
 							"outerLoaderReadyCount": 0,
@@ -4615,6 +5212,7 @@ ApplicationWindow {
 							"paintedCompleteCount": 0,
 							"paintedLoadingCount": 0,
 							"paintedTerminalCount": 0,
+							"duplicateHandoffSummaryCount": 0,
 							"pinnedCount": 0,
 							"inactiveRichResourceCount": 0,
 							"presentationHeightPendingCount": 0,
@@ -4635,9 +5233,14 @@ ApplicationWindow {
 							const previewKeyCount = Object.keys(preview).length
 							const paintedSummary = item.paintedSummary === true
 							const paintedSurface = item.paintedSurface === true
-							const paintedLoading = item.paintedLoading === true
-							const paintedTerminal = item.paintedTerminal === true
+						const paintedLoading = item.paintedLoading === true
+						const paintedTerminal = item.paintedTerminal === true
+						const duplicateHandoffSummary =
+							item.duplicateHandoffSummaryPainted === true
+							const deadlineFallback =
+								item.deadlinePresentationFallback === true
 							const paintedComplete = paintedSurface || paintedTerminal
+								|| (paintedLoading && paintedSummary)
 							const warmPin = stationaryThumbWarmPin(item.stableId)
 							if (paintedSummary)
 								++diagnostics.paintedSummaryCount
@@ -4647,8 +5250,12 @@ ApplicationWindow {
 								++diagnostics.paintedCompleteCount
 							if (paintedLoading)
 								++diagnostics.paintedLoadingCount
-							if (paintedTerminal)
-								++diagnostics.paintedTerminalCount
+						if (paintedTerminal)
+							++diagnostics.paintedTerminalCount
+						if (duplicateHandoffSummary)
+							++diagnostics.duplicateHandoffSummaryCount
+							if (deadlineFallback)
+								++diagnostics.deadlineFallbackCount
 							if (warmPin)
 								++diagnostics.pinnedCount
 							const previewSurfaceState = previewKeyCount === 0
@@ -4681,7 +5288,6 @@ ApplicationWindow {
 									- expectedPresentationHeight) : 0
 							const presentationHeightPending = hasLoadedImplicitHeight
 								&& item.messageRowReady === true
-								&& item.richGeometrySettling !== true
 								&& (item.presentationHeightReleased !== true
 									|| presentationHeightError > 1)
 							if (presentationHeightPending)
@@ -4711,8 +5317,10 @@ ApplicationWindow {
 								"paintedSummary": paintedSummary,
 								"paintedSurface": paintedSurface,
 								"paintedComplete": paintedComplete,
-								"paintedLoading": paintedLoading,
-								"paintedTerminal": paintedTerminal,
+							"paintedLoading": paintedLoading,
+							"paintedTerminal": paintedTerminal,
+							"duplicateHandoffSummary": duplicateHandoffSummary,
+							"deadlineFallback": deadlineFallback,
 								"stationaryThumbPinned": !!warmPin,
 								"stationaryThumbPinId": warmPin
 									? String(warmPin.id || "") : "",
@@ -4790,8 +5398,7 @@ ApplicationWindow {
 								++diagnostics.rowLoaderReadyCount
 							if (item.previewPresentationReady === true)
 								++diagnostics.previewReadyCount
-							if (item.messageRowReady === true && paintedComplete
-									&& !paintedLoading) {
+							if (item.messageRowReady === true && paintedComplete) {
 								++diagnostics.fullMessageCount
 								++diagnostics.readyCount
 							} else if (!paintedSummary) {
@@ -4818,10 +5425,12 @@ ApplicationWindow {
 							&& diagnostics.readyCount === diagnostics.visibleCount
 							&& diagnostics.fullMessageCount === diagnostics.visibleCount
 							&& diagnostics.paintedCompleteCount === diagnostics.visibleCount
-							&& diagnostics.paintedLoadingCount === 0
 							&& diagnostics.deferredSummaryCount === 0
 							&& diagnostics.blankCount === 0
-							&& diagnostics.inactiveRichResourceCount === 0
+							&& diagnostics.blankPreviewSurfaceCount === 0
+							&& diagnostics.presentationHeightPendingCount === 0
+							&& diagnostics.presentationHeightMismatchCount === 0
+							&& diagnostics.maximumPresentationHeightError <= 1
 					}
 
 					function visiblePresentationHeightConvergencePending() {
@@ -5690,6 +6299,7 @@ ApplicationWindow {
 							&& viewportMembershipUpdatePending !== true
 							&& richLoaderResumeActiveId.length === 0
 							&& deferredMaterializationActiveId.length === 0
+							&& plainDeferredMaterializationActiveCount() === 0
 							&& richLoaderResumeQueue.length === 0
 							&& deferredMaterializationQueue.length === 0
 							&& nearViewportPrefetchActiveId.length === 0
@@ -5971,6 +6581,7 @@ ApplicationWindow {
 							&& viewportMembershipUpdatePending !== true
 							&& richLoaderResumeActiveId.length === 0
 							&& deferredMaterializationActiveId.length === 0
+							&& plainDeferredMaterializationActiveCount() === 0
 							&& richLoaderResumeQueue.length === 0
 							&& deferredMaterializationQueue.length === 0
 					}
@@ -6019,9 +6630,12 @@ ApplicationWindow {
 						}
 						if (candidate.deferred) {
 							deferredMaterializationActiveId = candidate.id
+							deferredMaterializationActiveGeneration =
+								scopePresentationGeneration
 							if (!chatModel.materializeDeferredMessage(candidate.id)) {
 								nearViewportPrefetchDeadlineTimer.stop()
 								deferredMaterializationActiveId = ""
+								deferredMaterializationActiveGeneration = -1
 								nearViewportPrefetchActiveId = ""
 								nearViewportWarmId = ""
 								if (nearViewportPrefetchOwnsViewportAnchor
@@ -6092,8 +6706,10 @@ ApplicationWindow {
 						const releasedToken = richLoaderResumeActiveId === key
 						if (releasedToken)
 							richLoaderResumeActiveId = ""
-						if (deferredMaterializationActiveId === key)
+						if (deferredMaterializationActiveId === key) {
 							deferredMaterializationActiveId = ""
+							deferredMaterializationActiveGeneration = -1
+						}
 						if (nearViewportPrefetchActiveId === key)
 							nearViewportPrefetchActiveId = ""
 						if (nearViewportWarmId === key)
@@ -6219,6 +6835,8 @@ ApplicationWindow {
 						if (richScrollInProgress)
 							return
 						const candidates = []
+						const plainSourceCohortActive =
+							plainDeferredMaterializationActiveCount() > 0
 						const children = contentItem ? contentItem.children : []
 						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
 							const item = children[childIndex]
@@ -6236,6 +6854,9 @@ ApplicationWindow {
 							const stableId = String(item.stableId || "")
 							if (stableId.length === 0)
 								continue
+							const plainSourceOwned = item.plainDeferredSourceOwned === true
+							if (plainSourceCohortActive && !plainSourceOwned)
+								continue
 							if (stableId === richLoaderResumeActiveId)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
@@ -6247,7 +6868,16 @@ ApplicationWindow {
 							// geometry. Rebuilding provider trees that are still outside
 							// the viewport consumes UI frames without drawing anything.
 							// The one named bounded prefetch row is the sole exception.
-							if (!visible && !prefetchEligible)
+							if (!visible && !prefetchEligible && !plainSourceOwned)
+								continue
+							// A finalizing plain row that already owns its nested Loader is
+							// observed by visiblePresentationReady(). Re-enqueuing it while
+							// asynchronous incubation is pending would consume another bounded
+							// admission slot without making progress.
+							if (scopePresentationPending && scopePresentationFinalizing
+									&& (visible || plainSourceOwned)
+									&& item.plainScopeResumeEligible === true
+									&& item.messageRowMaterialized === true)
 								continue
 							const distance = visible ? 0
 								: Math.min(Math.abs(point.y), Math.abs(point.y - height))
@@ -6279,33 +6909,67 @@ ApplicationWindow {
 							return
 						}
 						const queued = richLoaderResumeQueue.slice()
-						const stableId = String(queued.shift() || "")
-						richLoaderResumeQueue = queued
 						const children = contentItem ? contentItem.children : []
 						let resumed = false
-						for (let childIndex = 0; childIndex < children.length; ++childIndex) {
-							const item = children[childIndex]
-							if (item && item.performanceTimelineDelegate === true
-									&& item.accessibilityPooled !== true
-									&& String(item.stableId || "") === stableId) {
-								const point = item.mapToItem(timeline, 0, 0)
-								const stillVisible = point.y + item.height > 0.5
-									&& point.y < height - 0.5
-								const prefetchEligible = String(item.stableId || "")
-									=== nearViewportWarmId
-								if (!stillVisible && !prefetchEligible)
+						let plainAdmissions = 0
+						while (queued.length > 0 && !resumed) {
+							const stableId = String(queued.shift() || "")
+							richLoaderResumeQueue = queued
+							let item = null
+							for (let childIndex = 0; childIndex < children.length; ++childIndex) {
+								const candidate = children[childIndex]
+								if (candidate && candidate.performanceTimelineDelegate === true
+										&& candidate.accessibilityPooled !== true
+										&& String(candidate.stableId || "") === stableId) {
+									item = candidate
 									break
-								richLoaderResumeActiveId = stableId
-								resumed = item.resumeRichContentAfterScroll(
-									timeline.scopePresentationFinalizing, true) !== false
-								if (!resumed)
-									richLoaderResumeActiveId = ""
-								else if (item.messageRowReady === true)
-									Qt.callLater(function() {
-										item.completeRichLoaderResumeWhenReady()
-									})
+								}
+							}
+							if (!item)
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							const stillVisible = point.y + item.height > 0.5
+								&& point.y < height - 0.5
+							const prefetchEligible = String(item.stableId || "")
+								=== nearViewportWarmId
+							const plainSourceOwned = item.plainDeferredSourceOwned === true
+							if (!stillVisible && !prefetchEligible && !plainSourceOwned)
+								continue
+							const plainScopeResume = scopePresentationPending
+								&& scopePresentationFinalizing
+								&& (stillVisible || plainSourceOwned)
+								&& item.plainScopeResumeEligible === true
+							if (plainScopeResume) {
+								if (item.messageRowMaterialized !== true
+										&& item.resumeRichContentAfterScroll(true, false) !== false) {
+									++plainAdmissions
+									noteScopePresentationPlainRowAdmission()
+								}
+								if (plainAdmissions >= plainScopeResumeAdmissionsPerFrame)
+									break
+								continue
+							}
+							if (plainAdmissions > 0) {
+								queued.unshift(stableId)
+								richLoaderResumeQueue = queued
 								break
 							}
+							richLoaderResumeActiveId = stableId
+							resumed = item.resumeRichContentAfterScroll(
+								timeline.scopePresentationFinalizing, true) !== false
+							if (!resumed)
+								richLoaderResumeActiveId = ""
+							else if (item.messageRowReady === true)
+								{
+									const resumeGeneration = scopePresentationGeneration
+									Qt.callLater(function() {
+										if (resumeGeneration === timeline.scopePresentationGeneration
+												&& String(item.stableId || "") === stableId
+												&& item.accessibilityPooled !== true
+												&& timeline.richLoaderResumeActiveId === stableId)
+											item.completeRichLoaderResumeWhenReady()
+									})
+								}
 						}
 						if (!resumed && queued.length > 0)
 							richLoaderResumeTimer.start()
@@ -6339,13 +7003,124 @@ ApplicationWindow {
 						return completeRichLoaderResume(stableId)
 					}
 
+					function plainDeferredMaterializationActiveCount() {
+						return Object.keys(plainDeferredMaterializationActive || ({})).length
+					}
+
+					function plainDeferredMaterializationOwns(stableId, generation) {
+						const key = String(stableId || "")
+						const expectedGeneration = Number(generation)
+						const ownedGeneration = key.length > 0
+							? plainDeferredMaterializationActive[key] : undefined
+						return ownedGeneration !== undefined
+							&& Number(ownedGeneration) === expectedGeneration
+					}
+
+					function deferredMaterializationGenerationFor(stableId) {
+						const key = String(stableId || "")
+						if (key.length === 0)
+							return -1
+						if (key === deferredMaterializationActiveId)
+							return deferredMaterializationActiveGeneration
+						const plainGeneration = plainDeferredMaterializationActive[key]
+						return plainGeneration === undefined ? -1 : Number(plainGeneration)
+					}
+
+					function deferredMaterializationOwnershipActive() {
+						return deferredMaterializationActiveId.length > 0
+							|| plainDeferredMaterializationActiveCount() > 0
+					}
+
+					function clearDeferredMaterializationOwnership() {
+						deferredMaterializationActiveId = ""
+						deferredMaterializationActiveGeneration = -1
+						plainDeferredMaterializationActive = ({})
+					}
+
+					function finishDeferredMaterializationCohort(generation) {
+						const ownedGeneration = Number(generation)
+						if (ownedGeneration !== scopePresentationGeneration
+								|| deferredMaterializationOwnershipActive())
+							return
+						if (scopePresentationFinalizing && stickToBottom) {
+							positionTailImmediately()
+							restoringBottom = true
+							containTailMessageWhenPossible()
+							restoringBottom = false
+						}
+						Qt.callLater(function() {
+							if (ownedGeneration !== timeline.scopePresentationGeneration)
+								return
+							timeline.queueVisibleDeferredMaterialization(
+								timeline.scopePresentationFinalizing)
+						})
+					}
+
+					function retirePlainDeferredMaterialization(stableId, generation) {
+						const key = String(stableId || "")
+						const ownedGeneration = Number(generation)
+						if (!plainDeferredMaterializationOwns(key, ownedGeneration))
+							return false
+						const nextActive = Object.assign({}, plainDeferredMaterializationActive)
+						delete nextActive[key]
+						plainDeferredMaterializationActive = nextActive
+						if (plainDeferredMaterializationActiveCount() === 0)
+							finishDeferredMaterializationCohort(ownedGeneration)
+						return true
+					}
+
+					function scopePresentationPhaseDuration(timestamp) {
+						return scopePresentationStartedAt > 0 && Number(timestamp) > 0
+							? Math.max(0, Number(timestamp) - scopePresentationStartedAt) : 0
+					}
+
+					function noteScopePresentationOuterLoaderLoaded() {
+						if (!scopePresentationPending)
+							return
+						const timestamp = Date.now()
+						if (scopePresentationFirstOuterLoaderLoadedAt <= 0)
+							scopePresentationFirstOuterLoaderLoadedAt = timestamp
+						scopePresentationLastOuterLoaderLoadedAt = timestamp
+						++scopePresentationOuterLoaderLoadedCount
+					}
+
+					function noteScopePresentationPlainRowAdmission() {
+						if (!scopePresentationPending || !scopePresentationFinalizing)
+							return
+						const timestamp = Date.now()
+						if (scopePresentationFirstPlainRowAdmissionAt <= 0)
+							scopePresentationFirstPlainRowAdmissionAt = timestamp
+						scopePresentationLastPlainRowAdmissionAt = timestamp
+						++scopePresentationPlainRowAdmissionCount
+					}
+
+					function noteScopePresentationRowLoaderLoaded() {
+						if (!scopePresentationPending)
+							return
+						const timestamp = Date.now()
+						if (scopePresentationFirstRowLoaderLoadedAt <= 0)
+							scopePresentationFirstRowLoaderLoadedAt = timestamp
+						scopePresentationLastRowLoaderLoadedAt = timestamp
+						++scopePresentationRowLoaderLoadedCount
+					}
+
+					function noteScopePresentationHeightCommit() {
+						if (!scopePresentationPending)
+							return
+						const timestamp = Date.now()
+						if (scopePresentationFirstHeightCommitAt <= 0)
+							scopePresentationFirstHeightCommitAt = timestamp
+						scopePresentationLastHeightCommitAt = timestamp
+						++scopePresentationHeightCommitCount
+					}
+
 					function queueVisibleDeferredMaterialization(allowDuringFinalization) {
 						const pendingAllowed = allowDuringFinalization === true
 							&& scopePresentationFinalizing
 						if (richScrollInProgress
 								|| coldScopeMaterializationDelayTimer.running
 								|| prependAnchorActive
-								|| deferredMaterializationActiveId.length > 0
+								|| deferredMaterializationOwnershipActive()
 								|| (scopePresentationPending && !pendingAllowed))
 							return
 						// Rebuild from the current viewport on every pass. A rich row can
@@ -6464,6 +7239,7 @@ ApplicationWindow {
 						if (richScrollInProgress
 								|| coldScopeMaterializationDelayTimer.running
 								|| prependAnchorActive
+								|| deferredMaterializationOwnershipActive()
 								|| (scopePresentationPending && !pendingAllowed)) {
 							scheduleRichContentResume()
 							return
@@ -6474,17 +7250,79 @@ ApplicationWindow {
 						}
 						const queued = deferredMaterializationQueue.slice()
 						let materialized = 0
-						while (queued.length > 0
-								&& materialized < deferredMaterializationsPerFrame) {
-							const stableId = String(queued.shift() || "")
-							if (!deferredPresentationStillEligible(stableId))
-								continue
-							if (serializeSourcePromotion)
-								deferredMaterializationActiveId = stableId
-							if (chatModel.materializeDeferredMessage(stableId))
-								++materialized
-							else if (serializeSourcePromotion)
-								deferredMaterializationActiveId = ""
+						const materializationGeneration = scopePresentationGeneration
+						if (!serializeSourcePromotion) {
+							while (queued.length > 0
+									&& materialized < deferredMaterializationsPerFrame) {
+								const stableId = String(queued.shift() || "")
+								if (deferredPresentationStillEligible(stableId)
+										&& chatModel.materializeDeferredMessage(stableId))
+									++materialized
+							}
+						} else {
+							const plainCohortIds = []
+							let serializedCandidateId = ""
+							while (queued.length > 0) {
+								const stableId = String(queued.shift() || "")
+								if (!deferredPresentationStillEligible(stableId))
+									continue
+								const knownPlain = !activeScope.activity
+									&& chatModel.deferredMessagePlainForMaterialization(stableId)
+								if (!knownPlain) {
+									if (plainCohortIds.length === 0)
+										serializedCandidateId = stableId
+									break
+								}
+								plainCohortIds.push(stableId)
+								if (plainCohortIds.length
+										>= plainDeferredMaterializationsPerFrame)
+									break
+							}
+							// The model mutation synchronously changes proxy membership. Publish
+							// every accepted owner and retire the stale queue before the first
+							// mutation so a reentrant delegate callback cannot finish a partial
+							// cohort and admit another source row in the same turn.
+							deferredMaterializationQueue = []
+							if (plainCohortIds.length > 0) {
+								const nextPlainActive = ({})
+								for (let plainIndex = 0;
+										plainIndex < plainCohortIds.length; ++plainIndex)
+									nextPlainActive[plainCohortIds[plainIndex]] =
+										materializationGeneration
+								plainDeferredMaterializationActive = nextPlainActive
+								for (let plainIndex = 0;
+										plainIndex < plainCohortIds.length; ++plainIndex) {
+									const stableId = plainCohortIds[plainIndex]
+									if (!deferredPresentationStillEligible(stableId)
+											|| activeScope.activity
+											|| !chatModel.deferredMessagePlainForMaterialization(
+												stableId)) {
+										retirePlainDeferredMaterialization(stableId,
+											materializationGeneration)
+										continue
+									}
+									if (chatModel.materializeDeferredMessage(stableId)) {
+										++materialized
+										++plainDeferredSourceAdmissionCount
+									} else {
+										retirePlainDeferredMaterialization(stableId,
+											materializationGeneration)
+									}
+								}
+							} else if (serializedCandidateId.length > 0) {
+								deferredMaterializationActiveId = serializedCandidateId
+								deferredMaterializationActiveGeneration =
+									materializationGeneration
+								if (chatModel.materializeDeferredMessage(serializedCandidateId)) {
+									++materialized
+									++serializedDeferredSourceAdmissionCount
+								} else {
+									deferredMaterializationActiveId = ""
+									deferredMaterializationActiveGeneration = -1
+									finishDeferredMaterializationCohort(
+										materializationGeneration)
+								}
+							}
 						}
 						// Never carry candidates across a geometry-changing promotion.
 						// The post-polish pass below computes the next viewport from scratch.
@@ -6521,24 +7359,17 @@ ApplicationWindow {
 						})
 					}
 
-					function completeDeferredMaterialization(stableId) {
+					function completeDeferredMaterialization(stableId, generation) {
 						const key = String(stableId || "")
-						if (key.length === 0 || key !== deferredMaterializationActiveId)
+						const ownedGeneration = Number(generation)
+						if (retirePlainDeferredMaterialization(key, ownedGeneration))
+							return true
+						if (key.length === 0 || key !== deferredMaterializationActiveId
+								|| ownedGeneration !== deferredMaterializationActiveGeneration)
 							return false
 						deferredMaterializationActiveId = ""
-						if (scopePresentationFinalizing && stickToBottom) {
-							positionTailImmediately()
-							restoringBottom = true
-							containTailMessageWhenPossible()
-							restoringBottom = false
-						}
-						const generation = scopePresentationGeneration
-						Qt.callLater(function() {
-							if (generation !== timeline.scopePresentationGeneration)
-								return
-							timeline.queueVisibleDeferredMaterialization(
-								timeline.scopePresentationFinalizing)
-						})
+						deferredMaterializationActiveGeneration = -1
+						finishDeferredMaterializationCohort(ownedGeneration)
 						return true
 					}
 
@@ -6549,7 +7380,8 @@ ApplicationWindow {
 							return
 						if (richContentResumeTimer.running || richLoaderResumeTimer.running
 								|| deferredMaterializationTimer.running
-								|| richLoaderResumeActiveId.length > 0) {
+								|| richLoaderResumeActiveId.length > 0
+								|| deferredMaterializationOwnershipActive()) {
 							Qt.callLater(function() {
 								timeline.finishRichContentRecoveryIfIdle()
 							})
@@ -6759,7 +7591,12 @@ ApplicationWindow {
 							else if (richBounds.bottom > height + 0.5)
 								correction = richBounds.bottom - height
 							if (Math.abs(correction) > 0.5) {
+								const previousY = contentY
 								setTailContentY(contentY + correction)
+								if (scopePresentationFinalizing
+										&& Math.abs(contentY - previousY) > 0.5)
+									scopePresentationTailContainedMutationCount =
+											scopePresentationMutationCount
 							}
 							return
 						}
@@ -6771,7 +7608,12 @@ ApplicationWindow {
 						// This also keeps the visible row's semantic subtree available at
 						// fractional DPR instead of exposing a visually clipped message.
 						if (item.y < contentY - 1.0) {
+							const previousY = contentY
 							setTailContentY(item.y)
+							if (scopePresentationFinalizing
+									&& Math.abs(contentY - previousY) > 0.5)
+								scopePresentationTailContainedMutationCount =
+										scopePresentationMutationCount
 						}
 					}
 
@@ -6823,7 +7665,67 @@ ApplicationWindow {
 							takeExplicitNavigationOwnership("native-wheel")
 					}
 					onOriginYChanged: scheduleViewportMembershipUpdate()
-					onHeightChanged: scheduleViewportMembershipUpdate()
+					onHeightChanged: {
+						scheduleViewportMembershipUpdate()
+						if (!scopePresentationPending && stickToBottom
+								&& !dragging && !flicking && !scrollbarDragActive
+								&& !scrollbarReleasePending && !timelineScrollBar.pressed) {
+							const generation = scopePresentationGeneration
+							Qt.callLater(function() {
+								if (generation === timeline.scopePresentationGeneration
+										&& timeline.stickToBottom
+										&& !timeline.scopePresentationPending)
+									timeline.requestBottomFollow()
+							})
+						}
+					}
+
+					function visiblePresentationDeadlineReady(diagnostics) {
+						if (count === 0)
+							return true
+						// The hard deadline may publish only a real, bounded message
+						// summary or a completed row. A transparent reservation or blank
+						// provider shell remains ineligible even at the deadline.
+						return diagnostics.visibleCount > 0
+							&& diagnostics.paintedSummaryCount === diagnostics.visibleCount
+							&& diagnostics.blankCount === 0
+							&& diagnostics.deadlineFallbackCount
+								+ diagnostics.fullMessageCount >= diagnostics.visibleCount
+					}
+
+					function forceVisibleDeadlineFallbacks() {
+						function forceFallback(item) {
+							if (!item || item.performanceTimelineDelegate !== true
+									|| item.accessibilityPooled === true)
+								return
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y + item.height <= 0.5 || point.y >= height - 0.5)
+								return
+							const paintedComplete = item.paintedSurface === true
+								|| item.paintedTerminal === true
+							// One stalled row must not collapse ready neighbors at the scope
+							// deadline. Preserve every already-painted complete presentation.
+							if (item.deadlinePresentationFallback !== true
+									&& item.messageRowReady === true && paintedComplete)
+								return
+							if (typeof item.forceDeadlinePresentationFallback === "function")
+								item.forceDeadlinePresentationFallback()
+						}
+						const children = contentItem ? contentItem.children : []
+						for (let index = 0; index < children.length; ++index)
+							forceFallback(children[index])
+						const deferredRepeater = headerItem ? headerItem.deferredRepeater : null
+						for (let index = 0;
+								deferredRepeater && index < deferredRepeater.count; ++index)
+							forceFallback(deferredRepeater.itemAt(index))
+						forceLayout()
+						positionTailImmediately()
+						forceLayout()
+						// Shrinking one oversized reservation can bring the next row into
+						// view. Bound that newly visible row in the same deadline turn.
+						for (let index = 0; index < children.length; ++index)
+							forceFallback(children[index])
+					}
 					onContentHeightChanged: {
 						scheduleViewportMembershipUpdate()
 						if (scrollbarDragActive || scrollbarReleasePending
@@ -6850,8 +7752,7 @@ ApplicationWindow {
 							// current tail in the same turn so ListView cannot reinterpret the
 							// automatic displacement as an upward scroll.
 							restoringBottom = true
-							const maximumY = Math.max(originY,
-								originY + contentHeight - height)
+							const maximumY = tailContentYTarget()
 							setTailContentY(maximumY)
 							Qt.callLater(function() {
 								timeline.containTailMessageWhenPossible()
@@ -7270,31 +8171,41 @@ ApplicationWindow {
 
 					Timer {
 						id: scopePresentationQuietTimer
-						interval: 120
+						// Model append-idle is the authoritative DataReady boundary. Yield
+						// one frame for its final synchronous bindings, then let the
+						// mutation-aware 48 ms finalization loop prove geometry stability;
+						// duplicating that quiet window here breaks the 300 ms cached gate.
+						interval: 16
 						repeat: false
 						onTriggered: timeline.finishScopePresentation(false)
 					}
 
 					Timer {
 						id: scopePresentationDeadlineTimer
-						interval: 2000
+						readonly property int defaultInterval: 2000
+						interval: defaultInterval
 						repeat: false
-						onTriggered: timeline.finishScopePresentation(true)
+						onTriggered: {
+							timeline.scopePresentationForcedByDeadline = true
+							timeline.finishScopePresentation(true)
+						}
 					}
 
 					Timer {
 						id: scopePresentationFinalizeStartTimer
-						interval: 16
+						// The append-idle gate already yielded one full frame. This timer
+						// only separates source promotion from the final model insertion.
+						interval: 0
 						repeat: false
 						onTriggered: timeline.continueScopePresentationFinalization()
 					}
 
 					Timer {
 						id: scopePresentationFinalizeQuietTimer
-						// Rich rows already expose Ready only after their own 48 ms
-						// materialization settle. One scene frame plus the final callLater
-						// verification is sufficient; another duplicate 48 ms wait makes
-						// an otherwise complete real room miss the one-second product gate.
+						// Delegate height release and viewport membership both settle on
+						// frame-paced observations. Hidden finalization now preserves the
+						// height latch across its own tail movement, so one frame is enough
+						// between retries without paying three duplicate quiet windows.
 						interval: 16
 						repeat: false
 						onTriggered: timeline.completeScopePresentationFinalization(false)
@@ -7332,6 +8243,7 @@ ApplicationWindow {
 						repeat: false
 						onTriggered: {
 							timeline.scrollbarReleasePending = false
+							timeline.clearStationaryThumbWarmPins("thumb-release")
 							timeline.scheduleViewportMembershipUpdate()
 							timeline.scheduleRichContentResume()
 							timeline.requestBottomFollow()
@@ -7358,8 +8270,7 @@ ApplicationWindow {
 								timeline.restoringBottom = false
 								return
 							}
-							const maximumY = Math.max(timeline.originY,
-								timeline.originY + timeline.contentHeight - timeline.height)
+							const maximumY = timeline.tailContentYTarget()
 							if (!timeline.scopeResetPending && Math.abs(maximumY - timeline.contentY) <= 0.5) {
 								timeline.restoringBottom = false
 								return
@@ -7424,15 +8335,14 @@ ApplicationWindow {
 						}
 						function onAppendPendingChanged() {
 							if (!chatModel.appendPending) {
+								// replaceMessages() publishes the complete model before its
+								// append-idle signal. Probe an eligible plain/sparse scope once
+								// on the zero-delay timer; never scan the model synchronously and
+								// then schedule the same failed probe again.
 								timeline.scheduleScopePresentationFastPath()
-								// The final appendPending=false transition is the
-								// authoritative quiet boundary for the frame-paced cold
-								// tail. Keep the existing frame-separated finalization,
-								// but do not add another unconditional quiet interval.
-								if (timeline.scopePresentationPending
-										&& !timeline.scopePresentationFinalizing
-										&& !activeScope.loading && timeline.count > 0)
-									timeline.finishScopePresentation(false)
+								// A plain row can still own a short body-parse mutation at this
+								// boundary. Keep the existing quiet timer as the bounded rich
+								// fallback so that mutation can re-enter the sparse fast path.
 							}
 						}
 						function onRowsAboutToChange(first, last) {
@@ -7446,9 +8356,10 @@ ApplicationWindow {
 						function onDataChanged(topLeft, bottomRight, roles) {
 							if (timeline.prependAnchorActive)
 								return
-							if (timeline.scopePresentationPending)
+							if (timeline.scopePresentationPending) {
 								timeline.noteScopePresentationMutation()
-							else
+								timeline.scheduleScopePresentationFastPath()
+							} else
 								timeline.requestBottomFollow()
 							timeline.reopenStaticPreviewSweepForNewData()
 						}
@@ -7506,7 +8417,7 @@ ApplicationWindow {
 						}
 						function onModelReset() {
 							timeline.scheduleViewportMembershipUpdate()
-							timeline.clearStationaryThumbWarmPins()
+							timeline.clearStationaryThumbWarmPins("model-reset")
 							timeline.releasePrependAnchor()
 							timeline.releaseViewportAnchor()
 							timeline.releaseTopAnchor()
@@ -7526,7 +8437,7 @@ ApplicationWindow {
 								timeline.scheduleScopePresentationFastPath()
 							}
 							if (timeline.count === 0) {
-								timeline.clearStationaryThumbWarmPins()
+								timeline.clearStationaryThumbWarmPins("model-empty")
 								timeline.releasePrependAnchor()
 								timeline.releaseViewportAnchor()
 								timeline.releaseTopAnchor()
@@ -7546,17 +8457,19 @@ ApplicationWindow {
 						}
                     }
                     headerPositioning: ListView.InlineHeader
-                    header: Column {
+					header: Column {
 						id: timelineHeader
 						property alias deferredRepeater: deferredHistoryRepeater
+						property alias olderHistoryControl: olderHistoryControlRow
                         width: timeline.width
 						height: implicitHeight
 						spacing: 0
-                        visible: height > 0
+						visible: height > 0
 						opacity: timeline.scopePresentationContentVisible ? 1 : 0
 						Item {
+							id: olderHistoryControlRow
 							width: timelineHeader.width
-							height: (activeScope.canLoadOlder
+						height: (activeScope.canLoadOlder
 								|| activeScope.loadingState === "older") ? 48 : 0
 							visible: height > 0
 							ModernButton {
@@ -7604,7 +8517,16 @@ ApplicationWindow {
 								readonly property bool paintedTerminal: false
 								readonly property bool richPresentationReserved:
 									deferredPresentationHeight > 180
+								property int deadlinePresentationFallbackGeneration: -1
+								readonly property bool deadlinePresentationFallback:
+									deadlinePresentationFallbackGeneration
+										=== timeline.scopePresentationGeneration
 								property bool accessibilityPooled: false
+								function forceDeadlinePresentationFallback() {
+									deadlinePresentationFallbackGeneration =
+										timeline.scopePresentationGeneration
+								}
+								onStableIdChanged: deadlinePresentationFallbackGeneration = -1
 								width: timelineHeader.width
 								height: timeline.deferredMessageRowHeight
 								radius: richPresentationReserved ? 0 : Theme.innerRadius
@@ -7615,6 +8537,7 @@ ApplicationWindow {
 								Accessible.role: Accessible.ListItem
 								Accessible.name: summaryText
 								Accessible.ignored: richPresentationReserved
+									&& !deadlinePresentationFallback
 
 								Label {
 									visible: true
@@ -7664,6 +8587,10 @@ ApplicationWindow {
 								readonly property bool paintedTerminal: false
 								readonly property bool richPresentationReserved:
 									deferredPresentationHeight > 180
+								property int deadlinePresentationFallbackGeneration: -1
+								readonly property bool deadlinePresentationFallback:
+									deadlinePresentationFallbackGeneration
+										=== timeline.scopePresentationGeneration
 								readonly property string presentationSummary: [title, subtitle, timestamp]
 									.filter(function(part) {
 										return String(part || "").trim().length > 0
@@ -7672,8 +8599,10 @@ ApplicationWindow {
 									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
 								width: timeline.width
-								height: Math.max(timeline.deferredMessageRowHeight,
-									deferredPresentationHeight)
+								height: deadlinePresentationFallback
+									? timeline.deferredMessageRowHeight
+									: Math.max(timeline.deferredMessageRowHeight,
+										deferredPresentationHeight)
 								radius: 0
 								color: "transparent"
 								border.width: 0
@@ -7681,9 +8610,18 @@ ApplicationWindow {
 								Accessible.role: Accessible.ListItem
 								Accessible.name: presentationSummary
 								Accessible.ignored: richPresentationReserved
+									&& !deadlinePresentationFallback
+								function forceDeadlinePresentationFallback() {
+									deadlinePresentationFallbackGeneration =
+										timeline.scopePresentationGeneration
+								}
 
 								ListView.onPooled: accessibilityPooled = true
-								ListView.onReused: accessibilityPooled = false
+								ListView.onReused: {
+									deadlinePresentationFallbackGeneration = -1
+									accessibilityPooled = false
+								}
+								onStableIdChanged: deadlinePresentationFallbackGeneration = -1
 
 								RowLayout {
 									visible: true
@@ -7753,17 +8691,87 @@ ApplicationWindow {
 								required property bool canReact
 								required property bool canDelete
 								property bool accessibilityPooled: false
+								property int deadlinePresentationFallbackGeneration: -1
+								property string deadlinePresentationFallbackStableId: ""
+								property string deadlinePresentationFallbackPreviewIdentity: ""
+								property bool deadlinePresentationRecoveryActive: false
+								readonly property string deadlinePresentationSourceIdentity:
+									root.richPreviewPresentationIdentity(stableId, preview)
+								readonly property bool deadlinePresentationFallback:
+									deadlinePresentationFallbackGeneration
+										=== timeline.scopePresentationGeneration
+									&& deadlinePresentationFallbackStableId === stableId
 								property bool resumeRequested: false
 								property bool resumeDuringFinalization: false
 								property bool resumeAdmitsPreview: false
 								property string resumeOwnedStableId: ""
 								property string deferredMaterializationCleanupId: ""
-								function releaseDeferredMaterialization(stableIdOverride) {
+								property int deferredMaterializationCleanupGeneration: -1
+								readonly property bool plainDeferredSourceOwned:
+									!activeScope.activity
+									&& timeline.plainDeferredMaterializationOwns(
+										deferredMaterializationCleanupId,
+										deferredMaterializationCleanupGeneration)
+								function captureDeferredMaterializationOwnership() {
+									deferredMaterializationCleanupId = String(stableId || "")
+									deferredMaterializationCleanupGeneration =
+										timeline.deferredMaterializationGenerationFor(
+											deferredMaterializationCleanupId)
+								}
+								function releaseDeferredMaterialization(stableIdOverride,
+										generationOverride) {
 									if (typeof timeline === "undefined" || !timeline)
 										return
 									const key = String(stableIdOverride || stableId || "")
+									const generation = generationOverride === undefined
+										? deferredMaterializationCleanupGeneration
+										: Number(generationOverride)
 									if (key.length > 0)
-										timeline.completeDeferredMaterialization(key)
+										timeline.completeDeferredMaterialization(key, generation)
+								}
+								function forceDeadlinePresentationFallback() {
+									if (deadlinePresentationFallback)
+										return
+									deadlinePresentationFallbackGeneration =
+										timeline.scopePresentationGeneration
+									deadlinePresentationFallbackStableId = String(stableId || "")
+									deadlinePresentationFallbackPreviewIdentity =
+										deadlinePresentationSourceIdentity
+									deadlinePresentationRecoveryActive = false
+									stopPresentationHeightObservation()
+									resetOuterLoaderIncubationWatchdog(true)
+									releaseDeferredMaterialization()
+								}
+								function clearDeadlinePresentationFallback() {
+									deadlinePresentationFallbackGeneration = -1
+									deadlinePresentationFallbackStableId = ""
+									deadlinePresentationFallbackPreviewIdentity = ""
+									deadlinePresentationRecoveryActive = false
+								}
+								function beginDeadlinePresentationFallbackRecovery() {
+									if (!deadlinePresentationFallback)
+										return true
+									// The bounded real-row summary owns the deadline reveal. Re-enter
+									// the normal one-row recovery queue only after that reveal has
+									// committed and while no user gesture owns timeline geometry.
+									if (accessibilityPooled || timeline.scopePresentationPending
+											|| timeline.scopePresentationFinalizing
+											|| timeline.richScrollInProgress)
+										return false
+									deadlinePresentationFallbackPreviewIdentity =
+										deadlinePresentationSourceIdentity
+									deadlinePresentationRecoveryActive = true
+									timeline.scheduleViewportMembershipUpdate()
+									return true
+								}
+								onDeadlinePresentationSourceIdentityChanged: {
+									if (!deadlinePresentationFallback)
+										return
+									deadlinePresentationRecoveryActive = false
+									stopPresentationHeightObservation()
+									resetOuterLoaderIncubationWatchdog(true)
+									if (!timeline.scopePresentationPending)
+										timeline.scheduleRichContentResume()
 								}
 								property bool outerLoaderReady: false
 								property bool outerLoaderIncubationSuppressed: false
@@ -7888,17 +8896,24 @@ ApplicationWindow {
 						timeline.stickToBottom = true
 					}
 					presentationHeightSettledIdentity = identity
+					const commitsDeadlineRecovery = deadlinePresentationFallback
+						&& deadlinePresentationRecoveryActive
+						&& deadlinePresentationFallbackPreviewIdentity
+							=== deadlinePresentationSourceIdentity
 					const committedOuterHeight =
 						presentationHeightCommitValue(measuredHeight)
 					const committedProbeHeight = Math.max(
 						timeline.deferredMessageRowHeight, committedOuterHeight)
-									presentationHeightSettledHeight = committedOuterHeight
-									presentationHeightReleased = true
-									presentationHeightReleasePending = false
-									presentationHeightObservedHeight = measuredHeight
+					presentationHeightSettledHeight = committedOuterHeight
+					presentationHeightReleased = true
+					presentationHeightReleasePending = false
+					timeline.noteScopePresentationHeightCommit()
+					presentationHeightObservedHeight = measuredHeight
 									presentationHeightQuietPolishObservations = 0
 									viewportProbeStableId = String(stableId || "")
 					viewportProbeHeight = committedProbeHeight
+					if (commitsDeadlineRecovery)
+						clearDeadlinePresentationFallback()
 					// Clear the pin in the same measured outer+probe commit while the
 					// non-tail anchor or exact-tail intent still owns correction. Only
 					// the existing restore/bottom-follow path runs after this cohort.
@@ -7908,7 +8923,9 @@ ApplicationWindow {
 						timeline.requestBottomFollow()
 					else if (timeline.viewportAnchorActive)
 						timeline.scheduleViewportAnchorQuietRelease()
-					timeline.scheduleViewportMembershipUpdate()
+						timeline.scheduleViewportMembershipUpdate()
+					if (commitsDeadlineRecovery && item)
+						item.completeRichLoaderResumeWhenReady()
 					return true
 								}
 								function observePresentationHeight() {
@@ -8174,7 +9191,8 @@ ApplicationWindow {
 								readonly property var stationaryThumbWarmPin:
 									timeline.stationaryThumbWarmPin(stableId)
 								readonly property bool stationaryThumbWarmPinned:
-									!!stationaryThumbWarmPin
+									timeline.stationaryThumbWarmPinMatchesCurrentScope(
+										stationaryThumbWarmPin, stableId)
 								readonly property real stationaryThumbPinnedOuterHeight:
 									stationaryThumbWarmPinned
 										? Number(stationaryThumbWarmPin.outerHeight || 0) : 0
@@ -8186,14 +9204,19 @@ ApplicationWindow {
 										? stationaryThumbPinnedProbeHeight : viewportProbeHeight
 								readonly property bool stationaryThumbWarmOwned:
 									stationaryThumbWarmPinned
-									&& ((stationaryThumbWarmPin.paintedSurface === true
-											|| stationaryThumbWarmPin.terminal === true)
-										? stationaryThumbWarmGate.retains(stableId,
+									&& (stationaryThumbWarmGate.owns(stableId,
 											Number(stationaryThumbWarmPin.pressEpoch),
 											Number(stationaryThumbWarmPin.dwellGeneration))
-										: stationaryThumbWarmGate.owns(stableId,
+										|| stationaryThumbWarmGate.retains(stableId,
 											Number(stationaryThumbWarmPin.pressEpoch),
 											Number(stationaryThumbWarmPin.dwellGeneration)))
+								property string stationaryThumbWarmObservationStableId: ""
+								property string stationaryThumbWarmObservationScopeToken: ""
+								property int stationaryThumbWarmObservationScopeGeneration: -1
+								property int stationaryThumbWarmObservationPressEpoch: 0
+								property int stationaryThumbWarmObservationDwellGeneration: 0
+								property int stationaryThumbWarmObservationPinSerial: 0
+								property string stationaryThumbDelegateIdentityStableId: ""
 								readonly property bool stationaryThumbWarmEligible: {
 									const value = preview || ({})
 									const state = String(value.state || "").toLowerCase()
@@ -8204,12 +9227,17 @@ ApplicationWindow {
 										&& statusValue !== "error" && statusValue !== "failed"
 										&& value.failed !== true && !previewLoaderFailed
 								}
-								readonly property bool paintedSummary: !accessibilityPooled
-									&& active && (!item || item.paintedSummary === true)
+						readonly property bool paintedSummary: !accessibilityPooled
+							&& (deadlinePresentationFallback
+								|| (active && (!item || item.paintedSummary === true)))
+						readonly property bool handoffSummaryPainted: !accessibilityPooled
+							&& asyncRichHandoff.visible && asyncRichHandoffSummary.visible
+						readonly property bool duplicateHandoffSummaryPainted:
+							handoffSummaryPainted && !!item && item.paintedSummary === true
 								readonly property bool paintedSurface: !!item
 									&& item.paintedSurface === true
-								readonly property bool paintedLoading: stationaryThumbWarmPinned
-									&& (!item || item.paintedLoading === true)
+								readonly property bool paintedLoading: !!item
+									&& item.paintedLoading === true
 								readonly property bool paintedTerminal: !!item
 									&& item.paintedTerminal === true
 								property bool viewportMembershipUpdating: false
@@ -8363,6 +9391,8 @@ ApplicationWindow {
 									? Number(item.previewPrewarmProgressRevision || 0) : 0
 								readonly property bool richResourcesRequired: item
 									? item.richResourcesRequired : false
+								readonly property bool plainScopeResumeEligible: item
+									? item.plainScopeResumeEligible : plainDeferredSourceOwned
 								property bool inVisibleViewport: false
 								property bool inHydrationWindow: false
 								readonly property bool richContentViewportEligible:
@@ -8389,32 +9419,40 @@ ApplicationWindow {
 									&& item.richResourcesRequired
 									&& (!item.messageRowReady
 										|| item.richResourceActivationPending
-										|| !item.richResourcesActive)
+										|| (!item.richResourcesActive
+											&& !item.boundedRichGeometryReady))
 								readonly property real presentationHeightMeasuredHeight: item
 									? Number(item.implicitHeight || 0) : 0
+								readonly property bool presentationHeightFinalizationMovementOwned:
+									timeline.scopePresentationPending
+									&& timeline.scopePresentationFinalizing
 								readonly property bool presentationHeightQuietObservationEligible:
 									!accessibilityPooled && !!item
 									&& currentPresentationHeightIdentity().length > 0
-									&& messageRowReady && !richGeometrySettling
-									&& !richResourceActivationPending
+									&& messageRowReady
+									// Hidden finalization may latch its bounded fallback surface. Once
+									// presented, wait for provider activation to settle so a temporary
+									// rich height cannot rewrite the steady-state ListView coordinate map.
+									&& (!richGeometrySettling || timeline.scopePresentationFinalizing)
+									&& (!richResourceActivationPending
+										|| timeline.scopePresentationFinalizing)
 									&& !previewLoaderIncubationWatchdogRunning
 									&& isFinite(presentationHeightMeasuredHeight)
 									&& presentationHeightMeasuredHeight > 0
-									&& !timeline.richScrollInProgress
-									&& !timeline.moving && !timeline.dragging && !timeline.flicking
+									&& (!timeline.richScrollInProgress
+										|| presentationHeightFinalizationMovementOwned)
+									&& ((!timeline.moving && !timeline.dragging && !timeline.flicking)
+										|| presentationHeightFinalizationMovementOwned)
 									&& !timeline.scrollbarDragActive
 									&& !timeline.scrollbarReleasePending
 									&& !timelineScrollBar.pressed
 									&& !timeline.prependAnchorActive
 									&& !timeline.prependMutationInProgress
 									&& !chatModel.prependPending
-									&& !timeline.scopePresentationPending
-									&& !timeline.scopePresentationFinalizing
-									&& !timeline.scopeResetPending
-									&& !timeline.scopePresentationObservationActive
 									&& !timeline.restoringPrependAnchor
 									&& !timeline.deferredPrependAnchorActive
-									&& !timeline.restoringBottom
+									&& (!timeline.restoringBottom
+										|| presentationHeightFinalizationMovementOwned)
 									&& !timeline.explicitWheelInputPending
 									&& !timeline.explicitNavigationMovement
 									&& !timelineScrollHandler.scrolling
@@ -8423,13 +9461,19 @@ ApplicationWindow {
 					&& !timeline.viewportAnchorQuietReleaseActive
 					&& !timeline.viewportAnchorReleasePending
 					&& !timeline.restoringViewportAnchor
-									&& !bottomFollowTimer.running
+									&& (!bottomFollowTimer.running
+										|| presentationHeightFinalizationMovementOwned)
 									&& !root.performanceChatScrollRunning
 								onPresentationHeightQuietObservationEligibleChanged: {
-									if (presentationHeightQuietObservationEligible)
+									if (presentationHeightQuietObservationEligible) {
 										schedulePresentationHeightObservation()
-									else
+									} else if (!presentationHeightFinalizationMovementOwned) {
+										// Hidden finalization owns its programmatic tail movement.
+										// Preserve the first quiet height sample across that movement;
+										// real wheel, drag, scrollbar, and performance ownership still
+										// cancel the latch through their independent guards above.
 										stopPresentationHeightObservation()
+									}
 								}
 								onPresentationHeightMeasuredHeightChanged: {
 									scheduleViewportProbeHeightUpdate()
@@ -8444,7 +9488,9 @@ ApplicationWindow {
 								// expose both placeholder and provider heights. Keep that
 								// reservation until the two-observation latch commits a
 								// measured height; after that, use only the cached height.
-								height: stationaryThumbWarmPinned
+								height: deadlinePresentationFallback
+									? timeline.deferredMessageRowHeight
+									: stationaryThumbWarmPinned
 									? stationaryThumbPinnedOuterHeight
 									: presentationHeightCommittedHeight > 0
 									? presentationHeightCommittedHeight
@@ -8466,6 +9512,8 @@ ApplicationWindow {
 								// inactive is important: asynchronous incubation still lets a
 								// burst of visible delegates finish in one GUI heartbeat.
 								active: !deferredPresentation
+									&& (!deadlinePresentationFallback
+										|| deadlinePresentationRecoveryActive)
 								onActiveChanged: {
 									if (!active) {
 										stopPresentationHeightObservation()
@@ -8490,8 +9538,9 @@ ApplicationWindow {
 									id: asyncRichHandoff
 									anchors.fill: parent
 									z: 1
-									visible: asyncMessageDelegate.active
-										&& (!asyncMessageDelegate.item
+									visible: asyncMessageDelegate.deadlinePresentationFallback
+										|| (asyncMessageDelegate.active
+											&& (!asyncMessageDelegate.item
 											|| !asyncMessageDelegate.item.currentMessagePresentationReady
 											|| (asyncMessageDelegate.item.richResourcesRequired
 												&& !asyncMessageDelegate.item.richResourcesActive)
@@ -8500,7 +9549,7 @@ ApplicationWindow {
 											|| (asyncMessageDelegate.item.richLoaderSuspended
 												&& (asyncMessageDelegate.item.richResourcesRequired
 													|| asyncMessageDelegate.item.previewNeedsHydration
-													|| asyncMessageDelegate.item.previewLoaderIncubationSuppressed)))
+													|| asyncMessageDelegate.item.previewLoaderIncubationSuppressed))))
 									// This item retains the outer delegate's reserved geometry while
 									// its asynchronous handoff is in flight. Do not paint that
 									// complete height as a card: a cold rich row can be several
@@ -8508,13 +9557,24 @@ ApplicationWindow {
 									radius: 0
 									color: "transparent"
 									border.width: 0
-									Accessible.ignored: true
+									Accessible.role: Accessible.ListItem
+									Accessible.name: asyncMessageDelegate.presentationSummary
+									Accessible.ignored:
+										!asyncMessageDelegate.deadlinePresentationFallback
+										|| asyncMessageDelegate.accessibilityPooled
+										|| !asyncMessageDelegate.inVisibleViewport
 
 									RowLayout {
+										id: asyncRichHandoffSummary
 										objectName: "asyncRichHandoffSummary"
 										// Preview-only rows must still paint their real fixed-height
-										// loading summary instead of a transparent reserved gap.
-										visible: true
+										// loading summary instead of a transparent reserved gap. Once
+										// the loaded row owns bounded loading/error geometry, it is the
+										// coherent handoff and this summary must not paint beside it.
+										visible: !asyncMessageDelegate.accessibilityPooled
+											&& (asyncMessageDelegate.deadlinePresentationFallback
+												|| !asyncMessageDelegate.item
+												|| !asyncMessageDelegate.item.boundedRichGeometryReady)
 										anchors.left: parent.left
 										anchors.right: parent.right
 										anchors.top: parent.top
@@ -8534,6 +9594,7 @@ ApplicationWindow {
 											font.pixelSize: Theme.fontLabel
 											font.weight: Font.DemiBold
 											elide: Text.ElideRight
+											Accessible.ignored: true
 										}
 										Label {
 											Layout.fillWidth: true
@@ -8543,6 +9604,7 @@ ApplicationWindow {
 											font.pixelSize: Theme.fontBody
 											elide: Text.ElideRight
 											maximumLineCount: 1
+											Accessible.ignored: true
 										}
 										Label {
 											visible: text.length > 0
@@ -8550,6 +9612,7 @@ ApplicationWindow {
 											text: asyncMessageDelegate.timestamp
 											color: Theme.textMuted
 											font.pixelSize: Theme.fontCaption
+											Accessible.ignored: true
 										}
 									}
 
@@ -8682,6 +9745,8 @@ ApplicationWindow {
 								}
 								function resumeRichContentAfterScroll(allowDuringFinalization,
 										admitPreviewMaterialization) {
+									if (!beginDeadlinePresentationFallbackRecovery())
+										return false
 									if (admitPreviewMaterialization === true)
 										resumeOwnedStableId = stableId
 									if (item) {
@@ -8710,6 +9775,52 @@ ApplicationWindow {
 									if (item)
 										item.suspendRichResourcesForScroll()
 								}
+								function clearStationaryThumbWarmObservation() {
+									stationaryThumbWarmObservationStableId = ""
+									stationaryThumbWarmObservationScopeToken = ""
+									stationaryThumbWarmObservationScopeGeneration = -1
+									stationaryThumbWarmObservationPressEpoch = 0
+									stationaryThumbWarmObservationDwellGeneration = 0
+									stationaryThumbWarmObservationPinSerial = 0
+								}
+								function stationaryThumbWarmObservationMatchesPin(pin) {
+									return timeline.stationaryThumbWarmPinMatchesCurrentScope(
+											pin, stableId)
+										&& stationaryThumbWarmObservationStableId
+											=== String(stableId || "")
+										&& stationaryThumbWarmObservationScopeToken
+											=== String(pin.scopeToken || "")
+										&& stationaryThumbWarmObservationScopeGeneration
+											=== Number(pin.scopeGeneration)
+										&& stationaryThumbWarmObservationPressEpoch
+											=== Number(pin.pressEpoch)
+										&& stationaryThumbWarmObservationDwellGeneration
+											=== Number(pin.dwellGeneration)
+										&& stationaryThumbWarmObservationPinSerial
+											=== Number(pin.serial)
+								}
+								function recordStationaryThumbWarmObservation(pin) {
+									if (!timeline.stationaryThumbWarmPinMatchesCurrentScope(
+											pin, stableId))
+										return false
+									stationaryThumbWarmObservationStableId = String(stableId || "")
+									stationaryThumbWarmObservationScopeToken = String(pin.scopeToken || "")
+									stationaryThumbWarmObservationScopeGeneration =
+										Number(pin.scopeGeneration)
+									stationaryThumbWarmObservationPressEpoch = Number(pin.pressEpoch)
+									stationaryThumbWarmObservationDwellGeneration =
+										Number(pin.dwellGeneration)
+									stationaryThumbWarmObservationPinSerial = Number(pin.serial)
+									return true
+								}
+								function retireStationaryThumbWarmForDelegate(reason) {
+									const retiredId = stationaryThumbWarmObservationStableId.length > 0
+										? stationaryThumbWarmObservationStableId
+										: String(stableId || "")
+									clearStationaryThumbWarmObservation()
+									return retiredId.length > 0
+										&& timeline.retireStationaryThumbWarmPin(retiredId, reason)
+								}
 								function admitStationaryThumbWarm(pressEpoch,
 										dwellGeneration) {
 									if (!stationaryThumbWarmEligible
@@ -8720,10 +9831,13 @@ ApplicationWindow {
 												!== Number(dwellGeneration)
 											|| !stationaryThumbWarmOwned)
 										return false
-									if (item)
-										return item.admitStationaryThumbWarm(
-											pressEpoch, dwellGeneration)
-									return active
+									const admitted = item
+										? item.admitStationaryThumbWarm(pressEpoch,
+											dwellGeneration) : active
+									if (admitted)
+										recordStationaryThumbWarmObservation(
+											stationaryThumbWarmPin)
+									return admitted
 								}
 								function stationaryThumbWouldBeOuterHeight() {
 									if (presentationHeightCommittedHeight > 0)
@@ -8737,59 +9851,69 @@ ApplicationWindow {
 										? presentationHeightCommittedHeight
 										: Number(viewportProbeHeight || 0)
 								}
-								function refreshStationaryThumbWarmState() {
-									if (!stationaryThumbWarmPinned)
-										return
-									timeline.updateStationaryThumbWarmPin(stableId,
-										paintedSummary, paintedSurface,
-										paintedLoading, paintedTerminal)
-									if (!inVisibleViewport && paintedTerminal) {
-										timeline.clearEqualStationaryThumbWarmTerminal(stableId,
-											stationaryThumbWouldBeOuterHeight(),
-											stationaryThumbWouldBeProbeHeight(), false, true)
-										return
-									}
-									if (!stationaryThumbWarmOwned)
-										return
+								function observeStationaryThumbWarmPaintedState() {
+									const pin = stationaryThumbWarmPin
+									if (!stationaryThumbWarmPinned || !stationaryThumbWarmOwned
+											|| !stationaryThumbWarmObservationMatchesPin(pin))
+										return false
+									let outcome = ""
 									if (paintedTerminal)
-										timeline.finishStationaryThumbWarm(stableId, "terminal")
+										outcome = "terminal"
 									else if (paintedSurface && item
 											&& item.previewPrewarmVisualReady === true)
-											timeline.finishStationaryThumbWarm(stableId, "painted")
+										outcome = "painted"
+									if (outcome.length === 0)
+										return false
+									return timeline.queueStationaryThumbWarmReceipt(stableId,
+										stationaryThumbWarmObservationScopeToken,
+										stationaryThumbWarmObservationScopeGeneration,
+										stationaryThumbWarmObservationPressEpoch,
+										stationaryThumbWarmObservationDwellGeneration,
+										stationaryThumbWarmObservationPinSerial, outcome,
+										inVisibleViewport,
+										stationaryThumbWouldBeOuterHeight(),
+										stationaryThumbWouldBeProbeHeight())
 								}
 								function noteStationaryThumbWarmProgress() {
 									const pin = stationaryThumbWarmPin
-									if (!stationaryThumbWarmOwned || !pin)
+									if (!stationaryThumbWarmOwned
+											|| !stationaryThumbWarmObservationMatchesPin(pin))
 										return false
 									return stationaryThumbWarmGate.noteAdmissionProgress(stableId,
 										Number(pin.pressEpoch), Number(pin.dwellGeneration))
 								}
 								onStationaryThumbWarmOwnedChanged: {
-									if (stationaryThumbWarmOwned)
-										admitStationaryThumbWarm(
+									if (stationaryThumbWarmOwned) {
+										if (!stationaryThumbWarmObservationMatchesPin(
+												stationaryThumbWarmPin))
+											admitStationaryThumbWarm(
 											Number(stationaryThumbWarmPin.pressEpoch),
 											Number(stationaryThumbWarmPin.dwellGeneration))
-									refreshStationaryThumbWarmState()
+										observeStationaryThumbWarmPaintedState()
+									} else
+										clearStationaryThumbWarmObservation()
 								}
 								onStationaryThumbWarmPinnedChanged: {
-									if (!stationaryThumbWarmPinned)
+									if (!stationaryThumbWarmPinned) {
 										schedulePresentationHeightObservation()
-									refreshStationaryThumbWarmState()
+										clearStationaryThumbWarmObservation()
+									} else
+										observeStationaryThumbWarmPaintedState()
 								}
-								onPaintedSummaryChanged: refreshStationaryThumbWarmState()
+								onPaintedSummaryChanged: observeStationaryThumbWarmPaintedState()
 								onPaintedSurfaceChanged: {
 									noteStationaryThumbWarmProgress()
-									refreshStationaryThumbWarmState()
+									observeStationaryThumbWarmPaintedState()
 								}
-								onPaintedLoadingChanged: refreshStationaryThumbWarmState()
-								onPaintedTerminalChanged: refreshStationaryThumbWarmState()
+								onPaintedLoadingChanged: observeStationaryThumbWarmPaintedState()
+								onPaintedTerminalChanged: observeStationaryThumbWarmPaintedState()
 								onPreviewPrewarmVisualReadyChanged:
-									refreshStationaryThumbWarmState()
+									observeStationaryThumbWarmPaintedState()
 								onPreviewPrewarmProgressRevisionChanged: {
 									noteStationaryThumbWarmProgress()
-									refreshStationaryThumbWarmState()
+									observeStationaryThumbWarmPaintedState()
 								}
-								onInVisibleViewportChanged: refreshStationaryThumbWarmState()
+								onInVisibleViewportChanged: observeStationaryThumbWarmPaintedState()
 								function cancelNearViewportPrefetchForScroll() {
 									const ownedStableId = resumeOwnedStableId
 									resumeRequested = false
@@ -8875,6 +9999,8 @@ ApplicationWindow {
 								}
 
 								ListView.onPooled: {
+									retireStationaryThumbWarmForDelegate("delegate-pooled")
+									deadlinePresentationRecoveryActive = false
 									accessibilityPooled = true
 									updateViewportMembership()
 									// Pooling the same stable presentation must not restore
@@ -8897,6 +10023,13 @@ ApplicationWindow {
 										item.handleListViewPooled()
 								}
 								ListView.onReused: {
+									releaseDeferredMaterialization(
+										deferredMaterializationCleanupId,
+										deferredMaterializationCleanupGeneration)
+									retireStationaryThumbWarmForDelegate("delegate-reused")
+									stationaryThumbDelegateIdentityStableId =
+										String(stableId || "")
+									clearDeadlinePresentationFallback()
 									const identityChanged =
 										reevaluatePresentationHeightIdentity()
 									stopPresentationHeightObservation()
@@ -8910,19 +10043,38 @@ ApplicationWindow {
 									scheduleViewportProbeHeightUpdate()
 									if (identityChanged || presentationHeightReleased)
 										schedulePresentationHeightObservation()
+									captureDeferredMaterializationOwnership()
 								}
 								onStableIdChanged: {
+									const retiredStationaryThumbId =
+										stationaryThumbDelegateIdentityStableId
+									const currentStationaryThumbId = String(stableId || "")
+									clearStationaryThumbWarmObservation()
+									if (retiredStationaryThumbId.length > 0
+											&& retiredStationaryThumbId
+												!== currentStationaryThumbId)
+										timeline.retireStationaryThumbWarmPin(
+											retiredStationaryThumbId, "delegate-identity-changed")
+									stationaryThumbDelegateIdentityStableId =
+										currentStationaryThumbId
+									clearDeadlinePresentationFallback()
 									resetPresentationHeightIdentity()
 									resetViewportProbeHeight()
 									scheduleViewportProbeReset()
 									timeline.scheduleViewportMembershipUpdate()
 									const retiredMaterializationId =
 										deferredMaterializationCleanupId
+									const retiredMaterializationGeneration =
+										deferredMaterializationCleanupGeneration
 									const currentMaterializationId = String(stableId || "")
 									if (retiredMaterializationId.length > 0
-										&& retiredMaterializationId !== currentMaterializationId)
-										releaseDeferredMaterialization(retiredMaterializationId)
+											&& retiredMaterializationId !== currentMaterializationId)
+										releaseDeferredMaterialization(retiredMaterializationId,
+											retiredMaterializationGeneration)
 									deferredMaterializationCleanupId = currentMaterializationId
+									deferredMaterializationCleanupGeneration =
+										timeline.deferredMaterializationGenerationFor(
+											currentMaterializationId)
 									const ownedStableId = resumeOwnedStableId
 									if (ownedStableId.length > 0
 											&& ownedStableId !== stableId
@@ -8936,11 +10088,13 @@ ApplicationWindow {
 									resetOuterLoaderIncubationWatchdog(true)
 								}
 								Component.onCompleted: {
+									stationaryThumbDelegateIdentityStableId =
+										String(stableId || "")
 									const identityChanged =
 										reevaluatePresentationHeightIdentity()
 									if (identityChanged)
 										resetViewportProbeHeight()
-									deferredMaterializationCleanupId = String(stableId || "")
+									captureDeferredMaterializationOwnership()
 									scheduleViewportProbeReset()
 									updateViewportMembership()
 									schedulePresentationHeightObservation()
@@ -8948,13 +10102,17 @@ ApplicationWindow {
 								Component.onDestruction: {
 									stopPresentationHeightObservation()
 									if (typeof timeline !== "undefined" && timeline) {
+										retireStationaryThumbWarmForDelegate(
+											"delegate-destroyed")
 										const retiredStableId = resumeOwnedStableId.length > 0
 											? resumeOwnedStableId : stableId
 										const abandoned = timeline.abandonNearViewportPrefetch(
 											retiredStableId, true)
 										if (resumeOwnedStableId.length > 0 && !abandoned)
 											timeline.cancelRichLoaderResume(resumeOwnedStableId)
-										releaseDeferredMaterialization(retiredStableId)
+										releaseDeferredMaterialization(
+											deferredMaterializationCleanupId,
+											deferredMaterializationCleanupGeneration)
 									}
 								}
 								onLoaded: {
@@ -8966,6 +10124,7 @@ ApplicationWindow {
 										outerLoaderIncubationSuppressed
 									resetOuterLoaderIncubationWatchdog(true)
 									outerLoaderReady = true
+									timeline.noteScopePresentationOuterLoaderLoaded()
 									item.accessibilityPooled = accessibilityPooled
 									scheduleViewportProbeHeightUpdate()
 									schedulePresentationHeightObservation()
@@ -8991,35 +10150,37 @@ ApplicationWindow {
 										resetViewportProbeHeight()
 									if (item) {
 										schedulePresentationHeightObservation()
+										timeline.scheduleScopePresentationFastPath()
 										if (stationaryThumbWarmOwned)
 											admitStationaryThumbWarm(
 												Number(stationaryThumbWarmPin.pressEpoch),
 												Number(stationaryThumbWarmPin.dwellGeneration))
 									} else
 										stopPresentationHeightObservation()
-									refreshStationaryThumbWarmState()
+									observeStationaryThumbWarmPaintedState()
 								}
 
 								sourceComponent: Component {
 									ChatMessageFrame {
-						id: messageDelegate
-						stableId: asyncMessageDelegate.stableId
-						own: asyncMessageDelegate.own
-						readonly property bool performanceTimelineDelegate: true
-						logEntry: activeScope.activity
+					id: messageDelegate
+					stableId: asyncMessageDelegate.stableId
+					own: asyncMessageDelegate.own
+					readonly property bool performanceTimelineDelegate: true
+					logEntry: activeScope.activity
 						logAlternating: logEntry && root.stableAlternatingRow(stableId)
 				// Ordinary rows enter UIA only when fully contained so cached actor/header
 				// nodes cannot leak across the clip. A legitimate rich card may be taller
 				// than the viewport; it can never satisfy full containment, so expose that
 				// row while it intersects the viewport and let its visible provider surface
 				// remain navigable.
-				accessibilityViewportVisible: height > timeline.height
-					? y + height > timeline.contentY + 0.5
-						&& y < timeline.contentY + timeline.height - 0.5
-					: y >= timeline.contentY - 0.5
-						&& y + height <= timeline.contentY + timeline.height + 0.5
+				accessibilityViewportVisible: asyncMessageDelegate.height > timeline.height
+					? asyncMessageDelegate.y + asyncMessageDelegate.height > timeline.contentY + 0.5
+						&& asyncMessageDelegate.y < timeline.contentY + timeline.height - 0.5
+					: asyncMessageDelegate.y >= timeline.contentY - 0.5
+						&& asyncMessageDelegate.y + asyncMessageDelegate.height
+							<= timeline.contentY + timeline.height + 0.5
 				accessibilitySuppressed: root.backgroundAccessibilitySuppressed
-					|| timeline.scopePresentationPending || previewOnlyPaintPending
+					|| timeline.scopePresentationPending
 				accessibilityBarrierEnabled: logEntry || messageRowReady
 				hoverEffectsEnabled: !root.visualFixtureOverrideActive
 					&& !timeline.richScrollInProgress && !previewOnlyPaintPending
@@ -9064,9 +10225,18 @@ ApplicationWindow {
 						// provider stages, so do not enqueue the same message again while
 						// that pipeline is already in flight.
 						property bool backendHydrationRequested: false
+						property string hydrationOwnerScopeToken: ""
+						property int hydrationOwnerGeneration: -1
+						function adoptHydrationOwner() {
+							hydrationOwnerScopeToken = String(activeScope.scopeToken || "")
+							hydrationOwnerGeneration = timeline.scopePresentationGeneration
+						}
 						property string stationaryThumbHydrationStableId: ""
+						property string stationaryThumbHydrationScopeToken: ""
+						property int stationaryThumbHydrationScopeGeneration: -1
 						property int stationaryThumbHydrationPressEpoch: 0
 						property int stationaryThumbHydrationDwellGeneration: 0
+						property int stationaryThumbHydrationPinSerial: 0
 						property bool previewBackendErrorEpochActive: false
 						property string previewBackendErrorStableId: ""
 						// A pooled rich-card tree is expensive to retarget while a
@@ -9108,24 +10278,7 @@ ApplicationWindow {
 								? row.previewLoader.status : Loader.Null
 						}
 						readonly property string previewLoaderIncubationIdentity: {
-							const value = preview || ({})
-							const metadata = value.metadata || ({})
-							const mediaItems = value.mediaItems || []
-							const mediaItemCount = Number(mediaItems.length !== undefined
-								? mediaItems.length : (mediaItems.count || 0))
-							return [
-								stableId,
-								String(value.url || value.sourceUrl || ""),
-								String(value.embedUrl || value.mediaUrl || ""),
-								String(value.state || ""),
-								String(value.failed === true ? "failed" : ""),
-								String(value.title || ""),
-								String(value.thumbnailUrl || value.posterUrl || ""),
-								String(metadata.provider || metadata.previewProvider || ""),
-								mediaItemCount,
-								String(value.revision || value.updatedAt || value.cacheKey
-									|| metadata.revision || "")
-							].join("|")
+							return root.richPreviewPresentationIdentity(stableId, preview)
 						}
 						readonly property bool nearViewportPrefetchTerminal:
 							nearViewportPrefetchTerminalIdentity.length > 0
@@ -9199,8 +10352,30 @@ ApplicationWindow {
 						readonly property bool richResourcesRequired:
 							(hasPreviewContent && !previewTerminalUnavailable)
 							|| hasAttachmentContent || hasInlineImageContent
+						readonly property bool previewStagingPresentationReady:
+							!hasPreviewContent
+							|| (!previewNeedsHydration && !previewTerminalUnavailable)
+							|| (messageRowLoader.item
+								&& messageRowLoader.item.previewHydrationPlaceholderLoader
+								&& messageRowLoader.item.previewHydrationPlaceholderLoader.status
+									=== Loader.Ready
+								&& !!messageRowLoader.item.previewHydrationPlaceholderLoader.item)
+						readonly property bool attachmentPresentationReady:
+							!hasAttachmentContent
+							|| (messageRowLoader.item && messageRowLoader.item.attachmentLoader
+								&& messageRowLoader.item.attachmentLoader.status === Loader.Ready
+								&& !!messageRowLoader.item.attachmentLoader.item)
+						// A loading or terminal native preview shell has bounded geometry.
+						// Let an independently ready attachment gallery settle beside it
+						// without waiting for the optional provider pipeline to finish.
+						readonly property bool boundedRichGeometryReady: messageRowReady
+							&& hasPreviewContent
+							&& (previewNeedsHydration || previewTerminalUnavailable)
+							&& previewStagingPresentationReady
+							&& attachmentPresentationReady
+							&& !hasInlineImageContent
 						readonly property bool richResourceActivationReady:
-							!backendContentNeedsHydration
+							!previewNeedsHydration
 							&& (!hasPreviewContent || previewTerminalUnavailable
 								|| (previewMaterializationAdmitted
 									&& messageRowLoader.item
@@ -9234,8 +10409,11 @@ ApplicationWindow {
 								// mixed attachment/inline row keeps its shared resource token.
 								backendHydrationRequested = false
 								stationaryThumbHydrationStableId = ""
+								stationaryThumbHydrationScopeToken = ""
+								stationaryThumbHydrationScopeGeneration = -1
 								stationaryThumbHydrationPressEpoch = 0
 								stationaryThumbHydrationDwellGeneration = 0
+								stationaryThumbHydrationPinSerial = 0
 								previewMaterializationAdmitted = false
 								previewLoaderTerminalErrorIdentity = ""
 								nearViewportPrefetchTerminalIdentity = ""
@@ -9310,8 +10488,11 @@ ApplicationWindow {
 							if (recoveryAction !== "hydrate") {
 								backendHydrationRequested = false
 								stationaryThumbHydrationStableId = ""
+								stationaryThumbHydrationScopeToken = ""
+								stationaryThumbHydrationScopeGeneration = -1
 								stationaryThumbHydrationPressEpoch = 0
 								stationaryThumbHydrationDwellGeneration = 0
+								stationaryThumbHydrationPinSerial = 0
 							}
 							previewMaterializationAdmitted = false
 							previewLoaderTerminalErrorIdentity = ""
@@ -9428,20 +10609,26 @@ ApplicationWindow {
 							// on the same frame as this card's poster/gallery.
 							if (richResourceActivationPending)
 								return
-							timeline.completeDeferredMaterialization(stableId)
+							timeline.completeDeferredMaterialization(stableId,
+								asyncMessageDelegate.deferredMaterializationCleanupGeneration)
 							timeline.completeNearViewportPrefetchIfReady(stableId)
 							// The complete message/card tree now owns its final layout
 							// geometry and its first bounded resource window has settled.
 							const rowId = stableId
+							const resumeGeneration = timeline.scopePresentationGeneration
 							const previewGeneration = previewLoaderIncubationIdentity
 							Qt.callLater(function() {
 								if (rowId === messageDelegate.stableId
+										&& resumeGeneration
+											=== timeline.scopePresentationGeneration
+										&& !messageDelegate.accessibilityPooled
 										&& previewGeneration
 											=== messageDelegate.previewLoaderIncubationIdentity
 										&& timeline.richLoaderResumeActiveId === rowId
 										&& (messageDelegate.currentMessagePresentationReady
 											|| messageDelegate.previewLoaderIncubationSuppressed)
-										&& messageDelegate.previewPresentationReady)
+										&& messageDelegate.previewPresentationReady
+										&& !asyncMessageDelegate.deadlinePresentationFallback)
 									timeline.completeRichLoaderResume(rowId)
 							})
 						}
@@ -9544,10 +10731,16 @@ ApplicationWindow {
 								if (messageDelegate.hasPreviewContent
 										&& !messageDelegate.previewLoaderFailed)
 									richResourceActivationSettleTimer.restart()
-								else
+								else {
+									const activationStableId = String(messageDelegate.stableId || "")
+									const activationGeneration = timeline.scopePresentationGeneration
 									Qt.callLater(function() {
-										messageDelegate.completeRichLoaderResumeWhenReady()
+										if (activationGeneration === timeline.scopePresentationGeneration
+												&& activationStableId === String(messageDelegate.stableId || "")
+												&& messageDelegate.accessibilityPooled !== true)
+											messageDelegate.completeRichLoaderResumeWhenReady()
 									})
+								}
 							}
 						}
 						Timer {
@@ -9557,9 +10750,16 @@ ApplicationWindow {
 							// Timer.running may remain true while onTriggered executes.
 							// Reconcile on the following event-loop turn so the prefetch
 							// ready gate observes a genuinely completed polish window.
-							onTriggered: Qt.callLater(function() {
-								messageDelegate.completeRichLoaderResumeWhenReady()
-							})
+							onTriggered: {
+								const activationStableId = String(messageDelegate.stableId || "")
+								const activationGeneration = timeline.scopePresentationGeneration
+								Qt.callLater(function() {
+									if (activationGeneration === timeline.scopePresentationGeneration
+											&& activationStableId === String(messageDelegate.stableId || "")
+											&& messageDelegate.accessibilityPooled !== true)
+										messageDelegate.completeRichLoaderResumeWhenReady()
+								})
+							}
 						}
 						function requestPreviewHydrationIfNeeded(allowDuringFinalization) {
 							const pendingAllowed = allowDuringFinalization === true
@@ -9570,7 +10770,8 @@ ApplicationWindow {
 									&& !timeline.richScrollInProgress
 									&& !timeline.prependAnchorActive
 									&& !chatModel.prependPending
-									&& root.queuePreviewHydration(stableId, inVisibleViewport))
+									&& root.queuePreviewHydration(stableId, inVisibleViewport,
+										hydrationOwnerScopeToken, hydrationOwnerGeneration))
 								backendHydrationRequested = true
 							if (bodyNeedsHydration && inHydrationWindow
 									&& !timeline.richScrollInProgress
@@ -9583,6 +10784,8 @@ ApplicationWindow {
 								dwellGeneration) {
 							const pin = asyncMessageDelegate.stationaryThumbWarmPin
 							if (!stationaryThumbWarmOwned || !pin
+									|| !timeline.stationaryThumbWarmPinMatchesCurrentScope(
+										pin, stableId)
 									|| Number(pin.pressEpoch) !== Number(pressEpoch)
 									|| Number(pin.dwellGeneration) !== Number(dwellGeneration)
 									|| !stationaryThumbWarmGate.owns(stableId,
@@ -9595,22 +10798,35 @@ ApplicationWindow {
 							// request, or enqueue exactly one backend hydration. A late result may
 							// update the model, but only the still-owned generation may reveal it.
 							if (!backendHydrationRequested
-									&& !root.queuePreviewHydration(stableId, true))
+									&& !root.queuePreviewHydration(stableId, true,
+										hydrationOwnerScopeToken, hydrationOwnerGeneration))
 								return false
 							backendHydrationRequested = true
 							stationaryThumbHydrationStableId = String(stableId || "")
+							stationaryThumbHydrationScopeToken =
+								String(pin.scopeToken || "")
+							stationaryThumbHydrationScopeGeneration =
+								Number(pin.scopeGeneration)
 							stationaryThumbHydrationPressEpoch = Number(pressEpoch)
 							stationaryThumbHydrationDwellGeneration = Number(dwellGeneration)
+							stationaryThumbHydrationPinSerial = Number(pin.serial)
 							return true
 						}
 						function resumeStationaryThumbWarmAfterHydration() {
 							const pin = asyncMessageDelegate.stationaryThumbWarmPin
-							if (!pin || stationaryThumbHydrationStableId
-										!== String(stableId || "")
+							if (!timeline.stationaryThumbWarmPinMatchesCurrentScope(
+									pin, stableId) || stationaryThumbHydrationStableId
+									!== String(stableId || "")
+									|| stationaryThumbHydrationScopeToken
+										!== String(pin.scopeToken || "")
+									|| stationaryThumbHydrationScopeGeneration
+										!== Number(pin.scopeGeneration)
 									|| Number(pin.pressEpoch)
 										!== stationaryThumbHydrationPressEpoch
 									|| Number(pin.dwellGeneration)
-										!== stationaryThumbHydrationDwellGeneration)
+										!== stationaryThumbHydrationDwellGeneration
+									|| Number(pin.serial)
+										!== stationaryThumbHydrationPinSerial)
 								return false
 							let resumed = false
 							if (stationaryThumbWarmOwned
@@ -9626,8 +10842,11 @@ ApplicationWindow {
 									Number(pin.pressEpoch), Number(pin.dwellGeneration))
 							if (resumed) {
 								stationaryThumbHydrationStableId = ""
+								stationaryThumbHydrationScopeToken = ""
+								stationaryThumbHydrationScopeGeneration = -1
 								stationaryThumbHydrationPressEpoch = 0
 								stationaryThumbHydrationDwellGeneration = 0
+								stationaryThumbHydrationPinSerial = 0
 							}
 							return resumed
 						}
@@ -9763,8 +10982,11 @@ ApplicationWindow {
 							previewMaterializationAdmitted = false
 							backendHydrationRequested = false
 							stationaryThumbHydrationStableId = ""
+							stationaryThumbHydrationScopeToken = ""
+							stationaryThumbHydrationScopeGeneration = -1
 							stationaryThumbHydrationPressEpoch = 0
 							stationaryThumbHydrationDwellGeneration = 0
+							stationaryThumbHydrationPinSerial = 0
 							previewBackendErrorEpochActive = false
 							previewBackendErrorStableId = ""
 							updateRichResourceActivity()
@@ -9784,7 +11006,15 @@ ApplicationWindow {
 							const row = messageRowLoader.item
 							if (row && row.previewLoader && row.previewLoader.item)
 								row.previewLoader.item.resetForReuse()
-							Qt.callLater(function() { messageDelegate.resumeRichContentAfterScroll() })
+							adoptHydrationOwner()
+							const reuseStableId = String(stableId || "")
+							const reuseGeneration = hydrationOwnerGeneration
+							Qt.callLater(function() {
+								if (reuseGeneration === timeline.scopePresentationGeneration
+										&& reuseStableId === String(messageDelegate.stableId || "")
+										&& messageDelegate.accessibilityPooled !== true)
+									messageDelegate.resumeRichContentAfterScroll()
+							})
 						}
 						onHasPreviewContentChanged: {
 							resetPreviewLoaderIncubationWatchdog(true)
@@ -9856,6 +11086,7 @@ ApplicationWindow {
 									hydrationId)
 							requestPreviewHydrationIfNeeded()
 							if (!contentNeedsHydration) {
+								timeline.scheduleScopePresentationFastPath()
 								completeRichLoaderResumeWhenReady()
 								timeline.scheduleRichContentResume()
 								timeline.scheduleNearViewportPrefetch()
@@ -9873,6 +11104,7 @@ ApplicationWindow {
 								reconcileViewportMembership()
 						}
 						onStableIdChanged: {
+							adoptHydrationOwner()
 							asyncMessageDelegate.resetPresentationHeightIdentity()
 							asyncMessageDelegate.resetViewportProbeHeight()
 							closeMessageActionsForReuse()
@@ -9886,8 +11118,11 @@ ApplicationWindow {
 							previewMaterializationAdmitted = false
 							backendHydrationRequested = false
 							stationaryThumbHydrationStableId = ""
+							stationaryThumbHydrationScopeToken = ""
+							stationaryThumbHydrationScopeGeneration = -1
 							stationaryThumbHydrationPressEpoch = 0
 							stationaryThumbHydrationDwellGeneration = 0
+							stationaryThumbHydrationPinSerial = 0
 							previewBackendErrorEpochActive = false
 							previewBackendErrorStableId = ""
 							messagePresentationReadyLatched = false
@@ -9898,8 +11133,18 @@ ApplicationWindow {
 								++root.performanceChatDelegateCreatedCount
 							richLoaderSuspended = timeline.richScrollInProgress
 								|| timeline.scopePresentationPending
+							adoptHydrationOwner()
 							resumeRichContentAfterScroll()
 							timeline.scheduleRichContentResume()
+						}
+						Connections {
+							target: timeline
+							function onScopePresentationPendingChanged() {
+								if (timeline.scopePresentationPending)
+									return
+								messageDelegate.adoptHydrationOwner()
+								messageDelegate.requestPreviewHydrationIfNeeded()
+							}
 						}
 						// This technical delegate frame must remain ignored for its entire
 						// lifetime. Switching it between ignored and exposed while ListView
@@ -10019,6 +11264,9 @@ ApplicationWindow {
 						readonly property bool hasAttachmentContent: !!attachments && attachments.length > 0
 						readonly property bool hasReplyContent: replyActor.length > 0 || replySnippet.length > 0
 						readonly property bool hasInlineImageContent: root.messageContainsInlineImage(bodySegments)
+						readonly property bool plainScopeResumeEligible: !logEntry
+							&& !contentNeedsHydration && !hasPreviewContent
+							&& !hasAttachmentContent && !hasInlineImageContent
 						readonly property bool hasMessageActions: canReply || canReact || canDelete
 							|| !!source.deliveryCanRetry
 						readonly property bool hasReactions: !!reactions && reactions.length > 0
@@ -10030,6 +11278,9 @@ ApplicationWindow {
 						readonly property bool hasEmbeddedFooterContent: hasReactions
 							|| hasReplyContent || hasDeliveryStatus
 							|| (own && !systemMessage && timestamp.length > 0)
+						readonly property bool plainTimestampOnlyFooterContent: own
+							&& !systemMessage && timestamp.length > 0
+							&& !hasReactions && !hasReplyContent && !hasDeliveryStatus
 						readonly property real richPresentationMetadataHeight:
 							(hasReplyContent ? 44 : 0)
 							+ (hasEmbeddedFooterContent ? 34 : 0)
@@ -10083,19 +11334,25 @@ ApplicationWindow {
 						// so admission and scroll anchors remain stable without painting it.
 						readonly property real previewStagingHeight: 64
 						readonly property real previewReservedHeight:
-							previewTerminalUnavailable ? previewStagingHeight
+							previewNeedsHydration || previewTerminalUnavailable
+								? previewStagingHeight
 								: previewPlaceholderHeight
 						readonly property real attachmentPlaceholderHeight: 320
+						readonly property real richPresentationContentHeight:
+							(hasPreviewContent ? previewReservedHeight : 0)
+							+ (hasAttachmentContent ? attachmentPlaceholderHeight : 0)
+							+ (hasPreviewContent && hasAttachmentContent
+								? Theme.chatContentSpacing : 0)
 						readonly property real lightweightMessageRowHeight:
-							hasPreviewContent ? previewReservedHeight + 72
-								+ richPresentationMetadataHeight
-							: hasAttachmentContent ? attachmentPlaceholderHeight + 72
+							hasPreviewContent || hasAttachmentContent
+								? richPresentationContentHeight + 72
 								+ richPresentationMetadataHeight
 							: hasInlineImageContent ? 360 + richPresentationMetadataHeight
 							: Math.max(48, Math.min(180,
 								48 + (bodySegments || []).length * 22
 									+ (hasReplyContent ? 44 : 0)
-									+ (hasEmbeddedFooterContent ? 34 : 0)))
+									+ (hasEmbeddedFooterContent
+										&& !plainTimestampOnlyFooterContent ? 34 : 0)))
 						// Reactions are compact metadata and wrap naturally in their Flow. Treating
 						// one reaction like a media card makes an otherwise short message expand
 						// across the complete conversation lane.
@@ -10114,7 +11371,7 @@ ApplicationWindow {
 							: Math.min(Theme.chatRichMaximumWidth, Math.max(attachmentTargetWidth,
 								previewMessageWidth, own ? preferredOwnWidth : preferredIncomingWidth))
 						preferredOwnWidth: root.preferredOutgoingMessageWidth(bodySegments, startsGroup,
-							replyActor, replySnippet, hasDeliveryStatus)
+							replyActor, replySnippet, hasDeliveryStatus, compactActionTextInset)
 						preferredIncomingWidth: root.preferredIncomingMessageWidth(bodySegments, startsGroup,
 							replyActor, replySnippet, hasDeliveryStatus)
 						readonly property string deliveryState: String(source.deliveryState || status || "").trim().toLowerCase()
@@ -10193,6 +11450,7 @@ ApplicationWindow {
 										accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 											|| !messageDelegate.itemContainedInViewport(activityLogBody)
 										segments: messageDelegate.bodySegments || []
+										contentIdentity: messageDelegate.stableId
 										resourceActive: !messageDelegate.accessibilityPooled
 										animationsEnabled: !root.visualFixtureOverrideActive
 										hoverEffectsEnabled: !root.visualFixtureOverrideActive
@@ -10211,13 +11469,14 @@ ApplicationWindow {
 							asynchronous: true
 							visible: active
 							onLoaded: {
-										messageDelegate.messageRowMaterialized = true
-										messageDelegate.completeRichLoaderResumeWhenReady()
-										if (timeline.topAnchorActive) {
-											topAnchorSettleTimer.restart()
-											topAnchorFrameTimer.restart()
-											Qt.callLater(function() { timeline.restoreTopAnchor() })
-										}
+								messageDelegate.messageRowMaterialized = true
+								timeline.noteScopePresentationRowLoaderLoaded()
+								messageDelegate.completeRichLoaderResumeWhenReady()
+								if (timeline.topAnchorActive) {
+									topAnchorSettleTimer.restart()
+									topAnchorFrameTimer.restart()
+									Qt.callLater(function() { timeline.restoreTopAnchor() })
+								}
 							}
 							onStatusChanged: {
 								if (status === Loader.Error
@@ -10225,13 +11484,15 @@ ApplicationWindow {
 											messageDelegate.stableId, true))
 									timeline.completeRichLoaderResume(messageDelegate.stableId)
 							}
-							sourceComponent: Component {
-								RowLayout {
-									id: messageRow
-									enabled: !messageDelegate.previewOnlyPaintPending
-									Accessible.ignored: messageDelegate.previewOnlyPaintPending
+								sourceComponent: Component {
+									RowLayout {
+										id: messageRow
+										enabled: true
+										Accessible.ignored: false
 									property alias previewLoader: messagePreviewLoader
 									property alias attachmentLoader: messageAttachmentLoader
+									property alias previewHydrationPlaceholderLoader:
+										messagePreviewHydrationPlaceholderLoader
 									property alias actionsMenu: messageActions
 									readonly property string previewSurfaceState:
 										!messageDelegate.hasPreviewContent ? "not-required"
@@ -10412,14 +11673,15 @@ ApplicationWindow {
                                         Label { width: parent.width; textFormat: Text.PlainText; text: replySnippet; color: Theme.textMuted; font.pixelSize: Theme.fontLabel; elide: Text.ElideRight }
                                     }
                                 }
-								RichMessageBody {
+									RichMessageBody {
 									id: messageBody
 									Layout.fillWidth: true
 									visible: !messageDelegate.deleted
 										&& !messageDelegate.previewSourceOnly
 									accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 										|| !messageDelegate.itemContainedInViewport(messageBody)
-									segments: messageDelegate.bodySegments || []
+										segments: messageDelegate.bodySegments || []
+										contentIdentity: messageDelegate.stableId
 									Layout.rightMargin: messageDelegate.compactActionTextInset
 									resourceActive: messageDelegate.richResourcesActive
 									animationsEnabled: !root.visualFixtureOverrideActive
@@ -10462,122 +11724,140 @@ ApplicationWindow {
                                     font.pixelSize: Theme.fontBody
                                     font.italic: true
                                 }
-								Loader {
-									id: messageAttachmentLoader
-									active: messageDelegate.hasAttachmentContent
-										&& !messageDelegate.attachmentNeedsHydration
-										&& !messageDelegate.richLoaderSuspended
-										&& timeline.prependRichContentActive(
-											messageDelegate.stableId,
-											messageDelegate.richContentViewportEligible)
-									// Older history can insert many rich rows in one model
-									// mutation. Incubate off-screen galleries over subsequent
-									// frames instead of constructing the entire cache window on
-									// the GUI thread in the insertion turn.
-									asynchronous: true
-									// Remain layout-visible while the rich tree is suspended.
-									// Otherwise Qt Layout drops the placeholder height, every rich
-									// row collapses during scroll, and the timeline expands again
-									// when the loaders wake.
+								Item {
+									id: messageAttachmentPresentation
 									visible: messageDelegate.hasAttachmentContent
 									Layout.fillWidth: true
-									Layout.preferredHeight: active && item ? item.implicitHeight
-										: messageDelegate.hasAttachmentContent
-											? messageDelegate.attachmentPlaceholderHeight : 0
-									onLoaded: {
-										timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
-										if (timeline.topAnchorActive) {
-											topAnchorSettleTimer.restart()
-											topAnchorFrameTimer.restart()
-											Qt.callLater(function() { timeline.restoreTopAnchor() })
+									Layout.preferredHeight: visible
+										? messageAttachmentLoader.status === Loader.Ready
+											&& messageAttachmentLoader.item
+												? messageAttachmentLoader.item.implicitHeight
+												: messageDelegate.attachmentPlaceholderHeight
+										: 0
+
+									Loader {
+										id: messageAttachmentLoader
+										anchors.fill: parent
+										active: messageDelegate.hasAttachmentContent
+											&& !messageDelegate.richLoaderSuspended
+											&& timeline.prependRichContentActive(
+												messageDelegate.stableId,
+												messageDelegate.richContentViewportEligible)
+										// Mixed galleries own ready, loading, and failed tiles independently.
+										// Incubate only the gallery tree; never replace all siblings because
+										// one attachment is still hydrating.
+										asynchronous: true
+										visible: active && status === Loader.Ready && !!item
+										onLoaded: {
+											timeline.markPrependRichRowMaterialized(messageDelegate.stableId)
+											if (timeline.topAnchorActive) {
+												topAnchorSettleTimer.restart()
+												topAnchorFrameTimer.restart()
+												Qt.callLater(function() { timeline.restoreTopAnchor() })
+											}
+											if (root.visualFixtureOverrideActive)
+												++root.performanceChatAttachmentLoadedCount
 										}
-										if (root.visualFixtureOverrideActive)
-											++root.performanceChatAttachmentLoadedCount
-									}
-									sourceComponent: Component {
+										sourceComponent: Component {
 										AttachmentGallery {
 											attachments: messageDelegate.attachments || []
 											resourceActive: messageDelegate.richResourcesActive
+												|| (messageDelegate.previewNeedsHydration
+													&& messageDelegate.richContentViewportEligible
+													&& !messageDelegate.richLoaderSuspended)
+											accessibilitySuppressed: messageDelegate.accessibilitySuppressed
+												|| messageDelegate.accessibilityPooled
+												|| !messageDelegate.accessibilityViewportVisible
+											accessibilityViewportItem: timeline
+											accessibilityViewportOffset: timeline.contentY
 											animationsEnabled: !root.visualFixtureOverrideActive
-												&& !timeline.richScrollInProgress
-											onAttachmentRequested: attachment => root.requestAttachment(
-												attachment, messageDelegate.stableId)
-											onAttachmentDownloadRequested: attachment => root.downloadAttachment(attachment, false)
-											onAttachmentRetryRequested: attachment => uiCommands.retryChatAttachmentPreview(
-												activeScope.scopeToken, messageDelegate.stableId,
-												String(attachment.assetId || attachment.assetID || ""))
-											onAttachmentRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
-										}
-									}
-                                }
-								Rectangle {
-									id: messageAttachmentHydrationPlaceholder
-									objectName: "messageAttachmentHydrationPlaceholder"
-									Layout.fillWidth: true
-									Layout.preferredHeight: messageDelegate.attachmentPlaceholderHeight
-									visible: messageDelegate.hasAttachmentContent
-										&& messageDelegate.attachmentNeedsHydration
-									radius: Theme.innerRadius
-									color: Theme.strip
-									border.color: Theme.divider
-									border.width: 1
-									clip: true
-									Accessible.role: Accessible.StaticText
-									Accessible.name: qsTr("Loading image attachment")
-
-									Column {
-										anchors.centerIn: parent
-										spacing: Theme.space2
-
-										Rectangle {
-											anchors.horizontalCenter: parent.horizontalCenter
-											width: 34
-											height: 34
-											radius: Theme.innerRadius
-											color: Theme.panel
-
-											ModernIcon {
-												anchors.centerIn: parent
-												name: "attach"
-												size: 18
-												color: Theme.textMuted
+													&& !timeline.richScrollInProgress
+												onAttachmentRequested: attachment => root.requestAttachment(
+													attachment, messageDelegate.stableId)
+												onAttachmentDownloadRequested: attachment => root.downloadAttachment(
+													attachment, false)
+												onAttachmentRetryRequested: attachment =>
+													uiCommands.retryChatAttachmentPreview(
+														activeScope.scopeToken, messageDelegate.stableId,
+														String(attachment.assetId || attachment.assetID || ""))
+												onAttachmentRefreshRequested: root.queuePreviewHydration(
+													messageDelegate.stableId, true,
+													messageDelegate.hydrationOwnerScopeToken,
+													messageDelegate.hydrationOwnerGeneration)
 											}
 										}
+									}
 
-										Label {
-											anchors.horizontalCenter: parent.horizontalCenter
-											textFormat: Text.PlainText
-											text: qsTr("Loading image preview")
-											color: Theme.textMuted
-											font.pixelSize: Theme.fontLabel
+									Rectangle {
+										id: messageAttachmentHydrationPlaceholder
+										objectName: "messageAttachmentHydrationPlaceholder"
+										anchors.fill: parent
+										visible: messageAttachmentLoader.active
+											&& messageAttachmentLoader.status !== Loader.Ready
+										radius: Theme.innerRadius
+										color: Theme.strip
+										border.color: Theme.divider
+										border.width: 1
+										clip: true
+										Accessible.role: Accessible.StaticText
+										Accessible.name: qsTr("Preparing message attachments")
+										Accessible.ignored: messageDelegate.accessibilitySuppressed
+											|| messageDelegate.accessibilityPooled
+											|| !messageDelegate.itemContainedInViewport(
+												messageAttachmentHydrationPlaceholder)
+
+										Column {
+											anchors.centerIn: parent
+											spacing: Theme.space2
+
+											Rectangle {
+												anchors.horizontalCenter: parent.horizontalCenter
+												width: 34
+												height: 34
+												radius: Theme.innerRadius
+												color: Theme.panel
+
+												ModernIcon {
+													anchors.centerIn: parent
+													name: "attach"
+													size: 18
+													color: Theme.textMuted
+												}
+											}
+
+											Label {
+												anchors.horizontalCenter: parent.horizontalCenter
+												textFormat: Text.PlainText
+												text: qsTr("Preparing attachment gallery")
+												color: Theme.textMuted
+												font.pixelSize: Theme.fontLabel
+												Accessible.ignored: true
+											}
 										}
 									}
 								}
 								Loader {
 									id: messagePreviewHydrationPlaceholderLoader
-									// Pending presentation owns geometry only. Construct and paint this
-									// native row solely for a terminal fallback with its Open action.
+									// Backend hydration keeps the provider tree unmounted. A compact,
+									// bounded native link row still owns the visible loading/error state.
 									active: messageDelegate.hasPreviewContent
-										&& messageDelegate.previewTerminalUnavailable
+										&& (messageDelegate.previewNeedsHydration
+											|| messageDelegate.previewTerminalUnavailable)
 										&& !messageDelegate.richLoaderSuspended
 										&& timeline.prependRichContentActive(
 											messageDelegate.stableId,
 											messageDelegate.richContentViewportEligible)
 									visible: messageDelegate.hasPreviewContent
 										&& (messageDelegate.previewNeedsHydration
-											|| messageDelegate.previewTerminalUnavailable
-											|| !messageDelegate.previewMaterializationAdmitted
-											|| messagePreviewLoader.status !== Loader.Ready)
+											|| messageDelegate.previewTerminalUnavailable)
 									Layout.fillWidth: false
 									Layout.preferredHeight: visible
-										? messageDelegate.previewTerminalUnavailable
-											? messageDelegate.previewStagingHeight
-											: messageDelegate.previewPlaceholderHeight : 0
+										? messageDelegate.previewStagingHeight : 0
 									Layout.alignment: Qt.AlignLeft
 									Layout.preferredWidth: Math.min(messageDelegate.previewTargetWidth,
 										Math.max(1, messageDelegate.previewPlaceholderWidth))
 									Layout.maximumWidth: Layout.preferredWidth
-									opacity: messageDelegate.previewTerminalUnavailable ? 1 : 0
+									opacity: active ? 1 : 0
 									enabled: active
 									Accessible.ignored: !active
 									sourceComponent: Component {
@@ -10586,24 +11866,21 @@ ApplicationWindow {
 											implicitWidth: messagePreviewHydrationPlaceholderLoader.Layout.preferredWidth
 											implicitHeight: messagePreviewHydrationPlaceholderLoader.Layout.preferredHeight
 											radius: Theme.innerRadius
-											color: messageDelegate.previewTerminalUnavailable
-												? Theme.surfaceRaised : "transparent"
-											border.color: messageDelegate.previewTerminalUnavailable
-												? Theme.divider : "transparent"
-											border.width: messageDelegate.previewTerminalUnavailable ? 1 : 0
-											Accessible.role: Accessible.StaticText
-											Accessible.name: (messageDelegate.previewTerminalUnavailable
-												? qsTr("Link preview unavailable for %1")
-												: qsTr("Loading link preview for %1")).arg(
-													String(messageDelegate.preview.host
-														|| messageDelegate.preview.url || qsTr("link")))
+										color: Theme.surfaceRaised
+										border.color: Theme.divider
+										border.width: 1
+										Accessible.role: Accessible.Grouping
+										Accessible.name: messageDelegate.previewTitleLabel
+										Accessible.description: messageDelegate.previewTerminalUnavailable
+											? qsTr("Link preview unavailable")
+											: qsTr("Loading link preview")
 
 											RowLayout {
 												id: previewHydrationCompactRow
 												objectName: "previewHydrationCompactRow"
 												anchors.left: parent.left
 												anchors.right: parent.right
-												anchors.top: parent.top
+											anchors.verticalCenter: parent.verticalCenter
 												anchors.margins: Theme.space2
 												height: Math.max(1, messageDelegate.previewStagingHeight
 													- Theme.space2 * 2)
@@ -10683,7 +11960,11 @@ ApplicationWindow {
 													visible: messageDelegate.previewOpenUrl.length > 0
 													enabled: visible
 													toolTipText: qsTr("Open link")
-													Accessible.name: qsTr("Open link")
+													Accessible.role: Accessible.Link
+													Accessible.name: qsTr("%1: %2").arg(
+														String(messageDelegate.preview.openLabel
+															|| qsTr("Open link"))).arg(
+															messageDelegate.previewTitleLabel)
 													onClicked: Qt.openUrlExternally(
 														messageDelegate.previewOpenUrl)
 												}
@@ -10787,7 +12068,10 @@ ApplicationWindow {
                                     onExternalOpenRequested: url => Qt.openUrlExternally(url)
 									onImageOpenRequested: (source, title) => root.openManagedPreviewImage(
 										source, title, messageDelegate.stableId)
-									onImageRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
+									onImageRefreshRequested: root.queuePreviewHydration(
+										messageDelegate.stableId, true,
+										messageDelegate.hydrationOwnerScopeToken,
+										messageDelegate.hydrationOwnerGeneration)
 									onDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
 										const sameMedia = mediaSession.active
 											&& String(mediaSession.sessionId || "") === messageDelegate.stableId
@@ -11159,14 +12443,14 @@ ApplicationWindow {
 						width: Math.max(1, Math.min(380, timeline.width
 							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
 						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
-						readonly property bool visualLoading: !activeScope.activity && (activeScope.loading
-							|| (timeline.scopePresentationPending
-								&& !timeline.scopePresentationFinalizing
-								&& chatModel.count > 0))
+						// A bounded branded shell owns every replacement frame. Internal
+						// materialization/finalization phases are never named or exposed.
+						readonly property bool visualLoading: !activeScope.activity
+							&& (activeScope.loading
+								|| !timeline.scopePresentationContentVisible)
 						visible: (activeScope.activity ? chatModel.count === 0
-							: (timeline.scopePresentationPending
-								&& !timeline.scopePresentationFinalizing)
-								|| chatModel.count === 0)
+							: chatModel.count === 0
+								|| !timeline.scopePresentationContentVisible)
 							&& !root.connectionTransitionActive
 							&& !root.connectionFailureActive
 						z: 5
@@ -11198,8 +12482,8 @@ ApplicationWindow {
 								width: parent.width
 								textFormat: Text.PlainText
 								text: emptyConversationState.visualLoading
-									? (activeScope.loading ? qsTr("Loading conversation")
-										: qsTr("Preparing conversation"))
+									? (String(activeScope.label || "").trim().length > 0
+										? String(activeScope.label) : qsTr("Loading conversation"))
 									: activeScope.activity ? qsTr("No server log entries yet")
 									: !clientSession.connected ? qsTr("Connect to Mumble")
 									: activeScope.canSend ? qsTr("This conversation is quiet")
@@ -11215,9 +12499,7 @@ ApplicationWindow {
 								width: parent.width
 								textFormat: Text.PlainText
 								text: emptyConversationState.visualLoading
-									? (activeScope.loading
-										? qsTr("Messages will appear here when history is ready.")
-										: qsTr("Recent messages are being laid out."))
+									? qsTr("Loading recent messages…")
 									: activeScope.activity
 										? qsTr("New Murmur server-log entries will appear here live.")
 									: !clientSession.connected ? qsTr("Open the server browser to load rooms and messages.")
@@ -11248,10 +12530,12 @@ ApplicationWindow {
 				ModernButton {
 					id: jumpToLatestButton
 					objectName: "jumpToLatestButton"
+					readonly property real timelineTopMargin: visible ? Theme.space1 : 0
+					readonly property real timelineBottomMargin: visible ? Theme.space1 : 0
 					Layout.alignment: Qt.AlignRight
 					Layout.rightMargin: Theme.space4
-					Layout.topMargin: visible ? Theme.space1 : 0
-					Layout.bottomMargin: visible ? Theme.space1 : 0
+					Layout.topMargin: timelineTopMargin
+					Layout.bottomMargin: timelineBottomMargin
 					Layout.preferredHeight: visible ? implicitHeight : 0
 					visible: timeline.count > 0 && !timeline.stickToBottom
 						&& !timeline.scopePresentationPending

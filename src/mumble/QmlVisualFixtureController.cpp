@@ -216,6 +216,9 @@ namespace {
 			QStringLiteral("menu-message"), QStringLiteral("direct-message-main"),
 			QStringLiteral("chat-message-states"), QStringLiteral("chat-composer-states"),
 			QStringLiteral("chat-attachment-states"), QStringLiteral("chat-history-prepend-anchor"),
+			QStringLiteral("chat-sparse-0"), QStringLiteral("chat-sparse-1"),
+			QStringLiteral("chat-sparse-2"), QStringLiteral("chat-sparse-5"),
+			QStringLiteral("chat-sparse-10"), QStringLiteral("chat-sparse-stonks-5"),
 			QStringLiteral("conversation-search-match"), QStringLiteral("conversation-search-empty"),
 			QStringLiteral("direct-message-tray"), QStringLiteral("direct-message-window"),
 			QStringLiteral("screen-share-editor"),
@@ -307,11 +310,26 @@ namespace {
 
 	QStringList supportedChatSurfaceVariants() {
 		return { QStringLiteral("chat-message-states"), QStringLiteral("chat-composer-states"),
-			QStringLiteral("chat-attachment-states"), QStringLiteral("chat-history-prepend-anchor") };
+			QStringLiteral("chat-attachment-states"), QStringLiteral("chat-history-prepend-anchor"),
+			QStringLiteral("chat-sparse-0"), QStringLiteral("chat-sparse-1"),
+			QStringLiteral("chat-sparse-2"), QStringLiteral("chat-sparse-5"),
+			QStringLiteral("chat-sparse-10"), QStringLiteral("chat-sparse-stonks-5") };
 	}
 
 	bool isChatSurfaceVariant(const QString &variant) {
 		return supportedChatSurfaceVariants().contains(variant);
+	}
+
+	int visualSparseMessageCount(const QString &surfaceVariant) {
+		if (surfaceVariant == QLatin1String("chat-sparse-0")) return 0;
+		if (surfaceVariant == QLatin1String("chat-sparse-1")) return 1;
+		if (surfaceVariant == QLatin1String("chat-sparse-2")) return 2;
+		if (surfaceVariant == QLatin1String("chat-sparse-5")
+			|| surfaceVariant == QLatin1String("chat-sparse-stonks-5")) {
+			return 5;
+		}
+		if (surfaceVariant == QLatin1String("chat-sparse-10")) return 10;
+		return -1;
 	}
 
 	constexpr int VisualHistoryInitialMessageCount = 24;
@@ -319,6 +337,8 @@ namespace {
 
 	int visualMessageCount(const QString &state, const QString &surfaceVariant, const bool afterPresentation) {
 		if (state != QLatin1String("connected")) return 0;
+		const int sparseCount = visualSparseMessageCount(surfaceVariant);
+		if (sparseCount >= 0) return sparseCount;
 		if (surfaceVariant == QLatin1String("chat-message-states")) return 4;
 		if (surfaceVariant == QLatin1String("chat-attachment-states")) return 1;
 		if (surfaceVariant == QLatin1String("chat-history-prepend-anchor")) {
@@ -1011,6 +1031,21 @@ namespace {
 				{ QStringLiteral("url"), source }, { QStringLiteral("title"), title }
 			} });
 		};
+		const auto attachProviderPoster = [&preview](const QString &source, const QString &title) {
+			if (source.isEmpty()) return;
+			preview.insert(QStringLiteral("thumbnailUrl"), source);
+			// Provider embeds use the typed gallery as their stable poster shell. Mark
+			// the poster as provider-playable media instead of an ordinary image so
+			// UI Automation and pointer users retain the intended Play action.
+			preview.insert(QStringLiteral("mediaItems"), QVariantList { QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("video") },
+				{ QStringLiteral("url"), preview.value(QStringLiteral("embedUrl")) },
+				{ QStringLiteral("poster"), source },
+				{ QStringLiteral("thumbnail"), source },
+				{ QStringLiteral("title"), title },
+				{ QStringLiteral("directPlayable"), false }
+			} });
+		};
 
 		if (variant == QLatin1String("loading") || variant == QLatin1String("error")) {
 			const bool failed = variant == QLatin1String("error");
@@ -1039,7 +1074,7 @@ namespace {
 			preview.insert(QStringLiteral("embedKind"), QStringLiteral("youtube"));
 			preview.insert(QStringLiteral("embedUrl"), QStringLiteral("https://www.youtube.com/embed/fixture"));
 			preview.insert(QStringLiteral("embedAspect"), QStringLiteral("wide"));
-			attachImage(registerVisualPreviewImage(host, variant, title, QStringLiteral("Media-first 16:9 fixture"),
+			attachProviderPoster(registerVisualPreviewImage(host, variant, title, QStringLiteral("Media-first 16:9 fixture"),
 				QColor(QStringLiteral("#8b1538")), QColor(QStringLiteral("#243b55"))), title);
 			return preview;
 		}
@@ -1894,6 +1929,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	window->setProperty("visualFixtureSurfaceVariant", surfaceVariant);
 	const int initialExpectedMessageCount = visualMessageCount(state, surfaceVariant, false);
 	const int finalExpectedMessageCount = visualMessageCount(state, surfaceVariant, true);
+	qulonglong preApplyPresentationGeneration = 0;
 	QVariantMap prependFixtureState;
 	{
 		struct MutationScope {
@@ -1938,6 +1974,23 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		}
 		window->setWidth(width);
 		window->setHeight(height);
+		QVariant preApplyTimelineResult;
+		if (!QMetaObject::invokeMethod(window, "timelinePresentationState",
+				Q_RETURN_ARG(QVariant, preApplyTimelineResult))) {
+			if (error) *error = QStringLiteral("The visual fixture could not capture atomic pre-apply timeline identity.");
+			return {};
+		}
+		const QVariantMap preApplyTimelinePresentation = preApplyTimelineResult.toMap();
+		bool preApplyGenerationValid = false;
+		preApplyPresentationGeneration = preApplyTimelinePresentation
+			.value(QStringLiteral("generation")).toULongLong(&preApplyGenerationValid);
+		if (!preApplyGenerationValid) {
+			if (error) *error = QStringLiteral("The visual fixture pre-apply timeline generation is invalid.");
+			return {};
+		}
+		// Capture and mutation share this GUI turn. Queued startup or reload work
+		// therefore cannot enter between the generation baseline and fixture scope
+		// publication, while any direct extra transaction still fails the +1 gate.
 		applyState(state, motdVariant, richPreviewVariant, richPreviewSize, caseVariant, surfaceVariant);
 		if (m_host->chatModel()->rowCount() != initialExpectedMessageCount) {
 			if (error) {
@@ -1951,7 +2004,8 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		const bool expectExpanded = expectMotd && motdVariant != QLatin1String("collapsed");
 		const bool expectChanged = motdVariant == QLatin1String("changed");
 		const bool expectUserHistory = state == QLatin1String("connected")
-			&& (motdVariant == QLatin1String("none") || motdVariant == QLatin1String("history-visible"));
+			&& (motdVariant == QLatin1String("none") || motdVariant == QLatin1String("history-visible"))
+			&& visualSparseMessageCount(surfaceVariant) != 0;
 		if (m_host->sessionController()->hasMotd() != expectMotd
 			|| (expectMotd && m_host->sessionController()->motdExpanded() != expectExpanded)
 			|| m_host->sessionController()->motdChanged() != expectChanged
@@ -1985,6 +2039,26 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		if (error) *error = QStringLiteral("The previous visual navigation drawer did not finish closing.");
 		return {};
 	}
+	const QString expectedFixtureScopeToken = m_host->activeScopeController()->scopeToken();
+	const QString expectedFixtureMessagePrefix = QStringLiteral("fixture:%1:").arg(m_generation + 1);
+	QVariantList expectedFixtureMessageIds;
+	expectedFixtureMessageIds.reserve(m_host->chatModel()->rowCount());
+	for (int row = 0; row < m_host->chatModel()->rowCount(); ++row) {
+		expectedFixtureMessageIds.push_back(
+			m_host->chatModel()->get(row).value(QStringLiteral("id")));
+	}
+	bool expectedFixtureMessageIdsValid = expectedFixtureMessageIds.size() == initialExpectedMessageCount;
+	QSet< QString > expectedFixtureMessageIdSet;
+	for (const QVariant &messageId : expectedFixtureMessageIds) {
+		const QString id = messageId.toString();
+		if (id.isEmpty() || !id.startsWith(expectedFixtureMessagePrefix)
+			|| expectedFixtureMessageIdSet.contains(id)) {
+			expectedFixtureMessageIdsValid = false;
+		}
+		expectedFixtureMessageIdSet.insert(id);
+	}
+	QVariantMap timelinePresentation;
+	qint64 timelinePresentationWaitMs = 0;
 	QString captureWindow = QStringLiteral("main");
 	if (!applySurface(surfaceVariant, &captureWindow, error)) return {};
 	QQuickWindow *presentationWindow = waitForCaptureWindow(captureWindow, error);
@@ -2015,9 +2089,10 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	// Surface-specific mutations must not race that handshake on a fresh
 	// process (where there is no earlier matrix case to provide incidental
 	// warm-up).
-	if (presentationWindow == window && initialExpectedMessageCount > 0) {
-		QVariantMap timelinePresentation;
+	if (presentationWindow == window && isChatSurfaceVariant(surfaceVariant)) {
 		bool timelineReady = false;
+		const int sparseMessageCount = visualSparseMessageCount(surfaceVariant);
+		const bool customHeaderExpected = surfaceVariant == QLatin1String("chat-sparse-stonks-5");
 		QElapsedTimer timelineTimer;
 		timelineTimer.start();
 		while (timelineTimer.elapsed() < 5000) {
@@ -2028,11 +2103,49 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				return {};
 			}
 			timelinePresentation = result.toMap();
+			const QVariantList visibleRows = timelinePresentation.value(QStringLiteral("visibleRows")).toList();
+			bool visibleRowsOwned = initialExpectedMessageCount == 0 ? visibleRows.isEmpty() : !visibleRows.isEmpty();
+			QSet< QString > visibleMessageIds;
+			for (const QVariant &visibleRow : visibleRows) {
+				const QVariantMap row = visibleRow.toMap();
+				const QString messageId = row.value(QStringLiteral("id")).toString();
+				if (messageId.isEmpty() || visibleMessageIds.contains(messageId)
+					|| !expectedFixtureMessageIds.contains(messageId)) {
+					visibleRowsOwned = false;
+					break;
+				}
+				visibleMessageIds.insert(messageId);
+			}
+			const bool sparseReady = sparseMessageCount < 0
+				|| (sparseMessageCount == 0
+					? timelinePresentation.value(QStringLiteral("emptyConversationVisible")).toBool()
+					: timelinePresentation.value(QStringLiteral("presentationFastPath")).toBool()
+						&& timelinePresentation.value(QStringLiteral("sparseBottomAlignmentActive")).toBool()
+						&& timelinePresentation.value(QStringLiteral("sparseBottomAlignmentError")).toDouble() <= 2.0
+						&& timelinePresentation.value(QStringLiteral("sparseTailContentYError")).toDouble() <= 0.5
+						&& timelinePresentation.value(QStringLiteral("pendingHydrationCount")).toInt() == 0);
+			const bool customHeaderReady = !customHeaderExpected
+				|| timelinePresentation.value(QStringLiteral("roomHeaderHeight")).toDouble() > 1.0;
 			timelineReady =
-				timelinePresentation.value(QStringLiteral("count")).toInt() == initialExpectedMessageCount
+				timelinePresentation.value(QStringLiteral("scopeToken")).toString() == expectedFixtureScopeToken
+				&& timelinePresentation.value(QStringLiteral("generation")).toULongLong() > 0
+				&& expectedFixtureMessageIdsValid
+				&& visibleRowsOwned
+				&& timelinePresentation.value(QStringLiteral("count")).toInt() == initialExpectedMessageCount
 				&& !timelinePresentation.value(QStringLiteral("presentationPending")).toBool()
 				&& !timelinePresentation.value(QStringLiteral("presentationFinalizing")).toBool()
-				&& !timelinePresentation.value(QStringLiteral("scopeResetPending")).toBool();
+				&& !timelinePresentation.value(QStringLiteral("scopeResetPending")).toBool()
+				&& timelinePresentation.value(QStringLiteral("stablePresentationReady")).toBool()
+				&& timelinePresentation.value(QStringLiteral("stableFrameCommitted")).toBool()
+				&& timelinePresentation.value(QStringLiteral("stableFrameConsecutiveCount")).toInt() >= 2
+				&& timelinePresentation.value(QStringLiteral("settled")).toBool()
+				&& timelinePresentation.value(QStringLiteral("visibleDeferredSummaryCount")).toInt() == 0
+				&& timelinePresentation.value(QStringLiteral("visibleBlankPresentationCount")).toInt() == 0
+				&& timelinePresentation.value(QStringLiteral("visibleBlankPreviewSurfaceCount")).toInt() == 0
+				&& timelinePresentation.value(QStringLiteral("visiblePresentationHeightPendingCount")).toInt() == 0
+				&& timelinePresentation.value(QStringLiteral("visiblePresentationHeightMismatchCount")).toInt() == 0
+				&& timelinePresentation.value(QStringLiteral("maximumVisiblePresentationHeightError")).toDouble() <= 1.0
+				&& sparseReady && customHeaderReady;
 			if (timelineReady) break;
 			window->requestUpdate();
 			QString frameError;
@@ -2041,15 +2154,67 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				return {};
 			}
 		}
+		timelinePresentationWaitMs = timelineTimer.elapsed();
 		if (!timelineReady) {
 			if (error) {
+				const QVariantMap firstVisibleRow =
+					timelinePresentation.value(QStringLiteral("visibleRows")).toList().value(0).toMap();
 				*error = QStringLiteral("The visual fixture timeline did not finish presentation "
-					"(count %1/%2, pending %3, finalizing %4, scope reset %5).")
+					"(count %1/%2, rich count %3, pending %4, finalizing %5, scope reset %6, "
+					"stable ready %7, stable frame %8, stable frames %9, settled %10, "
+					"visible %11, ready %12, full %13, painted %14, deferred %15, blank %16, "
+					"height pending %17, mismatch %18, max error %19, content %20/%21, "
+					"top margin %22, origin/contentY %23/%24, membership %25/%26, cold delay %27, "
+					"row %28 height/implicit %29/%30, eligible %31, release pending %32, released %33, "
+					"settling %34, identity '%35'/'%36', settled height %37, fast path %38, "
+					"sparse %39/error %40, hydration %41, fast blocker '%42'/'%43', attempts %44, "
+					"sparse tail %45/error %46).")
 					.arg(timelinePresentation.value(QStringLiteral("count")).toInt())
 					.arg(initialExpectedMessageCount)
+					.arg(timelinePresentation.value(QStringLiteral("richPresentationCount")).toInt())
 					.arg(timelinePresentation.value(QStringLiteral("presentationPending")).toBool())
 					.arg(timelinePresentation.value(QStringLiteral("presentationFinalizing")).toBool())
-					.arg(timelinePresentation.value(QStringLiteral("scopeResetPending")).toBool());
+					.arg(timelinePresentation.value(QStringLiteral("scopeResetPending")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("stablePresentationReady")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("stableFrameCommitted")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("stableFrameConsecutiveCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("settled")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("visiblePresentationCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("visibleReadyPresentationCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("visibleFullMessageCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("visiblePaintedCompleteCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("visibleDeferredSummaryCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("visibleBlankPresentationCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("visiblePresentationHeightPendingCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("visiblePresentationHeightMismatchCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("maximumVisiblePresentationHeightError")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("contentHeight")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("viewportHeight")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("topMargin")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("originY")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("contentY")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("viewportMembershipUpdateRunning")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("viewportMembershipUpdatePending")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("coldMaterializationDelayRunning")).toBool())
+					.arg(firstVisibleRow.value(QStringLiteral("id")).toString())
+					.arg(firstVisibleRow.value(QStringLiteral("height")).toDouble())
+					.arg(firstVisibleRow.value(QStringLiteral("loadedImplicitHeight")).toDouble())
+					.arg(firstVisibleRow.value(QStringLiteral("presentationHeightEligible")).toBool())
+					.arg(firstVisibleRow.value(QStringLiteral("presentationHeightReleasePending")).toBool())
+					.arg(firstVisibleRow.value(QStringLiteral("presentationHeightReleased")).toBool())
+					.arg(firstVisibleRow.value(QStringLiteral("richGeometrySettling")).toBool())
+					.arg(firstVisibleRow.value(QStringLiteral("presentationHeightIdentity")).toString())
+					.arg(firstVisibleRow.value(QStringLiteral("presentationHeightSettledIdentity")).toString())
+					.arg(firstVisibleRow.value(QStringLiteral("presentationHeightSettledHeight")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("presentationFastPath")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("sparseBottomAlignmentActive")).toBool())
+					.arg(timelinePresentation.value(QStringLiteral("sparseBottomAlignmentError")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("pendingHydrationCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("firstFastPathBlocker")).toString())
+					.arg(timelinePresentation.value(QStringLiteral("lastFastPathBlocker")).toString())
+					.arg(timelinePresentation.value(QStringLiteral("fastPathAttemptCount")).toInt())
+					.arg(timelinePresentation.value(QStringLiteral("sparseTailContentYTarget")).toDouble())
+					.arg(timelinePresentation.value(QStringLiteral("sparseTailContentYError")).toDouble());
 			}
 			return {};
 		}
@@ -2425,6 +2590,19 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 		{ QStringLiteral("current_match_row"), m_host->chatModel()->currentMatchRow() },
 		{ QStringLiteral("current_match_stable_id"), m_host->chatModel()->currentMatchStableId() }
 	};
+	if (presentationWindow == window) {
+		QVariant result;
+		if (!QMetaObject::invokeMethod(window, "timelinePresentationState", Q_RETURN_ARG(QVariant, result))) {
+			if (error) *error = QStringLiteral("The visual fixture could not record final timeline identity.");
+			return {};
+		}
+		timelinePresentation = result.toMap();
+	}
+	QVariantList fixtureMessageIds;
+	fixtureMessageIds.reserve(m_host->chatModel()->rowCount());
+	for (int row = 0; row < m_host->chatModel()->rowCount(); ++row) {
+		fixtureMessageIds.push_back(m_host->chatModel()->get(row).value(QStringLiteral("id")));
+	}
 	const QVariantMap chatFixtureState = visualChatFixtureState(m_host, surfaceVariant, prependFixtureState);
 	fixtureOverrideRollback.committed = true;
 	++m_generation;
@@ -2465,6 +2643,13 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			 { QStringLiteral("toast_state"), toastState },
 			 { QStringLiteral("conversation_search_state"), conversationSearchState },
 			 { QStringLiteral("chat_fixture_state"), chatFixtureState },
+			 { QStringLiteral("fixture_scope_token"), expectedFixtureScopeToken },
+			 { QStringLiteral("fixture_message_id_prefix"), expectedFixtureMessagePrefix },
+			 { QStringLiteral("fixture_message_ids"), fixtureMessageIds },
+			 { QStringLiteral("pre_apply_presentation_generation"), preApplyPresentationGeneration },
+			 { QStringLiteral("presentation_generation"),
+				 timelinePresentation.value(QStringLiteral("generation")).toULongLong() },
+			 { QStringLiteral("timeline_presentation_wait_ms"), timelinePresentationWaitMs },
 			 { QStringLiteral("focus_target"), requestedFocusName },
 			 { QStringLiteral("actual_device_pixel_ratio"), actualDevicePixelRatio() },
 			 { QStringLiteral("generation"), m_generation } };
@@ -3101,6 +3286,7 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 	session->setSelfDeafened(false);
 	session->setSelfMenu({});
 	session->setAppMenus({});
+	session->setStonks({});
 	directMessages->applyState({
 		{ QStringLiteral("available"), false },
 		{ QStringLiteral("title"), QStringLiteral("Direct messages") },
@@ -3259,25 +3445,73 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 		// conversation state. Apply every fixture model after the scope so those
 		// signal side-effects cannot clobber deterministic state while fixture
 		// writes are temporarily enabled.
+		const QString fixtureGeneration = QString::number(m_generation + 1);
+		const QString fixtureScopeToken = QStringLiteral("0:%1").arg(
+			QString::number(1000000ULL + m_generation + 1));
 		QVariantMap scopeState {
-			{ QStringLiteral("scopeToken"), QStringLiteral("0:1") },
+			{ QStringLiteral("scopeToken"), fixtureScopeToken },
 			{ QStringLiteral("label"), QStringLiteral("Lobby") },
 			{ QStringLiteral("description"), QStringLiteral("Voice room") },
 			{ QStringLiteral("kindLabel"), QStringLiteral("VOICE") },
 			{ QStringLiteral("composerPlaceholder"), QStringLiteral("Message Lobby") },
 			{ QStringLiteral("canSend"), true }, { QStringLiteral("canAttachImages"), true }
 		};
+		if (surfaceVariant == QLatin1String("chat-sparse-stonks-5")) {
+			session->setStonks({
+				{ QStringLiteral("supported"), true },
+				{ QStringLiteral("accessSupported"), true },
+				{ QStringLiteral("allowed"), true },
+				{ QStringLiteral("enabled"), true },
+				{ QStringLiteral("automationHeaderVisible"), true },
+				{ QStringLiteral("selectedPeriod"), QStringLiteral("30d") },
+				{ QStringLiteral("periods"), QVariantList { QStringLiteral("1d"),
+					QStringLiteral("7d"), QStringLiteral("30d"), QStringLiteral("ytd") } },
+				{ QStringLiteral("leaderboard"), QVariantList { QVariantMap {
+					{ QStringLiteral("displayName"), QStringLiteral("Demo User") },
+					{ QStringLiteral("rank"), 1 }, { QStringLiteral("returnPercent"), 8.4 } } } },
+				{ QStringLiteral("popularTickers"), QVariantList { QVariantMap {
+					{ QStringLiteral("symbol"), QStringLiteral("NVDA") },
+					{ QStringLiteral("name"), QStringLiteral("NVIDIA") },
+					{ QStringLiteral("priceLabel"), QStringLiteral("$184.42") },
+					{ QStringLiteral("changePercent"), 2.1 } } } }
+			});
+			scopeState.insert(QStringLiteral("label"), QStringLiteral("#stonks"));
+			scopeState.insert(QStringLiteral("description"), QStringLiteral("Text room"));
+			scopeState.insert(QStringLiteral("kindLabel"), QStringLiteral("TEXT"));
+			scopeState.insert(QStringLiteral("composerPlaceholder"), QStringLiteral("Message #stonks"));
+		}
 		if (surfaceVariant == QLatin1String("chat-composer-states")) {
 			scopeState.insert(QStringLiteral("hasPendingReply"), true);
 			scopeState.insert(QStringLiteral("replyActor"), QStringLiteral("Alex"));
 			scopeState.insert(QStringLiteral("replySnippet"),
 				QStringLiteral("Use the community test build once this check passes."));
 		}
-		scope->applyState(scopeState);
-		participants->replaceParticipantStates(fixtureParticipants);
 		const bool systemMessages = motdVariant != QLatin1String("none")
 			&& motdVariant != QLatin1String("history-visible");
 		const QVariantMap richPreview = visualRichPreview(m_host, richPreviewVariant, richPreviewSize);
+		QVariantList richPreviewAttachments;
+		if (richPreviewVariant == QLatin1String("loading")
+			|| richPreviewVariant == QLatin1String("error")) {
+			const QString mixedImage = registerVisualPreviewImage(m_host,
+				QStringLiteral("rich-preview-mixed-attachment"),
+				QStringLiteral("Ready attachment beside provider state"),
+				QStringLiteral("Mixed rich-row geometry fixture"),
+				QColor(QStringLiteral("#234c58")), QColor(QStringLiteral("#6cc5b5")),
+				QSize(960, 540));
+			richPreviewAttachments = { QVariantMap {
+				{ QStringLiteral("id"), QStringLiteral("rich-preview-mixed-ready") },
+				{ QStringLiteral("inlineToken"), QStringLiteral("1234567890abcdef12345678") },
+				{ QStringLiteral("url"), mixedImage },
+				{ QStringLiteral("thumbnailUrl"), mixedImage },
+				{ QStringLiteral("fileName"), QStringLiteral("provider-state-context.png") },
+				{ QStringLiteral("alt"), QStringLiteral("Ready attachment beside provider state") },
+				{ QStringLiteral("kind"), QStringLiteral("image") },
+				{ QStringLiteral("mime"), QStringLiteral("image/png") },
+				{ QStringLiteral("byteSize"), 245760 },
+				{ QStringLiteral("width"), 960 }, { QStringLiteral("height"), 540 },
+				{ QStringLiteral("state"), QStringLiteral("ready") }
+			} };
+		}
 		QString fixtureBodyText = QStringLiteral("Qt Quick is ready for review.");
 		QString fixtureBodyHtml;
 		if (caseVariant == QLatin1String("rich-image-link")) {
@@ -3290,7 +3524,6 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 				"<img src=\"%1\" alt=\"Qt Quick release artwork\" width=\"640\" height=\"360\"></a></p>")
 				.arg(image.toHtmlEscaped());
 		}
-		const QString fixtureGeneration = QString::number(m_generation + 1);
 		QVariantList fixtureMessages {
 			QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("fixture:%1:1").arg(fixtureGeneration) }, { QStringLiteral("actor"), QStringLiteral("Alex") },
 							{ QStringLiteral("bodyText"), QStringLiteral("Welcome to the deterministic visual fixture.") },
@@ -3304,9 +3537,30 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 							{ QStringLiteral("bodyHtml"), fixtureBodyHtml },
 							{ QStringLiteral("timeLabel"), QStringLiteral("10:25") }, { QStringLiteral("own"), true },
 							{ QStringLiteral("system"), systemMessages },
-							{ QStringLiteral("preview"), richPreview }, { QStringLiteral("attachments"), QVariantList() },
+							{ QStringLiteral("preview"), richPreview },
+							{ QStringLiteral("attachments"), richPreviewAttachments },
 							{ QStringLiteral("reactions"), QVariantList() } }
 		};
+		const int sparseMessageCount = visualSparseMessageCount(surfaceVariant);
+		if (sparseMessageCount >= 0) {
+			fixtureMessages.clear();
+			for (int messageIndex = 0; messageIndex < sparseMessageCount; ++messageIndex) {
+				fixtureMessages.append(QVariantMap {
+					{ QStringLiteral("messageKey"), QStringLiteral("fixture:%1:sparse:%2")
+						.arg(fixtureGeneration, QString::number(messageIndex + 1)) },
+					{ QStringLiteral("actor"), messageIndex % 2 == 0
+						? QStringLiteral("Alex") : QStringLiteral("Demo User") },
+					{ QStringLiteral("bodyText"), QStringLiteral("Sparse message %1 is ready together.")
+						.arg(messageIndex + 1) },
+					{ QStringLiteral("timeLabel"), QStringLiteral("10:%1")
+						.arg(24 + messageIndex, 2, 10, QLatin1Char('0')) },
+					{ QStringLiteral("own"), messageIndex % 2 != 0 },
+					{ QStringLiteral("preview"), QVariantMap() },
+					{ QStringLiteral("attachments"), QVariantList() },
+					{ QStringLiteral("reactions"), QVariantList() }
+				});
+			}
+		}
 		if (surfaceVariant == QLatin1String("chat-message-states")) {
 			fixtureMessages = {
 				QVariantMap {
@@ -3413,6 +3667,13 @@ void QmlVisualFixtureController::applyState(const QString &state, const QString 
 		} else if (surfaceVariant == QLatin1String("chat-history-prepend-anchor")) {
 			fixtureMessages = visualHistoryMessages(fixtureGeneration, 1, VisualHistoryInitialMessageCount);
 		}
+		// Payload construction above may generate deterministic fixture images and
+		// must not count against the cached-conversation presentation budget. Start
+		// the real scope transaction only once every source DTO is ready, then keep
+		// the production ordering in which scope ownership precedes participant and
+		// chat-model publication.
+		scope->applyState(scopeState);
+		participants->replaceParticipantStates(fixtureParticipants);
 		chat->replaceMessages(fixtureMessages);
 		if (surfaceVariant == QLatin1String("chat-composer-states")) {
 			const QString draftImage = registerVisualPreviewImage(m_host,

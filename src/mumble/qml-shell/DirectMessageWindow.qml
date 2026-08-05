@@ -1063,6 +1063,10 @@ Window {
 											objectName: "directMessageAttachments_" + messageDelegate.stableId
 											attachments: root.normalizedSequence(messageDelegate.attachments)
 											resourceActive: !messageDelegate.accessibilityPooled
+											accessibilitySuppressed: messageDelegate.accessibilityPooled
+												|| !messageDelegate.accessibilityViewportVisible
+											accessibilityViewportItem: timeline
+											accessibilityViewportOffset: timeline.contentY
 											animationsEnabled: !root.visualFixtureMode
 											onAttachmentRequested: attachment => root.requestAttachment(
 												attachment, messageDelegate.stableId)

@@ -52,6 +52,7 @@ class Database;
 class PacketDataStream;
 class QUdpSocket;
 class QSslSocket;
+class ServerHandler;
 class VoiceRecorder;
 
 class ServerHandlerMessageEvent : public QEvent {
@@ -59,7 +60,10 @@ public:
 	Mumble::Protocol::TCPMessageType type;
 	QByteArray qbaMsg;
 	bool bFlush;
-	ServerHandlerMessageEvent(const QByteArray &msg, Mumble::Protocol::TCPMessageType type, bool flush = false);
+	quintptr sourceHandlerIdentity = 0;
+	quint64 sourceConnectionRunEpoch = 0;
+	ServerHandlerMessageEvent(const QByteArray &msg, Mumble::Protocol::TCPMessageType type, bool flush = false,
+							  quintptr sourceHandlerIdentity = 0, quint64 sourceConnectionRunEpoch = 0);
 };
 
 enum class ServerHandlerState {
@@ -138,6 +142,7 @@ private:
 	std::atomic_bool m_udpEnabled{ true };
 	std::atomic_bool m_strongConnection{ false };
 	std::atomic_bool m_serverSynchronized{ false };
+	std::atomic< quint64 > m_connectionRunEpoch{ 0 };
 	mutable QReadWriteLock m_digestLock;
 	QByteArray m_serverDigest;
 	mutable QReadWriteLock m_tlsDetailsLock;
@@ -156,6 +161,7 @@ private:
 
 	bool initializeThreadResources(QString &errorMessage);
 	void releaseThreadResources();
+	bool acceptsMessageEventForCurrentRun(const ServerHandlerMessageEvent &event) const;
 	void publishConnection(ConnectionPtr connection);
 	ConnectionPtr takeConnection();
 	void setServerDigest(QByteArray digest);
@@ -211,6 +217,7 @@ public:
 	/// Refreshes settings that are consumed during run() startup. Call only from
 	/// the owner/UI thread while this handler is stopped.
 	void refreshStartConfiguration();
+	quint64 connectionRunEpoch() const;
 	/// Releases process-wide resources owned by this handler after run() has
 	/// returned. This is idempotent and allows a replacement handler to be
 	/// installed without waiting for transient shared_ptr readers to disappear.

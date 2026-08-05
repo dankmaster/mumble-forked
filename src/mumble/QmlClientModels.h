@@ -531,6 +531,7 @@ public:
 	void setPresentationBusy(bool busy);
 	ChatTimelinePresentationProxyModel *presentationModel();
 	ChatTimelinePresentationProxyModel *deferredPresentationModel();
+	Q_INVOKABLE bool deferredMessagePlainForMaterialization(const QString &messageId) const;
 	Q_INVOKABLE bool materializeDeferredMessage(const QString &messageId);
 	Q_INVOKABLE bool requestBodyHydration(const QString &messageId);
 	Q_INVOKABLE bool nextMatch();
@@ -563,6 +564,10 @@ private:
 		QString messageId;
 		QByteArray cacheKey;
 		QVariantList segments;
+	};
+	struct DeferredRowUpdate {
+		QVariantMap message;
+		bool plainForMaterialization = false;
 	};
 
 	MessageMutation applyAcceptedMessage(const QVariantMap &message);
@@ -623,7 +628,7 @@ private:
 	// Source updates for a fixed-height deferred row are not presentation work
 	// until that row approaches the viewport. Retain only the newest complete
 	// message DTO and fold it into the single materialization mutation.
-	QHash< QString, QVariantMap > m_deferredRowUpdates;
+	QHash< QString, DeferredRowUpdate > m_deferredRowUpdates;
 	ChatTimelinePresentationProxyModel m_presentationModel;
 	ChatTimelinePresentationProxyModel m_deferredPresentationModel;
 };

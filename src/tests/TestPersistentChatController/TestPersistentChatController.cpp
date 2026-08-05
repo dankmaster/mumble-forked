@@ -12,7 +12,9 @@
 namespace {
 	bool g_gatewayReady                          = false;
 	int g_initialRequestCount                    = 0;
+	int g_olderRequestCount                      = 0;
 	int g_warmupRequestCount                     = 0;
+	quint64 g_gatewayConnectionGeneration        = 1;
 	bool g_warmupRequestSucceeds                 = true;
 	MumbleProto::ChatScope g_lastInitialRequestScope = MumbleProto::Channel;
 	unsigned int g_lastInitialRequestScopeID     = 0;
@@ -22,12 +24,14 @@ namespace {
 	void resetGatewayRequestState() {
 		g_gatewayReady              = false;
 		g_initialRequestCount       = 0;
+		g_olderRequestCount         = 0;
 		g_warmupRequestCount        = 0;
 		g_warmupRequestSucceeds     = true;
 		g_lastInitialRequestScope   = MumbleProto::Channel;
 		g_lastInitialRequestScopeID = 0;
 		g_lastWarmupScopes.clear();
 		g_lastWarmupLimit = 0;
+		g_gatewayConnectionGeneration = 1;
 	}
 }
 
@@ -39,6 +43,10 @@ void PersistentChatGateway::setServerHandler(ServerHandler *) {
 
 ServerHandler *PersistentChatGateway::serverHandler() const {
 	return nullptr;
+}
+
+quint64 PersistentChatGateway::connectionGeneration() const {
+	return g_gatewayConnectionGeneration;
 }
 
 bool PersistentChatGateway::isReady() const {
@@ -64,6 +72,7 @@ bool PersistentChatGateway::requestWarmupPages(
 }
 
 void PersistentChatGateway::requestOlder(MumbleProto::ChatScope, unsigned int, unsigned int) {
+	++g_olderRequestCount;
 }
 
 void PersistentChatGateway::send(MumbleProto::ChatScope, unsigned int, const QString &, MumbleProto::ChatBodyFormat,
@@ -81,7 +90,7 @@ void PersistentChatGateway::markRead(MumbleProto::ChatScope, unsigned int, unsig
 }
 
 void PersistentChatGateway::handleIncomingHistory(const MumbleProto::ChatHistoryResponse &response) {
-	emit historyReceived(response);
+	emit historyReceived(response, g_gatewayConnectionGeneration);
 }
 
 void PersistentChatGateway::handleIncomingMessage(const MumbleProto::ChatMessage &message) {
@@ -178,7 +187,9 @@ private slots:
 	void restoresCachedScopeSnapshots();
 	void activeSnapshotChangedPublishesTwoHistoryMessages();
 	void liveScopeWithoutHistoryPermissionPublishesMessages();
-	void forceReloadSendsInitialRequestWhileInitialLoadIsInFlight();
+	void forceReloadCoalescesWithInitialRequestInFlight();
+	void ignoresLateHistoryAfterReconnectToSameScope();
+	void refreshRequestBlocksConcurrentOlderPage();
 	void warmupScopesSkipsActiveScope();
 	void warmupScopesRequestsBatchAndCachesResponses();
 	void liveMessagesDoNotSatisfyInitialHistoryLoad();
@@ -193,6 +204,7 @@ private slots:
 
 void TestPersistentChatController::activeSnapshotChangedPublishesTwoHistoryMessages() {
 	resetGatewayRequestState();
+	g_gatewayReady = true;
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -254,6 +266,7 @@ void TestPersistentChatController::liveScopeWithoutHistoryPermissionPublishesMes
 
 void TestPersistentChatController::restoresCachedScopeSnapshots() {
 	resetGatewayRequestState();
+	g_gatewayReady = true;
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -281,7 +294,7 @@ void TestPersistentChatController::restoresCachedScopeSnapshots() {
 	resetGatewayRequestState();
 }
 
-void TestPersistentChatController::forceReloadSendsInitialRequestWhileInitialLoadIsInFlight() {
+void TestPersistentChatController::forceReloadCoalescesWithInitialRequestInFlight() {
 	resetGatewayRequestState();
 	g_gatewayReady = true;
 
@@ -298,8 +311,74 @@ void TestPersistentChatController::forceReloadSendsInitialRequestWhileInitialLoa
 	QCOMPARE(g_initialRequestCount, 1);
 
 	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::Channel, 7), true);
-	QCOMPARE(g_initialRequestCount, 2);
+	QCOMPARE(g_initialRequestCount, 1);
 
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::ignoresLateHistoryAfterReconnectToSameScope() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	const PersistentChatScopeKey key =
+		PersistentChatScopeKey::fromScope(MumbleProto::Channel, 7);
+	controller.setActiveScope(key, false);
+	QCOMPARE(g_initialRequestCount, 1);
+
+	controller.reset();
+	++g_gatewayConnectionGeneration;
+	controller.setActiveScope(key, false);
+	QCOMPARE(g_initialRequestCount, 2);
+	emit gateway.historyReceived(
+		makeHistory(MumbleProto::Channel, 7,
+					{ makeMessage(70, 7000, MumbleProto::Channel, 7) },
+					0, 70, false),
+		g_gatewayConnectionGeneration - 1);
+
+	QCOMPARE(controller.activeSnapshot().messages.size(), 0);
+	QVERIFY(!controller.activeSnapshot().initialLoaded);
+	QCOMPARE(controller.activeSnapshot().loadingState, PersistentChatLoadingState::Initial);
+
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::Channel, 7,
+					{ makeMessage(71, 7100, MumbleProto::Channel, 7) },
+					0, 71, false));
+	QCOMPARE(controller.activeSnapshot().messages.size(), 1);
+	QCOMPARE(controller.activeSnapshot().messages.constFirst().message_id(), 71U);
+	QVERIFY(controller.activeSnapshot().initialLoaded);
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::refreshRequestBlocksConcurrentOlderPage() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	const PersistentChatScopeKey key =
+		PersistentChatScopeKey::fromScope(MumbleProto::Channel, 7);
+	controller.setActiveScope(key, false);
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::Channel, 7,
+					{ makeMessage(70, 7000, MumbleProto::Channel, 7) },
+					0, 70, true));
+
+	controller.setActiveScope(key, true);
+	QCOMPARE(g_initialRequestCount, 2);
+	QVERIFY(!controller.requestOlderForActiveScope());
+	QCOMPARE(g_olderRequestCount, 0);
+	QCOMPARE(controller.activeSnapshot().loadingState, PersistentChatLoadingState::Refreshing);
+
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::Channel, 7,
+					{ makeMessage(71, 7100, MumbleProto::Channel, 7) },
+					0, 70, true));
+	QVERIFY(controller.requestOlderForActiveScope());
+	QCOMPARE(g_olderRequestCount, 1);
 	resetGatewayRequestState();
 }
 
@@ -421,6 +500,8 @@ void TestPersistentChatController::keepsInactivePendingHistoryForCache() {
 }
 
 void TestPersistentChatController::mergesOlderHistoryAndReadState() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -431,6 +512,7 @@ void TestPersistentChatController::mergesOlderHistoryAndReadState() {
 					{ makeMessage(20, 2000, MumbleProto::Channel, 7),
 					  makeMessage(21, 2010, MumbleProto::Channel, 7) },
 					20, 20, true));
+	QVERIFY(controller.requestOlderForActiveScope());
 	gateway.handleIncomingHistory(
 		makeHistory(MumbleProto::Channel, 7,
 					{ makeMessage(10, 1000, MumbleProto::Channel, 7),
@@ -445,6 +527,7 @@ void TestPersistentChatController::mergesOlderHistoryAndReadState() {
 	QCOMPARE(snapshot.oldestLoadedMessageId, 10U);
 	QCOMPARE(snapshot.hasOlder, false);
 	QCOMPARE(snapshot.unreadCount, 0);
+	resetGatewayRequestState();
 }
 
 void TestPersistentChatController::olderHistoryUsesStableRevisionAndBulkOrdering() {
@@ -499,6 +582,8 @@ void TestPersistentChatController::olderHistoryUsesStableRevisionAndBulkOrdering
 }
 
 void TestPersistentChatController::appliesEmbedUpdatesToCachedMessages() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -515,9 +600,12 @@ void TestPersistentChatController::appliesEmbedUpdatesToCachedMessages() {
 	QCOMPARE(snapshot.messages.front().embeds_size(), 1);
 	QCOMPARE(QString::fromUtf8(snapshot.messages.front().embeds(0).canonical_url().c_str()),
 			 QStringLiteral("https://example.com/preview"));
+	resetGatewayRequestState();
 }
 
 void TestPersistentChatController::preservesReplyMetadataFromHistory() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -542,9 +630,12 @@ void TestPersistentChatController::preservesReplyMetadataFromHistory() {
 	QCOMPARE(QString::fromUtf8(snapshot.messages.back().reactions(0).emoji().c_str()), QString::fromUtf8("🔥"));
 	QCOMPARE(snapshot.messages.back().reactions(0).count(), 2U);
 	QCOMPARE(snapshot.messages.back().reactions(0).self_reacted(), true);
+	resetGatewayRequestState();
 }
 
 void TestPersistentChatController::appliesReactionUpdatesToCachedMessages() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -576,9 +667,12 @@ void TestPersistentChatController::appliesReactionUpdatesToCachedMessages() {
 			 QStringLiteral("Bob"));
 	QCOMPARE(QString::fromUtf8(snapshot.messages.front().reactions(1).actor_names(1).c_str()),
 			 QStringLiteral("Carol"));
+	resetGatewayRequestState();
 }
 
 void TestPersistentChatController::removesDeletedMessageFromCachedSnapshot() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -600,6 +694,7 @@ void TestPersistentChatController::removesDeletedMessageFromCachedSnapshot() {
 
 	const PersistentChatScopeStateSnapshot snapshot = controller.activeSnapshot();
 	QCOMPARE(snapshot.messages.size(), 0);
+	resetGatewayRequestState();
 }
 
 QTEST_MAIN(TestPersistentChatController)

@@ -79,6 +79,15 @@ QMutex ServerHandler::nextConnectionIDMutex;
 
 namespace {
 QMutex serverHandlerRunMutex;
+std::atomic< quint64 > nextServerHandlerRunEpoch{ 0 };
+
+quint64 allocateServerHandlerRunEpoch() {
+	quint64 epoch = 0;
+	do {
+		epoch = nextServerHandlerRunEpoch.fetch_add(1, std::memory_order_relaxed) + 1;
+	} while (epoch == 0);
+	return epoch;
+}
 
 bool serverAllowsAdvertisedChatFeature(const MumbleProto::ChatFeature feature) {
 	return Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures, feature);
@@ -202,11 +211,14 @@ MumbleProto::Version buildClientVersionMessage() {
 } // namespace
 
 ServerHandlerMessageEvent::ServerHandlerMessageEvent(const QByteArray &msg, Mumble::Protocol::TCPMessageType type,
-													 bool flush)
+												 bool flush, quintptr sourceHandlerIdentity,
+												 quint64 sourceConnectionRunEpoch)
 	: QEvent(static_cast< QEvent::Type >(SERVERSEND_EVENT)) {
-	qbaMsg     = msg;
-	this->type = type;
-	bFlush     = flush;
+	qbaMsg                              = msg;
+	this->type                          = type;
+	bFlush                              = flush;
+	this->sourceHandlerIdentity         = sourceHandlerIdentity;
+	this->sourceConnectionRunEpoch      = sourceConnectionRunEpoch;
 }
 
 #ifdef Q_OS_WIN
@@ -267,6 +279,7 @@ ServerHandler::ServerHandler() {
 
 void ServerHandler::refreshStartConfiguration() {
 	Q_ASSERT(!isRunning());
+	m_connectionRunEpoch.store(allocateServerHandlerRunEpoch(), std::memory_order_release);
 	// Aborted is terminal only for the current run. MainWindow may reuse a
 	// stopped handler for its timed reconnect path.
 	m_state.store(ServerHandlerState::Idle, std::memory_order_release);
@@ -275,6 +288,10 @@ void ServerHandler::refreshStartConfiguration() {
 	m_clientCertificate = Global::get().s.kpCertificate;
 	m_suppressIdentity  = Global::get().s.bSuppressIdentity;
 	m_qosEnabled        = Global::get().s.bQoS;
+}
+
+quint64 ServerHandler::connectionRunEpoch() const {
+	return m_connectionRunEpoch.load(std::memory_order_acquire);
 }
 
 bool ServerHandler::initializeThreadResources(QString &errorMessage) {
@@ -382,6 +399,10 @@ void ServerHandler::customEvent(QEvent *evt) {
 	}
 
 	ServerHandlerMessageEvent *shme = static_cast< ServerHandlerMessageEvent * >(evt);
+	if (!acceptsMessageEventForCurrentRun(*shme)) {
+		mumble::chatperf::recordValue("server.send.retired_run_dropped", 1);
+		return;
+	}
 
 	const ConnectionPtr connection = connectionSnapshot();
 	if (connection) {
@@ -392,6 +413,11 @@ void ServerHandler::customEvent(QEvent *evt) {
 			}
 		}
 	}
+}
+
+bool ServerHandler::acceptsMessageEventForCurrentRun(const ServerHandlerMessageEvent &event) const {
+	return event.sourceConnectionRunEpoch != 0
+		&& event.sourceConnectionRunEpoch == connectionRunEpoch();
 }
 
 void ServerHandler::changeState(ServerHandlerState state) {
@@ -702,7 +728,8 @@ void ServerHandler::sendMessage(const unsigned char *data, int len, bool force) 
 		memcpy(uc + 6, data, static_cast< std::size_t >(len));
 
 		QCoreApplication::postEvent(this,
-								new ServerHandlerMessageEvent(qba, Mumble::Protocol::TCPMessageType::UDPTunnel, true));
+								new ServerHandlerMessageEvent(qba, Mumble::Protocol::TCPMessageType::UDPTunnel, true, 0,
+														  connectionRunEpoch()));
 	} else {
 		if (!connection->csCrypt->encrypt(reinterpret_cast< const unsigned char * >(data), m_udpCryptoBuffer.data(),
 										  static_cast< unsigned int >(len))) {
@@ -718,7 +745,8 @@ void ServerHandler::sendProtoMessage(const ::google::protobuf::Message &msg, Mum
 
 	if (QThread::currentThread() != thread()) {
 		Connection::messageToNetwork(msg, type, qba);
-		ServerHandlerMessageEvent *shme = new ServerHandlerMessageEvent(qba, type, false);
+		ServerHandlerMessageEvent *shme =
+			new ServerHandlerMessageEvent(qba, type, false, 0, connectionRunEpoch());
 		QCoreApplication::postEvent(this, shme);
 	} else {
 		const ConnectionPtr connection = connectionSnapshot();
@@ -1123,7 +1151,8 @@ void ServerHandler::message(Mumble::Protocol::TCPMessageType type, const QByteAr
 			}
 		}
 	} else {
-		ServerHandlerMessageEvent *shme = new ServerHandlerMessageEvent(qbaMsg, type, false);
+		ServerHandlerMessageEvent *shme = new ServerHandlerMessageEvent(
+			qbaMsg, type, false, reinterpret_cast< quintptr >(this), connectionRunEpoch());
 		QCoreApplication::postEvent(Global::get().mw, shme);
 	}
 }

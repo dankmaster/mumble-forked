@@ -28,6 +28,7 @@ Rectangle {
 		inlineMediaLoader.item
 			? Number(inlineMediaLoader.item.providerDocumentLoadTimeoutMs || 0) : 0
 	property bool renderActive: true
+	property int reuseEpoch: 0
 	// The pressed-thumb warm lane is deliberately static-only. It never grants
 	// provider/player ownership and is ignored by every animated resource path.
 	property bool warmStaticActive: false
@@ -508,11 +509,15 @@ Rectangle {
 		selectedMediaIndex = Math.max(0, Math.min(selectedMediaIndex, Math.max(0, itemCount - 1)))
 		const retryHydratedPoster = embedPosterFallbackActive && renderActive
 			&& embedPosterHydrationRetryCount < embedPosterHydrationRetryLimit
+		const queuedPreviewIdentity = previewIdentity
+		const queuedReuseEpoch = reuseEpoch
         imageRefreshQueued = false
 		if (retryHydratedPoster) {
 			embedPosterHydrationRetryCount += 1
 			Qt.callLater(function() {
-				if (root.embedPosterFallbackActive && root.renderActive)
+				if (root.reuseEpoch === queuedReuseEpoch
+						&& root.previewIdentity === queuedPreviewIdentity
+						&& root.embedPosterFallbackActive && root.renderActive)
 					root.resetEmbedPosterRecovery()
 			})
 		}
@@ -581,8 +586,10 @@ Rectangle {
 		id: inlineComponentRetryTimer
 		interval: 0
 		repeat: false
+		property string ownerPreviewIdentity: ""
 		onTriggered: {
-			if (inlineMediaLoader.active)
+			if (ownerPreviewIdentity === root.previewIdentity
+					&& inlineMediaLoader.active)
 				inlineMediaLoader.updateSource()
 		}
 	}
@@ -629,6 +636,15 @@ Rectangle {
 	}
 
 	function resetForReuse() {
+		// Every queued zero-delay callback belongs to the current preview identity.
+		// Stop them before mutable selection/focus state is rebound to another row.
+		currentMediaRequestTimer.stop()
+		inlineFocusRestoreTimer.stop()
+		inlineFocusHandoffTimer.stop()
+		inlineFailureFocusTimer.stop()
+		inlineComponentRetryTimer.stop()
+		++reuseEpoch
+		inlineRuntimeRetryFocusTimer.stop()
         userExpanded = false
 		sizePresetOverride = ""
         selectedMediaIndex = 0
@@ -641,6 +657,9 @@ Rectangle {
 		inlineFocusPreviewIdentity = ""
 		inlineFocusSessionId = ""
 		inlineFocusRestoreGeneration += 1
+		inlineComponentRetryTimer.ownerPreviewIdentity = previewIdentity
+		if (inlineMediaLoader.active)
+			inlineComponentRetryTimer.restart()
     }
 
 	function requestImageRefresh() {
@@ -918,6 +937,7 @@ Rectangle {
 		if (typeof mediaSessionController.retry === "function")
 			mediaSessionController.retry()
 		inlineMediaLoader.source = ""
+		inlineComponentRetryTimer.ownerPreviewIdentity = previewIdentity
 		inlineComponentRetryTimer.restart()
 	}
 

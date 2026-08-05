@@ -27,6 +27,7 @@ public:
 
 	void setServerHandler(ServerHandler *serverHandler);
 	ServerHandler *serverHandler() const;
+	quint64 connectionGeneration() const;
 	bool isReady() const;
 
 	void requestInitialPage(MumbleProto::ChatScope scope, unsigned int scopeID);
@@ -49,12 +50,14 @@ public:
 	void handleIncomingReadState(const MumbleProto::ChatReadStateUpdate &update);
 
 signals:
-	void historyReceived(const MumbleProto::ChatHistoryResponse &response);
+	void historyReceived(const MumbleProto::ChatHistoryResponse &response, quint64 connectionGeneration);
 	void messageReceived(const MumbleProto::ChatMessage &message);
 	void readStateReceived(const MumbleProto::ChatReadStateUpdate &update);
 
 private:
 	QPointer< ServerHandler > m_serverHandler;
+	quint64 m_serverHandlerRunEpoch = 0;
+	quint64 m_connectionGeneration = 0;
 };
 
 #endif // MUMBLE_MUMBLE_PERSISTENTCHATGATEWAY_H_

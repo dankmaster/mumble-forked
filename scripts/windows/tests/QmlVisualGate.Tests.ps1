@@ -433,9 +433,11 @@ Describe "Qt Quick visual manifest validation" {
 		$models | Should Match '(?s)bool MediaSessionBackend::detachedPlaybackSupported\(\) const \{\s*#ifdef Q_OS_WIN.*?return false;'
 	}
 
-	It "gates attachment image previews by their exact accessible alt label" {
+	It "gates every contained attachment control through the shared viewport bounds contract" {
 		$gateScript = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
-		$gateScript | Should Match '"chat-attachment-states" \{ @\([\s\S]*?"Community test dashboard", "Loading Performance trace"'
+		$gateScript | Should Match '"chat-attachment-states" \{ @\([\s\S]*?"Community test dashboard"[\s\S]*?"Save original Community test dashboard"[\s\S]*?"Performance trace"[\s\S]*?"Save original Performance trace"[\s\S]*?"Loading Performance trace"[\s\S]*?"Failed attachment preview"'
+		$gateScript | Should Match 'Assert-QmlAccessibilityViewportBounds -Snapshot \$Snapshot -CaseId \$CaseId'
+		$gateScript | Should Not Match 'exposes partially clipped semantic node'
 		$gateScript | Should Not Match '"View preview Community test dashboard"'
 	}
 
@@ -512,7 +514,234 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'presentationPending'
 		$worker | Should Match 'presentationFinalizing'
 		$worker | Should Match 'scopeResetPending'
+		$worker | Should Match 'stablePresentationReady'
+		$worker | Should Match 'stableFrameCommitted'
+		$worker | Should Match 'visibleFrameCommitted'
+		$worker | Should Match 'visibleDeadlineFallbackCount'
+		$worker | Should Match 'stableFrameConsecutiveCount'
+		$worker | Should Match 'visiblePresentationHeightMismatchCount'
+		$controller | Should Match 'stablePresentationReady'
+		$controller | Should Match 'stableFrameCommitted'
+		$controller | Should Match 'rich-preview-mixed-attachment'
+		$controller | Should Match 'Ready attachment beside provider state'
 		$worker | Should Match 'did not finish its production timeline presentation'
+		$worker | Should Match '\$requiresProductionTimelineHandshake\s*=\s*\$captureWindow\s*-eq\s*"main"[\s\S]*\[string\]\$case\.state\s*-eq\s*"connected"'
+		$previewCases = @($matrix.cases | Where-Object {
+			[string](Get-QmlVisualCaseValue $_ "rich_preview_variant" "none") -ne "none"
+		})
+		$previewCases.Count | Should BeGreaterThan 0
+		foreach ($previewCase in $previewCases) {
+			[string]$previewCase.state | Should Be "connected"
+		}
+	}
+
+	It "supports task-local sparse chat matrices without changing the tracked baseline" {
+		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
+		$main = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\Main.qml"
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		$matrix = Get-Content -Raw "$PSScriptRoot\..\qml-visual-gate-matrix.json" |
+			ConvertFrom-Json
+		$expectedSparseSurfaces = @(
+			"chat-sparse-0", "chat-sparse-1", "chat-sparse-2", "chat-sparse-5",
+			"chat-sparse-10", "chat-sparse-stonks-5")
+		@($matrix.cases | Where-Object {
+			[string]$_.surface_variant -in $expectedSparseSurfaces
+		}).Count | Should Be 0
+		foreach ($surface in $expectedSparseSurfaces) {
+			$controller | Should Match ([regex]::Escape('QStringLiteral("' + $surface + '")'))
+			$worker | Should Match ([regex]::Escape('"' + $surface + '"'))
+		}
+		$controller | Should Match 'visualSparseMessageCount'
+		$controller | Should Match 'presentationWindow == window && isChatSurfaceVariant\(surfaceVariant\)'
+		$controller | Should Match 'emptyConversationVisible'
+		$controller | Should Match 'sparseBottomAlignmentActive'
+		$controller | Should Match 'sparseBottomAlignmentError'
+		$controller | Should Match 'sparseTailContentYError'
+		$controller | Should Match 'roomHeaderHeight'
+		$main | Should Match 'roomHeaderBottom'
+		$main | Should Match 'composerTop'
+		$main | Should Match 'jumpToLatestTop'
+		$main | Should Match 'historyLoaderHeight'
+		$worker | Should Match '\$isSparseChatSurface\s*=\s*\$surfaceVariant\s*-like\s*"chat-sparse-\*"'
+		$worker | Should Match 'visibleTailGap'
+		$worker | Should Match 'footerHeight'
+		$worker | Should Match 'sparseTailContentYError'
+		$worker | Should Match 'pendingHydrationCount'
+		$worker | Should Match 'richHydrated'
+		$worker | Should Match 'composerHeight'
+		$worker | Should Match 'function Test-QmlTimelineViewportGeometry'
+		$worker | Should Match '\[Math\]::Abs\(\$viewportBottom - \(\$viewportY \+ \$viewportHeight\)\) -gt 1\.0'
+		$worker | Should Match '\$jumpTop - \(\$layoutBoundary \+ \$jumpTopMargin\)'
+		$worker | Should Match '\$composerTop - \$layoutBoundary'
+		$worker | Should Match '\[Math\]::Abs\(\$viewportY - \[double\]\$Timeline\.roomHeaderBottom\) -gt 1\.0'
+		$worker | Should Match '\$expectUserHistory[\s\S]*\$expectedMessageCount\s*-gt\s*0'
+	}
+
+	It "fails closed on malformed timeline viewport geometry" -TestCases @(
+		@{ Name = "exact"; CustomHeader = $false; History = $false; Expected = $true; Timeline = [pscustomobject]@{
+			viewportY = 100.0; viewportBottom = 700.0; viewportHeight = 600.0
+			composerTop = 700.0; roomHeaderHeight = 0.0; roomHeaderBottom = 0.0
+			jumpToLatestVisible = $false; jumpToLatestTop = 0.0; jumpToLatestHeight = 0.0
+			jumpToLatestBottom = 0.0; jumpToLatestTopMargin = 0.0; jumpToLatestBottomMargin = 0.0
+			aboveComposerTickerVisible = $false; aboveComposerTickerTop = 0.0
+			aboveComposerTickerHeight = 0.0; aboveComposerTickerBottom = 0.0 } }
+		@{ Name = "bottom gap"; CustomHeader = $false; History = $false; Expected = $false; Timeline = [pscustomobject]@{
+			viewportY = 100.0; viewportBottom = 650.0; viewportHeight = 600.0
+			composerTop = 700.0; roomHeaderHeight = 0.0; roomHeaderBottom = 0.0
+			jumpToLatestVisible = $false; jumpToLatestTop = 0.0; jumpToLatestHeight = 0.0
+			jumpToLatestBottom = 0.0; jumpToLatestTopMargin = 0.0; jumpToLatestBottomMargin = 0.0
+			aboveComposerTickerVisible = $false; aboveComposerTickerTop = 0.0
+			aboveComposerTickerHeight = 0.0; aboveComposerTickerBottom = 0.0 } }
+		@{ Name = "height mismatch"; CustomHeader = $false; History = $false; Expected = $false; Timeline = [pscustomobject]@{
+			viewportY = 100.0; viewportBottom = 700.0; viewportHeight = 500.0
+			composerTop = 700.0; roomHeaderHeight = 0.0; roomHeaderBottom = 0.0
+			jumpToLatestVisible = $false; jumpToLatestTop = 0.0; jumpToLatestHeight = 0.0
+			jumpToLatestBottom = 0.0; jumpToLatestTopMargin = 0.0; jumpToLatestBottomMargin = 0.0
+			aboveComposerTickerVisible = $false; aboveComposerTickerTop = 0.0
+			aboveComposerTickerHeight = 0.0; aboveComposerTickerBottom = 0.0 } }
+		@{ Name = "header gap"; CustomHeader = $true; History = $false; Expected = $false; Timeline = [pscustomobject]@{
+			viewportY = 130.0; viewportBottom = 700.0; viewportHeight = 570.0
+			composerTop = 700.0; roomHeaderHeight = 44.0; roomHeaderBottom = 100.0
+			jumpToLatestVisible = $false; jumpToLatestTop = 0.0; jumpToLatestHeight = 0.0
+			jumpToLatestBottom = 0.0; jumpToLatestTopMargin = 0.0; jumpToLatestBottomMargin = 0.0
+			aboveComposerTickerVisible = $false; aboveComposerTickerTop = 0.0
+			aboveComposerTickerHeight = 0.0; aboveComposerTickerBottom = 0.0 } }
+		@{ Name = "header exact"; CustomHeader = $true; History = $false; Expected = $true; Timeline = [pscustomobject]@{
+			viewportY = 100.5; viewportBottom = 699.5; viewportHeight = 599.0
+			composerTop = 700.0; roomHeaderHeight = 44.0; roomHeaderBottom = 100.0
+			jumpToLatestVisible = $false; jumpToLatestTop = 0.0; jumpToLatestHeight = 0.0
+			jumpToLatestBottom = 0.0; jumpToLatestTopMargin = 0.0; jumpToLatestBottomMargin = 0.0
+			aboveComposerTickerVisible = $false; aboveComposerTickerTop = 0.0
+			aboveComposerTickerHeight = 0.0; aboveComposerTickerBottom = 0.0 } }
+		@{ Name = "jump lane exact"; CustomHeader = $false; History = $true; Expected = $true; Timeline = [pscustomobject]@{
+			viewportY = 88.0; viewportBottom = 658.0; viewportHeight = 570.0
+			composerTop = 698.0; roomHeaderHeight = 0.0; roomHeaderBottom = 88.0
+			jumpToLatestVisible = $true; jumpToLatestTop = 662.0; jumpToLatestHeight = 32.0
+			jumpToLatestBottom = 694.0; jumpToLatestTopMargin = 4.0; jumpToLatestBottomMargin = 4.0
+			aboveComposerTickerVisible = $false; aboveComposerTickerTop = 0.0
+			aboveComposerTickerHeight = 0.0; aboveComposerTickerBottom = 0.0
+			historyLoaderVisible = $true; historyLoaderTop = -24.0; historyLoaderHeight = 48.0
+			historyLoaderBottom = 24.0; timelineHeaderHeight = 48.0 } }
+		@{ Name = "jump lane overlaps composer"; CustomHeader = $false; History = $true; Expected = $false; Timeline = [pscustomobject]@{
+			viewportY = 88.0; viewportBottom = 658.0; viewportHeight = 570.0
+			composerTop = 694.0; roomHeaderHeight = 0.0; roomHeaderBottom = 88.0
+			jumpToLatestVisible = $true; jumpToLatestTop = 662.0; jumpToLatestHeight = 32.0
+			jumpToLatestBottom = 694.0; jumpToLatestTopMargin = 4.0; jumpToLatestBottomMargin = 4.0
+			aboveComposerTickerVisible = $false; aboveComposerTickerTop = 0.0
+			aboveComposerTickerHeight = 0.0; aboveComposerTickerBottom = 0.0
+			historyLoaderVisible = $true; historyLoaderTop = -24.0; historyLoaderHeight = 48.0
+			historyLoaderBottom = 24.0; timelineHeaderHeight = 48.0 } }
+	) {
+		param($Name, $CustomHeader, $History, $Expected, $Timeline)
+		$tokens = $null
+		$parseErrors = $null
+		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+			"$PSScriptRoot\..\invoke-qml-visual-gate.ps1", [ref]$tokens, [ref]$parseErrors)
+		$parseErrors.Count | Should Be 0
+		$functionAst = $ast.Find({
+			param($node)
+			$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+				$node.Name -eq "Test-QmlTimelineViewportGeometry"
+		}, $true)
+		$functionAst | Should Not BeNullOrEmpty
+		Invoke-Expression $functionAst.Extent.Text
+		(Test-QmlTimelineViewportGeometry -Timeline $Timeline `
+			-RequireCustomHeader $CustomHeader `
+			-RequireHistoryPrependLayout $History) | Should Be $Expected
+	}
+
+	It "binds timeline readiness to an independently derived scope, generation, and exact row ids" {
+		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		$controller | Should Match 'fixture_scope_token'
+		$controller | Should Match 'fixture_message_ids'
+		$controller | Should Match 'pre_apply_presentation_generation'
+		$controller | Should Match 'presentation_generation'
+		$controller | Should Match 'get\(row\)\.value\(QStringLiteral\("id"\)\)'
+		$controller | Should Match 'preApplyPresentationGeneration[\s\S]*applyState\(state'
+		$worker | Should Match 'function Test-QmlTimelineFixtureIdentity'
+		$worker | Should Match 'preApplyTimelineGeneration'
+		$worker | Should Match '\$expectedFixtureScopeToken\s*=\s*"0:\$\(\[long\]1000000\s*\+\s*\[long\]\$applied\.generation\)"'
+		$worker | Should Match '\$preApplyTimelineGeneration\s*=\s*\[long\]\$applied\.pre_apply_presentation_generation'
+		$worker | Should Match '\$expectedFixtureGeneration\s*=\s*\[long\]\$preApplyTimelineGeneration\s*\+\s*1'
+		$worker | Should Match '\$expectedIdSet\.Contains\(\$visibleId\)'
+		$worker | Should Match '\$seenIds\.Add\(\$visibleId\)'
+		$worker | Should Match '\$expectedFixtureStableIdPrefix\s*=\s*"fixture:\$\(\[long\]\$applied\.generation\):"'
+	}
+
+	It "rejects stale or internally inconsistent timeline identity" -TestCases @(
+		@{ Name = "exact visible row"; Expected = $true; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:1", "fixture:7:2"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:7:2"; modelIndex = 1 }) } }
+		@{ Name = "deferred source row"; Expected = $true; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:history:-1", "fixture:7:history:12"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:7:history:-1"; modelIndex = -1 }) } }
+		@{ Name = "previous fixture model"; Expected = $false; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:6:1", "fixture:6:2"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:6:2"; modelIndex = 1 }) } }
+		@{ Name = "wrong id case"; Expected = $false; Count = 1; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:Alpha"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:7:alpha"; modelIndex = 0 }) } }
+		@{ Name = "stale scope"; Expected = $false; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:1", "fixture:7:2"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000006"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:7:2"; modelIndex = 1 }) } }
+		@{ Name = "stale generation"; Expected = $false; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:1", "fixture:7:2"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 11; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:7:2"; modelIndex = 1 }) } }
+		@{ Name = "wrong id for row"; Expected = $false; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:1", "fixture:7:2"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:old:2"; modelIndex = 1 }) } }
+		@{ Name = "duplicate visible id"; Expected = $false; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:1", "fixture:7:2"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:7:1"; modelIndex = 0 },
+					[pscustomobject]@{ id = "fixture:7:1"; modelIndex = 0 }) } }
+		@{ Name = "duplicate expected id"; Expected = $false; Count = 2; Scope = "0:1000007"; Generation = 12
+			Ids = @("fixture:7:1", "fixture:7:1"); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @(
+					[pscustomobject]@{ id = "fixture:7:1"; modelIndex = 0 }) } }
+		@{ Name = "empty exact"; Expected = $true; Count = 0; Scope = "0:1000007"; Generation = 12
+			Ids = @(); Timeline = [pscustomobject]@{
+				scopeToken = "0:1000007"; generation = 12; visibleRows = @() } }
+	) {
+		param($Name, $Expected, $Count, $Scope, $Generation, $Ids, $Timeline)
+		$tokens = $null
+		$parseErrors = $null
+		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+			"$PSScriptRoot\..\invoke-qml-visual-gate.ps1", [ref]$tokens, [ref]$parseErrors)
+		$parseErrors.Count | Should Be 0
+		$functionAst = $ast.Find({
+			param($node)
+			$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+				$node.Name -eq "Test-QmlTimelineFixtureIdentity"
+		}, $true)
+		$functionAst | Should Not BeNullOrEmpty
+		Invoke-Expression $functionAst.Extent.Text
+		(Test-QmlTimelineFixtureIdentity -Timeline $Timeline -ExpectedScopeToken $Scope `
+			-ExpectedGeneration $Generation -ExpectedStableIdPrefix "fixture:7:" -ExpectedStableIds $Ids `
+			-ExpectedMessageCount $Count) | Should Be $Expected
+	}
+
+	It "records and gates cached presentation timing without claiming uncached coverage" {
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		$worker | Should Match '\$applyTimer\s*=\s*\[Diagnostics\.Stopwatch\]::StartNew\(\)'
+		$worker | Should Match '\$timelinePresentationBudgetMs\s*=\s*300\.0'
+		$worker | Should Match '\$applyRpcBudgetMs\s*=\s*1000\.0'
+		$worker | Should Match '\$applyDurationMs\s*-gt\s*\$applyRpcBudgetMs'
+		$worker | Should Match 'visibleFrameDurationMs\s*-gt\s*\$timelinePresentationBudgetMs'
+		$worker | Should Match 'cached_presentation_budget_ms'
+		$worker | Should Match 'uncached_presentation_budget_ms\s*=\s*1000\.0'
+		$worker | Should Match 'uncached_presentation_exercised\s*=\s*\$false'
+		$worker | Should Match 'visual_coherence_passed\s*=\s*\$true'
+		$worker | Should Match 'function Write-QmlPresentationTimingDiagnostic'
+		$worker | Should Match '\.presentation-timing\.json'
 	}
 
 	It "covers model-backed profile text-room and chat-background menus" {
@@ -923,6 +1152,188 @@ Describe "Qt Quick visual runner modes" {
 	}
 }
 
+Describe "Qt Quick visual exact-process warning gate" {
+	BeforeAll {
+		foreach ($definition in @(
+			@{ Path = "$PSScriptRoot\..\invoke-qml-visual-gate.ps1";
+				Name = "Assert-QmlVisualProcessIdentity" },
+			@{ Path = "$PSScriptRoot\..\invoke-qml-visual-matrix.ps1";
+				Name = "Assert-QmlVisualProcessLogs" }
+		)) {
+			$tokens = $null
+			$parseErrors = $null
+			$ast = [Management.Automation.Language.Parser]::ParseFile(
+				(Resolve-Path $definition.Path).Path, [ref]$tokens, [ref]$parseErrors)
+			$parseErrors.Count | Should Be 0
+			$functionAst = $ast.Find({
+				param($node)
+				$node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+					$node.Name -eq $definition.Name
+			}, $true)
+			$null -eq $functionAst | Should Be $false
+			. ([scriptblock]::Create($functionAst.Extent.Text))
+		}
+		$script:warningGateRoot = Join-Path ([IO.Path]::GetTempPath()) `
+			("qml-warning-gate-" + [Guid]::NewGuid().ToString('N'))
+		New-Item -ItemType Directory -Path $script:warningGateRoot | Out-Null
+	}
+
+	AfterAll {
+		if (Test-Path -LiteralPath $script:warningGateRoot) {
+			Remove-Item -LiteralPath $script:warningGateRoot -Recurse -Force
+		}
+	}
+
+	It "accepts the exact automation process identity" {
+		Assert-QmlVisualProcessIdentity -PingResponse ([pscustomobject]@{ pid = 4242 }) `
+			-ExpectedProcessId 4242 | Should Be $true
+	}
+
+	It "rejects an automation endpoint owned by another process" {
+		$thrown = $null
+		try {
+			Assert-QmlVisualProcessIdentity -PingResponse ([pscustomobject]@{ pid = 4243 }) `
+				-ExpectedProcessId 4242 | Out-Null
+		} catch { $thrown = $_ }
+		$null -eq $thrown | Should Be $false
+		[string]$thrown.Exception.Message | Should Match 'PID 4243.*exact fixture PID 4242'
+	}
+
+	It "accepts readable exact-process logs without binding loops" {
+		$stdout = Join-Path $script:warningGateRoot 'clean.stdout.log'
+		$stderr = Join-Path $script:warningGateRoot 'clean.stderr.log'
+		[IO.File]::WriteAllText($stdout, "fixture ready`n")
+		[IO.File]::WriteAllText($stderr, "")
+		$receipt = Assert-QmlVisualProcessLogs -ProcessId 4242 `
+			-StandardOutputPath $stdout -StandardErrorPath $stderr
+		$receipt.process_id | Should Be 4242
+		$receipt.binding_loop_count | Should Be 0
+		[string]$receipt.stdout_sha256 | Should Match '^[0-9a-f]{64}$'
+		[string]$receipt.stderr_sha256 | Should Match '^[0-9a-f]{64}$'
+	}
+
+	It "fails closed when an exact-process log is missing" {
+		$stdout = Join-Path $script:warningGateRoot 'missing.stdout.log'
+		$stderr = Join-Path $script:warningGateRoot 'missing.stderr.log'
+		[IO.File]::WriteAllText($stdout, "fixture ready`n")
+		$thrown = $null
+		try {
+			Assert-QmlVisualProcessLogs -ProcessId 4242 `
+				-StandardOutputPath $stdout -StandardErrorPath $stderr | Out-Null
+		} catch { $thrown = $_ }
+		$null -eq $thrown | Should Be $false
+		[string]$thrown.Exception.Message | Should Match 'did not preserve its stderr log'
+	}
+
+	It "rejects and identifies a binding-loop component and property" {
+		$stdout = Join-Path $script:warningGateRoot 'loop.stdout.log'
+		$stderr = Join-Path $script:warningGateRoot 'loop.stderr.log'
+		$warning = '<W> qrc:/qml-shell/Main.qml:8260:8: QML Loader: Binding loop detected for property "stationaryThumbWarmPin":'
+		[IO.File]::WriteAllText($stdout, "$warning`n")
+		[IO.File]::WriteAllText($stderr, "")
+		$thrown = $null
+		try {
+			Assert-QmlVisualProcessLogs -ProcessId 4242 `
+				-StandardOutputPath $stdout -StandardErrorPath $stderr | Out-Null
+		} catch { $thrown = $_ }
+		$null -eq $thrown | Should Be $false
+		[string]$thrown.Exception.Message | Should Match 'component=Loader'
+		[string]$thrown.Exception.Message | Should Match 'property=stationaryThumbWarmPin'
+		(Test-Path -LiteralPath $stdout) | Should Be $true
+	}
+}
+
+Describe "Qt Quick visual exact-process warning gate" {
+	BeforeAll {
+		foreach ($definition in @(
+			@{ Path = "$PSScriptRoot\..\invoke-qml-visual-gate.ps1";
+				Name = "Assert-QmlVisualProcessIdentity" },
+			@{ Path = "$PSScriptRoot\..\invoke-qml-visual-matrix.ps1";
+				Name = "Assert-QmlVisualProcessLogs" }
+		)) {
+			$tokens = $null
+			$parseErrors = $null
+			$ast = [Management.Automation.Language.Parser]::ParseFile(
+				(Resolve-Path $definition.Path).Path, [ref]$tokens, [ref]$parseErrors)
+			$parseErrors.Count | Should Be 0
+			$functionAst = $ast.Find({
+				param($node)
+				$node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+					$node.Name -eq $definition.Name
+			}, $true)
+			$null -eq $functionAst | Should Be $false
+			. ([scriptblock]::Create($functionAst.Extent.Text))
+		}
+		$script:warningGateRoot = Join-Path ([IO.Path]::GetTempPath()) `
+			("qml-warning-gate-" + [Guid]::NewGuid().ToString('N'))
+		New-Item -ItemType Directory -Path $script:warningGateRoot | Out-Null
+	}
+
+	AfterAll {
+		if (Test-Path -LiteralPath $script:warningGateRoot) {
+			Remove-Item -LiteralPath $script:warningGateRoot -Recurse -Force
+		}
+	}
+
+	It "accepts the exact automation process identity" {
+		Assert-QmlVisualProcessIdentity -PingResponse ([pscustomobject]@{ pid = 4242 }) `
+			-ExpectedProcessId 4242 | Should Be $true
+	}
+
+	It "rejects an automation endpoint owned by another process" {
+		$thrown = $null
+		try {
+			Assert-QmlVisualProcessIdentity -PingResponse ([pscustomobject]@{ pid = 4243 }) `
+				-ExpectedProcessId 4242 | Out-Null
+		} catch { $thrown = $_ }
+		$null -eq $thrown | Should Be $false
+		[string]$thrown.Exception.Message | Should Match 'PID 4243.*exact fixture PID 4242'
+	}
+
+	It "accepts readable exact-process logs without binding loops" {
+		$stdout = Join-Path $script:warningGateRoot 'clean.stdout.log'
+		$stderr = Join-Path $script:warningGateRoot 'clean.stderr.log'
+		[IO.File]::WriteAllText($stdout, "fixture ready`n")
+		[IO.File]::WriteAllText($stderr, "")
+		$receipt = Assert-QmlVisualProcessLogs -ProcessId 4242 `
+			-StandardOutputPath $stdout -StandardErrorPath $stderr
+		$receipt.process_id | Should Be 4242
+		$receipt.binding_loop_count | Should Be 0
+		[string]$receipt.stdout_sha256 | Should Match '^[0-9a-f]{64}$'
+		[string]$receipt.stderr_sha256 | Should Match '^[0-9a-f]{64}$'
+	}
+
+	It "fails closed when an exact-process log is missing" {
+		$stdout = Join-Path $script:warningGateRoot 'missing.stdout.log'
+		$stderr = Join-Path $script:warningGateRoot 'missing.stderr.log'
+		[IO.File]::WriteAllText($stdout, "fixture ready`n")
+		$thrown = $null
+		try {
+			Assert-QmlVisualProcessLogs -ProcessId 4242 `
+				-StandardOutputPath $stdout -StandardErrorPath $stderr | Out-Null
+		} catch { $thrown = $_ }
+		$null -eq $thrown | Should Be $false
+		[string]$thrown.Exception.Message | Should Match 'did not preserve its stderr log'
+	}
+
+	It "rejects and identifies a binding-loop component and property" {
+		$stdout = Join-Path $script:warningGateRoot 'loop.stdout.log'
+		$stderr = Join-Path $script:warningGateRoot 'loop.stderr.log'
+		$warning = '<W> qrc:/qml-shell/Main.qml:8260:8: QML Loader: Binding loop detected for property "stationaryThumbWarmPin":'
+		[IO.File]::WriteAllText($stdout, "$warning`n")
+		[IO.File]::WriteAllText($stderr, "")
+		$thrown = $null
+		try {
+			Assert-QmlVisualProcessLogs -ProcessId 4242 `
+				-StandardOutputPath $stdout -StandardErrorPath $stderr | Out-Null
+		} catch { $thrown = $_ }
+		$null -eq $thrown | Should Be $false
+		[string]$thrown.Exception.Message | Should Match 'component=Loader'
+		[string]$thrown.Exception.Message | Should Match 'property=stationaryThumbWarmPin'
+		(Test-Path -LiteralPath $stdout) | Should Be $true
+	}
+}
+
 Describe "Qt Quick connected fixture contract" {
 	It "keeps synthetic loading state free of transient async operations" {
 		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
@@ -969,6 +1380,10 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'rich_preview_embed_provider') | Should Be $true
 		($worker -match 'RichPreviewPlayName') | Should Be $true
 		($worker -match 'visibleImages') | Should Be $true
+		($worker -match 'documentGalleryPaintedSurface') | Should Be $true
+		($worker -match 'typedProviderDocumentReady') | Should Be $true
+		($worker -match 'typedProviderPlayName') | Should Be $true
+		($controller -match 'attachProviderPoster') | Should Be $true
 		($worker -match 'providerDetailsVisible') | Should Be $true
 		($worker -match 'providerVariant') | Should Be $true
 		($worker -match 'providerToken') | Should Be $true
@@ -1027,7 +1442,7 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'StartsWith\("settings-"[\s\S]*?\{ "settings" \}') | Should Be $true
 		($controller -match 'surfaceVariant\.startsWith\(QLatin1String\("settings-"\)\)[\s\S]*?captureWindow\s*=\s*QStringLiteral\("settings"\)') | Should Be $true
 		($shellHost -match 'normalizedWindowId == QLatin1String\("settings"\)[\s\S]*?surfaceId = QStringLiteral\("settings\.window"\)') | Should Be $true
-		($worker -match '\$expectRichPreview\s+-and\s+-not\s+\$isMediaSurface') | Should Be $true
+		($worker -match '\$expectRichPreview\s+-and\s+-not\s+\$expectDeferredRichPreviewShell\s+-and\s+-not\s+\$isMediaSurface') | Should Be $true
 		($server -match 'qmlAccessibilitySnapshot[\s\S]*captureWindowTarget\(windowId') | Should Be $true
 	}
 
@@ -1135,7 +1550,11 @@ Describe "Qt Quick connected fixture contract" {
 
 	It "limits loading previews to one safe origin link until hydration completes" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		($worker -match '\$expectDeferredRichPreviewShell\s*=\s*\$richPreviewVariant\s+-in\s+@\("loading",\s*"error"\)') | Should Be $true
+		($worker -match 'if\s*\(\$expectRichPreview\s+-and\s+-not\s+\$expectDeferredRichPreviewShell[\s\S]*qmlVisualGateRichPreviewState') | Should Be $true
 		($worker -match 'Loading rich-preview case.*exactly one safe origin link') | Should Be $true
+		($worker -match '\$boundedNativeShells[\s\S]*Test-QmlAccessibilityPositiveRect[\s\S]*height\s+-le\s+96\.0') | Should Be $true
+		($worker -match '\$boundedOriginLinks[\s\S]*Test-QmlAccessibilityPositiveRect') | Should Be $true
 		($worker -match 'Loading rich-preview case.*playback or overflow actions before hydration completes') | Should Be $true
 		($worker -match '"Play video in chat", "Preview actions", "Watch together"') | Should Be $true
 	}
@@ -1231,7 +1650,7 @@ Describe "Qt Quick connected fixture contract" {
 		$workerPath = "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		$worker = Get-Content -Raw $workerPath
 		$worker | Should Match '\$inlineMediaStageExpected\s*=\s*\$richPreviewVariant\s+-eq\s*"direct-media"'
-		$worker | Should Match '\$expectedImageObjectName\s*=\s*if\s*\(\$inlineMediaStageExpected\)\s*\{\s*"previewEmbedPoster"'
+		$worker | Should Match '\$expectedImageObjectNames\s*=\s*if\s*\(\$inlineMediaStageExpected\)\s*\{[\s\S]*@\("previewEmbedPoster",\s*"embedDocumentMediaImage"\)'
 		$worker | Should Match '\$openSurfaceReady\s*=\s*if\s*\(\$inlineMediaStageExpected\)'
 		$tokens = $null
 		$parseErrors = $null
@@ -1465,6 +1884,15 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'Compare-QmlVisualPng') | Should Be $true
 		($worker -match 'finalPixelsExact') | Should Be $true
 		($worker -match 'scene changed after accessibility stabilization') | Should Be $true
+	}
+
+	It "rejects a painted async handoff summary beside its loaded rich row" {
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		$mainQml = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\Main.qml"
+		$worker | Should Match 'visibleDuplicateHandoffSummaryCount\s*-eq\s*0'
+		$mainQml | Should Match '"visibleDuplicateHandoffSummaryCount"'
+		$mainQml | Should Match 'readonly property bool duplicateHandoffSummaryPainted:'
+		$mainQml | Should Match '(?s)id:\s*asyncRichHandoffSummary.*?visible:.*?deadlinePresentationFallback.*?!asyncMessageDelegate\.item\.boundedRichGeometryReady'
 	}
 
 	It "starts the strict stability budget after the first admissible frame" {
@@ -1821,11 +2249,6 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'Qt Quick is ready for review\.') | Should Be $true
 	}
 
-	It "seeds a valid versioned settings profile in the Windows visual workflow" {
-		$workflow = Get-Content -Raw "$PSScriptRoot\..\..\..\.github\workflows\windows-shared-client.yml"
-		($workflow -match '\{ "settings_version": 1 \}') | Should Be $true
-		($workflow -match "'\{\}'\s*\|\s*Set-Content[^\r\n]*qml-visual-settings") | Should Be $false
-	}
 }
 
 Describe "Qt Quick accessibility geometry and modal subtree contracts" {
@@ -2012,6 +2435,29 @@ Describe "Qt Quick accessibility geometry and modal subtree contracts" {
 		$threw | Should Be $false
 	}
 
+	It "accepts a typed-provider origin link without duplicating its card title" {
+		$open = New-QmlAccessibilityTestNode "Link" "Open source on YouTube" 850 720 260 32
+		$play = New-QmlAccessibilityTestNode "Button" "Play YouTube preview" 930 330 96 48
+		$preview = New-QmlAccessibilityTestNode "Grouping" `
+			"YouTube preview: YouTube · Mumble" 830 120 380 660 @($play, $open)
+		$timeline = New-QmlAccessibilityTestNode "List" "Conversation messages" `
+			320 100 920 700 @($preview)
+		$root = New-QmlAccessibilityTestNode "Window" "Mumble Visual Fixture" `
+			0 0 1280 900 @($timeline)
+		$root.states = @("focused")
+
+		$threw = $false
+		try {
+			Assert-QmlAccessibilityEvidence -Snapshot $root -CaseId "preview-dark-youtube" `
+				-State "connected" -RichPreviewVariant "youtube" `
+				-RichPreviewTitle "YouTube preview" `
+				-RichPreviewOpenLabel "Open on YouTube" `
+				-RichPreviewEmbedProvider "youtube" `
+				-RichPreviewPlayName "Play YouTube preview"
+		} catch { $threw = $true }
+		$threw | Should Be $false
+	}
+
 	It "rejects a visible rich preview whose semantic preview subtree is absent" {
 		$timeline = New-QmlAccessibilityTestNode "List" "Conversation messages" `
 			320 100 920 700
@@ -2179,12 +2625,12 @@ Describe "Qt Quick community parity contract" {
 	}
 
 	It "routes DM Watch Together and managed images through the native shell contract" {
-		$script:communityDm | Should Match 'signal watchTogetherRequested\(string url, string provider, string title\)'
+		$script:communityDm | Should Match 'signal watchTogetherRequested\(string url, string provider, string title,[\s\S]*string presentationAspect\)'
 		$script:communityDm | Should Match 'signal managedImageOpenRequested\(string source, string title, string messageId\)'
-		$script:communityDm | Should Match 'onWatchTogetherRequested:[\s\S]*root\.watchTogetherRequested\(url, provider, title\)'
+		$script:communityDm | Should Match 'onWatchTogetherRequested:[\s\S]*root\.watchTogetherRequested\(url, provider, title, presentationAspect\)'
 		$script:communityDm | Should Match 'onImageOpenRequested:[\s\S]*root\.managedImageOpenRequested'
 		$script:communityMain | Should Match 'onManagedImageOpenRequested:[\s\S]*root\.openManagedPreviewImage\(source, title, messageId\)'
-		$script:communityMain | Should Match 'onWatchTogetherRequested:[\s\S]*root\.startWatchTogether\(url, provider, title\)'
+		$script:communityMain | Should Match 'onWatchTogetherRequested:[\s\S]*root\.startWatchTogether\(url, provider, title, presentationAspect\)'
 		$script:communityMain | Should Match 'function openManagedPreviewImage\(source, title, messageId\)[\s\S]*root\.openAttachment'
 		$script:communityMain | Should Match 'objectName:\s*"directMessageTrayDismissLayer"[\s\S]*onClicked:\s*directMessages\.setTrayOpen\(false\)'
 		$script:communityDmTest | Should Match 'test_private_preview_routes_watch_together_and_preserves_size_preference'
@@ -2214,7 +2660,7 @@ Describe "Qt Quick community parity contract" {
 			$script:communityAutomation | Should Match ([regex]::Escape('QStringLiteral("' + $field + '")'))
 		}
 		$script:communityAutomation | Should Match 'directMessages->sendDraft\(\)'
-		$script:communityAutomation | Should Match 'media->startShared\(url, provider, title\)'
+		$script:communityAutomation | Should Match 'media->startShared\(url, provider, title, presentationAspect\)'
 		$script:communityAutomation | Should Match 'media->joinShared\(\)'
 		$script:communityAutomation | Should Match 'media->leaveShared\(\)'
 		$script:communityAutomation | Should Match 'media->endShared\(\)'
@@ -2238,7 +2684,7 @@ Describe "Qt Quick community parity contract" {
 
 	It "renders notifications as one centered coalescing product pill" {
 		$script:communityMainWindow | Should Match 'toastController\(\)->publish\(kind, title, message, actionID, actionLabel, timeoutMs\)'
-		$script:communityMain | Should Match 'ToastPill\s*\{[\s\S]*anchors\.horizontalCenter: parent\.horizontalCenter[\s\S]*anchors\.bottom: parent\.bottom[\s\S]*anchors\.bottomMargin: composerSurface\.height \+ bottomStonksTicker\.height \+ 22'
+		$script:communityMain | Should Match 'ToastPill\s*\{[\s\S]*anchors\.horizontalCenter: parent\.horizontalCenter[\s\S]*anchors\.bottom: parent\.bottom[\s\S]*anchors\.bottomMargin: composerSurface\.height \+ bottomStonksTickerLoader\.height \+ 22'
 		$script:communityToast | Should Match 'objectName: "modernToastPill"'
 		$script:communityToast | Should Match 'radius: height / 2'
 		$script:communityToast | Should Match 'controller\.repeatCount > 1'
@@ -2300,7 +2746,7 @@ Describe "Qt Quick community parity contract" {
 		$navigationRailTest | Should Match 'test_modal_suppression_covers_virtualized_room_and_participant_rows'
 
 		$chatMessageFrame | Should Match 'property bool accessibilitySuppressed:\s*false'
-		$chatMessageFrame | Should Match 'objectName:\s*"chatMessageAccessibilityBarrier"[\s\S]*?active:\s*root\.accessibilitySuppressed[\s\S]*?targets:\s*\[\s*root\s*\]'
+		$chatMessageFrame | Should Match 'objectName:\s*"chatMessageAccessibilityBarrier"[\s\S]*?active:\s*root\.accessibilityBarrierEnabled[\s\S]*?root\.accessibilitySuppressed\s*\|\|\s*!root\.accessibilitySubtreeActive[\s\S]*?targets:\s*\[\s*root\s*\]'
 		$chatTimelineTest | Should Match 'test_modal_suppression_prunes_promoted_message_content_and_restores_it'
 	}
 
@@ -2308,6 +2754,8 @@ Describe "Qt Quick community parity contract" {
 		$script:communityPreview | Should Match 'steamMediaItems: root\.mediaItems'
 		$script:communityPreview | Should Match 'steamMediaIndex: root\.selectedMediaIndex'
 		$script:communityProviderDetails | Should Match 'objectName: "previewSteamMediaRail"'
+		$script:communityProviderDetails | Should Match 'id: steamLayout[\s\S]*spacing: Theme\.space2'
+		$script:communityProviderDetails | Should Match 'root\.compactLayout \? 116 : 140'
 		$script:communityProviderDetails | Should Match 'objectName: "previewSteamMediaThumbnail_" \+ index'
 		$script:communityProviderDetails | Should Match 'modelData\.thumbnail[\s\S]*modelData\.poster'
 		$script:communityPreviewTest | Should Match 'test_steam_gallery_is_visible_and_selectable_without_expanding_the_card'

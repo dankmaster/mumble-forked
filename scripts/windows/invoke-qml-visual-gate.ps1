@@ -7,6 +7,7 @@ param(
 	[Parameter(Mandatory = $true, ParameterSetName = "Candidate")][switch]$CandidateOnly,
 	[string]$OutputDirectory = ".tmp\qml-visual-gate",
 	[Parameter(Mandatory = $true)][double]$ExpectedDevicePixelRatio,
+	[Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$ExpectedProcessId,
 	[int]$TimeoutMilliseconds = 30000
 )
 
@@ -43,6 +44,21 @@ function Invoke-Automation {
 			return $response
 		} finally { $writer.Dispose(); $reader.Dispose() }
 	} finally { $client.Dispose() }
+}
+
+function Assert-QmlVisualProcessIdentity {
+	param(
+		[Parameter(Mandatory = $true)]$PingResponse,
+		[Parameter(Mandatory = $true)][ValidateRange(1, [int]::MaxValue)][int]$ExpectedProcessId
+	)
+	if (-not ($PingResponse.PSObject.Properties.Name -contains "pid") -or
+		[int]$PingResponse.pid -ne $ExpectedProcessId) {
+		$actualPid = if ($PingResponse.PSObject.Properties.Name -contains "pid") {
+			[string]$PingResponse.pid
+		} else { "missing" }
+		throw "Visual worker attached to automation PID $actualPid, expected exact fixture PID $ExpectedProcessId."
+	}
+	return $true
 }
 
 function Assert-Capability {
@@ -106,6 +122,147 @@ function Test-QmlAccessibilityPathContains {
 function Test-QmlAccessibilityPositiveRect {
 	param([AllowNull()]$Rect)
 	return $null -ne $Rect -and [double]$Rect.width -gt 0.0 -and [double]$Rect.height -gt 0.0
+}
+
+function Test-QmlTimelineViewportGeometry {
+	param(
+		[Parameter(Mandatory = $true)]$Timeline,
+		[bool]$RequireCustomHeader = $false,
+		[bool]$RequireHistoryPrependLayout = $false
+	)
+	$requiredProperties = @(
+		"viewportY", "viewportBottom", "viewportHeight", "composerTop",
+		"jumpToLatestVisible", "jumpToLatestTop", "jumpToLatestHeight",
+		"jumpToLatestBottom", "jumpToLatestTopMargin", "jumpToLatestBottomMargin",
+		"aboveComposerTickerVisible", "aboveComposerTickerTop",
+		"aboveComposerTickerHeight", "aboveComposerTickerBottom"
+	)
+	foreach ($propertyName in $requiredProperties) {
+		if (-not ($Timeline.PSObject.Properties.Name -contains $propertyName)) {
+			return $false
+		}
+	}
+	$viewportY = [double]$Timeline.viewportY
+	$viewportBottom = [double]$Timeline.viewportBottom
+	$viewportHeight = [double]$Timeline.viewportHeight
+	$composerTop = [double]$Timeline.composerTop
+	if ($viewportHeight -le 1.0 -or
+		[Math]::Abs($viewportBottom - ($viewportY + $viewportHeight)) -gt 1.0) {
+		return $false
+	}
+	$layoutBoundary = $viewportBottom
+	if ([bool]$Timeline.jumpToLatestVisible) {
+		$jumpTop = [double]$Timeline.jumpToLatestTop
+		$jumpHeight = [double]$Timeline.jumpToLatestHeight
+		$jumpBottom = [double]$Timeline.jumpToLatestBottom
+		$jumpTopMargin = [double]$Timeline.jumpToLatestTopMargin
+		$jumpBottomMargin = [double]$Timeline.jumpToLatestBottomMargin
+		if ($jumpHeight -le 1.0 -or $jumpTopMargin -lt 0 -or $jumpBottomMargin -lt 0 -or
+			[Math]::Abs($jumpTop - ($layoutBoundary + $jumpTopMargin)) -gt 1.0 -or
+			[Math]::Abs($jumpBottom - ($jumpTop + $jumpHeight)) -gt 1.0) {
+			return $false
+		}
+		$layoutBoundary = $jumpBottom + $jumpBottomMargin
+	}
+	if ([bool]$Timeline.aboveComposerTickerVisible) {
+		$tickerTop = [double]$Timeline.aboveComposerTickerTop
+		$tickerHeight = [double]$Timeline.aboveComposerTickerHeight
+		$tickerBottom = [double]$Timeline.aboveComposerTickerBottom
+		if ($tickerHeight -le 1.0 -or
+			[Math]::Abs($tickerTop - $layoutBoundary) -gt 1.0 -or
+			[Math]::Abs($tickerBottom - ($tickerTop + $tickerHeight)) -gt 1.0) {
+			return $false
+		}
+		$layoutBoundary = $tickerBottom
+	}
+	if ($composerTop -lt $viewportBottom - 1.0 -or
+		[Math]::Abs($composerTop - $layoutBoundary) -gt 1.0) {
+		return $false
+	}
+	if ($RequireCustomHeader -and
+		([double]$Timeline.roomHeaderHeight -le 1.0 -or
+			[Math]::Abs($viewportY - [double]$Timeline.roomHeaderBottom) -gt 1.0)) {
+		return $false
+	}
+	if ($RequireHistoryPrependLayout) {
+		foreach ($propertyName in @("historyLoaderVisible", "historyLoaderTop",
+			"historyLoaderHeight", "historyLoaderBottom", "timelineHeaderHeight")) {
+			if (-not ($Timeline.PSObject.Properties.Name -contains $propertyName)) {
+				return $false
+			}
+		}
+		$historyLoaderHeight = [double]$Timeline.historyLoaderHeight
+		if ([bool]$Timeline.historyLoaderVisible -ne ($historyLoaderHeight -gt 1.0) -or
+			([bool]$Timeline.historyLoaderVisible -and
+				[Math]::Abs($historyLoaderHeight - 48.0) -gt 1.0) -or
+			[Math]::Abs([double]$Timeline.historyLoaderBottom -
+				([double]$Timeline.historyLoaderTop + $historyLoaderHeight)) -gt 1.0 -or
+			[double]$Timeline.timelineHeaderHeight + 1.0 -lt $historyLoaderHeight) {
+			return $false
+		}
+	}
+	return $true
+}
+
+function Test-QmlTimelineFixtureIdentity {
+	param(
+		[Parameter(Mandatory = $true)]$Timeline,
+		[Parameter(Mandatory = $true)][string]$ExpectedScopeToken,
+		[Parameter(Mandatory = $true)][long]$ExpectedGeneration,
+		[Parameter(Mandatory = $true)][string]$ExpectedStableIdPrefix,
+		[Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ExpectedStableIds,
+		[Parameter(Mandatory = $true)][int]$ExpectedMessageCount
+	)
+	if ([string]$Timeline.scopeToken -cne $ExpectedScopeToken -or
+		[long]$Timeline.generation -ne $ExpectedGeneration) {
+		return $false
+	}
+	$visibleRows = @($Timeline.visibleRows)
+	$stableIds = @($ExpectedStableIds | ForEach-Object { [string]$_ })
+	if ($stableIds.Count -ne $ExpectedMessageCount) {
+		return $false
+	}
+	foreach ($stableId in $stableIds) {
+		if ([string]::IsNullOrWhiteSpace($stableId)) {
+			return $false
+		}
+	}
+	if ($ExpectedMessageCount -eq 0) {
+		return $visibleRows.Count -eq 0
+	}
+	if ($visibleRows.Count -eq 0) {
+		return $false
+	}
+	$expectedIdSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+	foreach ($stableId in $stableIds) {
+		if (-not $stableId.StartsWith($ExpectedStableIdPrefix, [StringComparison]::Ordinal) -or
+			-not $expectedIdSet.Add($stableId)) {
+			return $false
+		}
+	}
+	$seenIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+	foreach ($row in $visibleRows) {
+		$visibleId = [string]$row.id
+		if ([string]::IsNullOrWhiteSpace($visibleId) -or
+			-not $expectedIdSet.Contains($visibleId) -or
+			-not $seenIds.Add($visibleId)) {
+			return $false
+		}
+	}
+	return $true
+}
+
+function Write-QmlPresentationTimingDiagnostic {
+	param(
+		[Parameter(Mandatory = $true)][string]$OutputDirectory,
+		[Parameter(Mandatory = $true)][string]$CaseId,
+		[Parameter(Mandatory = $true)]$Diagnostic
+	)
+	$diagnosticsDirectory = Join-Path $OutputDirectory "diagnostics"
+	New-Item -ItemType Directory -Force -Path $diagnosticsDirectory | Out-Null
+	$path = Join-Path $diagnosticsDirectory "$CaseId.presentation-timing.json"
+	$Diagnostic | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding utf8NoBOM
+	return $path
 }
 
 function Assert-QmlAccessibilityModalSubtree {
@@ -657,12 +814,22 @@ function Assert-QmlAccessibilityEvidence {
 			"Upload interrupted", "Retry release-notes.pdf", "Alex", "Message Lobby"
 		) }
 		"chat-attachment-states" { @(
-			"Message attachments", "Community test dashboard", "Loading Performance trace",
-			"Preview unavailable", "Retry preview for Failed attachment preview"
+			"Message attachments", "Community test dashboard",
+			"Save original Community test dashboard", "Performance trace",
+			"Save original Performance trace",
+			"Loading Performance trace", "Failed attachment preview",
+			"Save original Failed attachment preview", "Preview unavailable",
+			"Retry preview for Failed attachment preview"
 		) }
 		"chat-history-prepend-anchor" { @(
 			"Anchor message 12 remains in place after older history loads.", "Jump to latest"
 		) }
+		"chat-sparse-0" { @("This conversation is quiet", "Message Lobby") }
+		"chat-sparse-1" { @("Message Lobby") }
+		"chat-sparse-2" { @("Message Lobby") }
+		"chat-sparse-5" { @("Message Lobby") }
+		"chat-sparse-10" { @("Message Lobby") }
+		"chat-sparse-stonks-5" { @("Stonks room dashboard", "Message #stonks") }
 		"direct-message-main" { @(
 			"Alex", "The native DM surface feels fast.", "Message attachments", "Release checklist attachment"
 		) }
@@ -829,10 +996,30 @@ function Assert-QmlAccessibilityEvidence {
 		if ([string]::IsNullOrWhiteSpace($RichPreviewTitle) -or $matchingPreviewCards.Count -ne 1) {
 			throw "Rich-preview case '$CaseId' does not expose exactly one '$RichPreviewTitle' grouping."
 		}
+		$typedProviderOpenLabel = if (
+			-not [string]::IsNullOrWhiteSpace($RichPreviewEmbedProvider) -and
+			$RichPreviewOpenLabel.StartsWith("Open on ", [StringComparison]::Ordinal)) {
+			"Open source on " + $RichPreviewOpenLabel.Substring(8)
+		} else { "" }
 		$matchingPreviewLinks = @($nodes | Where-Object {
 			([string]$_.role).Equals("Link", [StringComparison]::OrdinalIgnoreCase) -and
-			[string]$_.name -eq ($RichPreviewOpenLabel + ": " + $RichPreviewTitle)
+			([string]$_.name -eq ($RichPreviewOpenLabel + ": " + $RichPreviewTitle) -or
+				(-not [string]::IsNullOrWhiteSpace($RichPreviewEmbedProvider) -and
+				 ([string]$_.name -eq $RichPreviewOpenLabel -or
+				  [string]$_.name -eq $typedProviderOpenLabel)))
 		})
+		if ($RichPreviewVariant -in @("loading", "error")) {
+			$boundedNativeShells = @($matchingPreviewCards | Where-Object {
+				(Test-QmlAccessibilityPositiveRect $_.rect) -and
+				[double]$_.rect.height -ge 40.0 -and [double]$_.rect.height -le 96.0
+			})
+			$boundedOriginLinks = @($matchingPreviewLinks | Where-Object {
+				Test-QmlAccessibilityPositiveRect $_.rect
+			})
+			if ($boundedNativeShells.Count -ne 1 -or $boundedOriginLinks.Count -ne 1) {
+				throw "Deferred rich-preview case '$CaseId' does not expose one bounded native shell and origin link."
+			}
+		}
 		if ($RichPreviewVariant -eq "loading") {
 			if ([string]::IsNullOrWhiteSpace($RichPreviewOpenLabel) -or $matchingPreviewLinks.Count -ne 1) {
 				throw "Loading rich-preview case '$CaseId' does not expose exactly one safe origin link."
@@ -866,12 +1053,16 @@ function Assert-QmlAccessibilityEvidence {
 			throw "Rich-preview case '$CaseId' does not expose exactly one explicit open link."
 		}
 		if (-not [string]::IsNullOrWhiteSpace($RichPreviewEmbedProvider)) {
+			$typedProviderPlayName = if ($RichPreviewPlayName.EndsWith(
+					" here", [StringComparison]::Ordinal)) {
+				$RichPreviewPlayName.Substring(0, $RichPreviewPlayName.Length - 5)
+			} else { $RichPreviewPlayName }
 			$matchingPlayActions = @($nodes | Where-Object {
 				([string]$_.role).Equals("Button", [StringComparison]::OrdinalIgnoreCase) -and
-				[string]$_.name -eq $RichPreviewPlayName
+				[string]$_.name -in @($RichPreviewPlayName, $typedProviderPlayName)
 			})
 			if ([string]::IsNullOrWhiteSpace($RichPreviewPlayName) -or $matchingPlayActions.Count -ne 1) {
-				throw "Rich-preview case '$CaseId' does not expose exactly one provider play action."
+				throw "Rich-preview case '$CaseId' does not expose exactly one provider or typed-document play action."
 			}
 		}
 		$expectedProviderGroupName = switch ($RichPreviewVariant) {
@@ -926,6 +1117,10 @@ if (-not $CandidateOnly) {
 	$baseline = Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $BaselineManifestPath).Path | ConvertFrom-Json
 	Assert-QmlVisualManifestMatchesMatrix -Manifest $baseline -MatrixPath $MatrixPath | Out-Null
 }
+
+$pingResponse = Invoke-Automation @{ command = "ping" }
+Assert-QmlVisualProcessIdentity -PingResponse $pingResponse `
+	-ExpectedProcessId $ExpectedProcessId | Out-Null
 
 $capabilityResponse = Invoke-Automation @{ command = "qmlVisualGateCapabilities" }
 $capabilities = $capabilityResponse.capabilities
@@ -1047,24 +1242,55 @@ foreach ($case in $selectedCases) {
 	if ($caseVariant -ne "none" -and [string]$case.state -ne "connected") {
 		throw "Case '$($case.id)' requests visual variant '$caseVariant' outside connected state."
 	}
-	$apply = Invoke-Automation @{
-		command = "setQmlVisualGateState"; case_id = [string]$case.id; state = [string]$case.state
-		theme = [string]$case.theme; layout = [string]$case.layout; width = [int]$case.width
-		height = [int]$case.height; motd_variant = $motdVariant; rich_preview_variant = $richPreviewVariant
-		rich_preview_size = $richPreviewSize; presentation_family = $presentationFamily; case_variant = $caseVariant
-		surface_variant = $surfaceVariant; density = $density
+	$requiresTimelineIdentity = [string]$case.state -eq "connected"
+	$preApplyTimelineGeneration = $null
+	$applyTimer = [Diagnostics.Stopwatch]::StartNew()
+	try {
+		$apply = Invoke-Automation @{
+			command = "setQmlVisualGateState"; case_id = [string]$case.id; state = [string]$case.state
+			theme = [string]$case.theme; layout = [string]$case.layout; width = [int]$case.width
+			height = [int]$case.height; motd_variant = $motdVariant; rich_preview_variant = $richPreviewVariant
+			rich_preview_size = $richPreviewSize; presentation_family = $presentationFamily; case_variant = $caseVariant
+			surface_variant = $surfaceVariant; density = $density
+		}
+	} catch {
+		$applyTimer.Stop()
+		$applyFailureMessage = [string]$_.Exception.Message
+		if (-not [string]::IsNullOrWhiteSpace($AutomationToken)) {
+			$applyFailureMessage = $applyFailureMessage.Replace($AutomationToken, "<redacted>")
+		}
+		if ($applyFailureMessage.Length -gt 1200) {
+			$applyFailureMessage = $applyFailureMessage.Substring(0, 1200)
+		}
+		Write-QmlPresentationTimingDiagnostic -OutputDirectory $output `
+			-CaseId ([string]$case.id) -Diagnostic ([ordered]@{
+				case_id = [string]$case.id
+				status = "apply_rpc_failed"
+				apply_duration_ms = [Math]::Round($applyTimer.Elapsed.TotalMilliseconds, 3)
+				pre_apply_generation = $preApplyTimelineGeneration
+				error = $applyFailureMessage
+			}) | Out-Null
+		throw
+	} finally {
+		if ($applyTimer.IsRunning) { $applyTimer.Stop() }
 	}
+	$applyDurationMs = [Math]::Round($applyTimer.Elapsed.TotalMilliseconds, 3)
 	$applied = $apply.applied
 	foreach ($property in @("case_id", "state", "theme", "layout", "density", "motd_variant", "rich_preview_variant",
 		"rich_preview_size", "rich_preview_present", "rich_preview_message_id", "rich_body_message_id", "rich_preview_title",
 		"presentation_family", "case_variant", "surface_variant", "surface_present", "capture_window",
 		"screen_share_native_frame_ready", "conversation_search_state",
-		"chat_fixture_state",
+		"chat_fixture_state", "fixture_scope_token", "fixture_message_id_prefix",
+		"fixture_message_ids",
+		"pre_apply_presentation_generation", "presentation_generation", "timeline_presentation_wait_ms",
 		"rich_preview_open_label", "rich_preview_embed_provider", "rich_preview_embed_aspect",
 		"rich_preview_media_count", "rich_preview_has_thumbnail", "width", "height", "message_count",
 		"motd_present", "motd_expanded", "motd_changed", "motd_has_user_history", "motd_visible",
 		"manual_plugin_state", "recorder_state", "toast_state", "focus_target", "actual_device_pixel_ratio", "generation")) {
 		if (-not ($applied.PSObject.Properties.Name -contains $property)) { throw "Case '$($case.id)' lacks applied '$property'." }
+	}
+	if ($requiresTimelineIdentity) {
+		$preApplyTimelineGeneration = [long]$applied.pre_apply_presentation_generation
 	}
 	if ([string]::IsNullOrWhiteSpace([string]$applied.focus_target)) {
 		throw "Case '$($case.id)' returned an empty deterministic focus target."
@@ -1174,11 +1400,18 @@ foreach ($case in $selectedCases) {
 		$appliedJson = $applied | ConvertTo-Json -Compress -Depth 10
 		throw "Automation did not apply visual case '$($case.id)' exactly. Expected $([int]$case.width)x$([int]$case.height) at DPR $actualDevicePixelRatio; applied: $appliedJson"
 	}
+	$isSparseChatSurface = $surfaceVariant -like "chat-sparse-*"
 	$expectedMessageCount = if ([string]$case.state -ne "connected") { 0 } else {
 		switch ($surfaceVariant) {
 			"chat-message-states" { 4 }
 			"chat-attachment-states" { 1 }
 			"chat-history-prepend-anchor" { 30 }
+			"chat-sparse-0" { 0 }
+			"chat-sparse-1" { 1 }
+			"chat-sparse-2" { 2 }
+			"chat-sparse-5" { 5 }
+			"chat-sparse-10" { 10 }
+			"chat-sparse-stonks-5" { 5 }
 			default { 2 }
 		}
 	}
@@ -1237,7 +1470,15 @@ foreach ($case in $selectedCases) {
 				composer_attachment_count = 0; composer_uploading_count = 0; composer_failed_count = 0
 				composer_autocomplete_count = 0; composer_upload_progress_percent = 0; prepend_count = 6
 			} }
-			default { $null }
+			default {
+				if ($isSparseChatSurface) { @{
+					reply_message_count = 0; reaction_message_count = 0; sending_message_count = 0
+					failed_retry_message_count = 0; deleted_message_count = 0
+					ready_attachment_count = 0; loading_attachment_count = 0; error_attachment_count = 0
+					composer_attachment_count = 0; composer_uploading_count = 0; composer_failed_count = 0
+					composer_autocomplete_count = 0; composer_upload_progress_percent = 0; prepend_count = 0
+				} } else { $null }
+			}
 		}
 		if ($null -eq $expectedNumericState) {
 			throw "Chat fixture '$($case.id)' uses unsupported surface '$surfaceVariant'."
@@ -1288,7 +1529,8 @@ foreach ($case in $selectedCases) {
 	$expectMotd = $motdVariant -ne "none"
 	$expectMotdExpanded = $expectMotd -and $motdVariant -ne "collapsed"
 	$expectMotdChanged = $motdVariant -eq "changed"
-	$expectUserHistory = [string]$case.state -eq "connected" -and $motdVariant -in @("none", "history-visible")
+	$expectUserHistory = [string]$case.state -eq "connected" -and
+		$motdVariant -in @("none", "history-visible") -and $expectedMessageCount -gt 0
 	$expectMotdVisible = $expectMotd
 	if ([bool]$applied.motd_present -ne $expectMotd -or
 		[bool]$applied.motd_expanded -ne $expectMotdExpanded -or
@@ -1299,6 +1541,7 @@ foreach ($case in $selectedCases) {
 		throw "Automation did not establish MOTD variant '$motdVariant' for '$($case.id)': $appliedJson"
 	}
 	$expectRichPreview = $richPreviewVariant -ne "none"
+	$expectDeferredRichPreviewShell = $richPreviewVariant -in @("loading", "error")
 	$expectedRichPreviewAspect = switch ($richPreviewVariant) {
 		"youtube" { "wide" }
 		"spotify" { "compact-audio" }
@@ -1366,29 +1609,152 @@ foreach ($case in $selectedCases) {
 	# the tail anchor settles. A visually stable loading pane is not the requested
 	# case, so wait for that production handshake before accepting any main-window
 	# capture instead of relying on unrelated earlier matrix cases for timing.
-	if ($captureWindow -eq "main" -and $expectedMessageCount -gt 0) {
-		$timelinePresentation = $null
+	$requiresProductionTimelineHandshake = $captureWindow -eq "main" -and
+		[string]$case.state -eq "connected"
+	$timelinePresentation = $null
+	$timelineHandshakeDurationMs = $null
+	$timelinePresentationBudgetMs = 300.0
+	$applyRpcBudgetMs = 1000.0
+	$presentationTimingDiagnosticPath = $null
+	if ($requiresProductionTimelineHandshake) {
+		$expectedFixtureScopeToken = "0:$([long]1000000 + [long]$applied.generation)"
+		$expectedFixtureGeneration = [long]$preApplyTimelineGeneration + 1
+		$expectedFixtureStableIdPrefix = "fixture:$([long]$applied.generation):"
+		$expectedFixtureStableIds = @($applied.fixture_message_ids)
+		$presentationTimingDiagnostic = [ordered]@{
+			case_id = [string]$case.id
+			status = "pending"
+			cached_budget_ms = $timelinePresentationBudgetMs
+			apply_rpc_budget_ms = $applyRpcBudgetMs
+			uncached_budget_ms = 1000.0
+			uncached_exercised = $false
+			apply_duration_ms = $applyDurationMs
+			controller_wait_ms = [double]$applied.timeline_presentation_wait_ms
+			pre_apply_generation = $preApplyTimelineGeneration
+			expected_scope_token = $expectedFixtureScopeToken
+			expected_generation = $expectedFixtureGeneration
+			expected_stable_ids = $expectedFixtureStableIds
+			applied_identity = [ordered]@{
+				scope_token = [string]$applied.fixture_scope_token
+				presentation_generation = [long]$applied.presentation_generation
+				stable_id_prefix = [string]$applied.fixture_message_id_prefix
+				stable_ids = @($applied.fixture_message_ids)
+			}
+			timeline_handshake_duration_ms = $null
+			timeline = $null
+		}
+		if ([string]$applied.fixture_scope_token -cne $expectedFixtureScopeToken -or
+			[long]$applied.presentation_generation -ne $expectedFixtureGeneration -or
+			[string]$applied.fixture_message_id_prefix -cne $expectedFixtureStableIdPrefix -or
+			$expectedFixtureGeneration -le 0 -or
+			[string]::IsNullOrWhiteSpace($expectedFixtureStableIdPrefix) -or
+			$expectedFixtureStableIds.Count -ne $expectedMessageCount) {
+			$presentationTimingDiagnostic["status"] = "identity_invalid"
+			$presentationTimingDiagnosticPath = Write-QmlPresentationTimingDiagnostic `
+				-OutputDirectory $output -CaseId ([string]$case.id) `
+				-Diagnostic $presentationTimingDiagnostic
+			throw "Case '$($case.id)' did not return a complete production timeline identity."
+		}
+		$applyBudgetExceeded = [double]$applyDurationMs -gt $applyRpcBudgetMs
 		$timelinePresentationReady = $false
+		$timelineHandshakeTimer = [Diagnostics.Stopwatch]::StartNew()
 		$timelinePresentationDeadline = [DateTime]::UtcNow.AddSeconds(5)
 		do {
 			$timelineResponse = Invoke-Automation @{
 				command = "qmlTimelinePresentationState"
 			}
 			$timelinePresentation = $timelineResponse.timeline
+			$timelineIdentityReady = Test-QmlTimelineFixtureIdentity `
+				-Timeline $timelinePresentation `
+				-ExpectedScopeToken $expectedFixtureScopeToken `
+				-ExpectedGeneration $expectedFixtureGeneration `
+				-ExpectedStableIdPrefix $expectedFixtureStableIdPrefix `
+				-ExpectedStableIds $expectedFixtureStableIds `
+				-ExpectedMessageCount $expectedMessageCount
+			$sparseTimelineReady = $true
+			if ($isSparseChatSurface) {
+				if ($expectedMessageCount -eq 0) {
+					$sparseTimelineReady = [bool]$timelinePresentation.emptyConversationVisible
+				} else {
+					$sparseTimelineReady = [bool]$timelinePresentation.presentationFastPath -and
+						[bool]$timelinePresentation.sparseBottomAlignmentActive -and
+						[double]$timelinePresentation.sparseBottomAlignmentError -le 2.0 -and
+						[double]$timelinePresentation.sparseTailContentYError -le 0.5 -and
+						[Math]::Abs([double]$timelinePresentation.visibleTailGap -
+							[double]$timelinePresentation.footerHeight) -le 2.0 -and
+						[int]$timelinePresentation.pendingHydrationCount -eq 0 -and
+						[bool]$timelinePresentation.richHydrated
+				}
+			}
+			$timelineGeometryReady = Test-QmlTimelineViewportGeometry `
+				-Timeline $timelinePresentation `
+				-RequireCustomHeader ($surfaceVariant -eq "chat-sparse-stonks-5") `
+				-RequireHistoryPrependLayout `
+					($surfaceVariant -eq "chat-history-prepend-anchor")
 			$timelinePresentationReady = $null -ne $timelinePresentation -and
+				$timelineIdentityReady -and
 				[int]$timelinePresentation.count -eq $expectedMessageCount -and
 				-not [bool]$timelinePresentation.presentationPending -and
 				-not [bool]$timelinePresentation.presentationFinalizing -and
-				-not [bool]$timelinePresentation.scopeResetPending
+				-not [bool]$timelinePresentation.scopeResetPending -and
+				[bool]$timelinePresentation.stablePresentationReady -and
+				[bool]$timelinePresentation.stableFrameCommitted -and
+				[bool]$timelinePresentation.visibleFrameCommitted -and
+				[int]$timelinePresentation.stableFrameConsecutiveCount -ge 2 -and
+				[bool]$timelinePresentation.settled -and
+				[int]$timelinePresentation.visibleDeferredSummaryCount -eq 0 -and
+				[int]$timelinePresentation.visibleDeadlineFallbackCount -eq 0 -and
+				[int]$timelinePresentation.visibleBlankPresentationCount -eq 0 -and
+				[int]$timelinePresentation.visibleBlankPreviewSurfaceCount -eq 0 -and
+				[int]$timelinePresentation.visibleDuplicateHandoffSummaryCount -eq 0 -and
+				[int]$timelinePresentation.visiblePresentationHeightPendingCount -eq 0 -and
+				[int]$timelinePresentation.visiblePresentationHeightMismatchCount -eq 0 -and
+				[double]$timelinePresentation.maximumVisiblePresentationHeightError -le 1.0 -and
+				[double]$timelinePresentation.composerHeight -gt 1.0 -and
+				$sparseTimelineReady -and $timelineGeometryReady
 			if (-not $timelinePresentationReady) {
 				Start-Sleep -Milliseconds 25
 			}
 		} while (-not $timelinePresentationReady -and
 			[DateTime]::UtcNow -lt $timelinePresentationDeadline)
+		$timelineHandshakeTimer.Stop()
+		$timelineHandshakeDurationMs = [Math]::Round(
+			$timelineHandshakeTimer.Elapsed.TotalMilliseconds, 3)
+		$presentationTimingDiagnostic["timeline_handshake_duration_ms"] =
+			$timelineHandshakeDurationMs
+		$presentationTimingDiagnostic["timeline"] = $timelinePresentation
 		if (-not $timelinePresentationReady) {
+			$presentationTimingDiagnostic["status"] = "presentation_timeout"
+			$presentationTimingDiagnosticPath = Write-QmlPresentationTimingDiagnostic `
+				-OutputDirectory $output -CaseId ([string]$case.id) `
+				-Diagnostic $presentationTimingDiagnostic
 			$timelineJson = $timelinePresentation | ConvertTo-Json -Compress -Depth 8
 			throw "Case '$($case.id)' did not finish its production timeline presentation: $timelineJson"
 		}
+		$qmlBudgetExceeded = [double]$timelinePresentation.dataReadyDurationMs -gt $timelinePresentationBudgetMs -or
+			[double]$timelinePresentation.stableReadyDurationMs -gt $timelinePresentationBudgetMs -or
+			[double]$timelinePresentation.stableFrameDurationMs -gt $timelinePresentationBudgetMs -or
+			[double]$timelinePresentation.visibleFrameDurationMs -gt $timelinePresentationBudgetMs
+		if ($applyBudgetExceeded -or $qmlBudgetExceeded) {
+			$presentationTimingDiagnostic["status"] = if ($applyBudgetExceeded -and $qmlBudgetExceeded) {
+				"apply_and_qml_budget_exceeded"
+			} elseif ($applyBudgetExceeded) { "apply_budget_exceeded" } else { "qml_budget_exceeded" }
+			$presentationTimingDiagnosticPath = Write-QmlPresentationTimingDiagnostic `
+				-OutputDirectory $output -CaseId ([string]$case.id) `
+				-Diagnostic $presentationTimingDiagnostic
+			if ($applyBudgetExceeded) {
+				throw "Case '$($case.id)' exceeded the $($applyRpcBudgetMs) ms " +
+					"fixture apply-RPC budget ($applyDurationMs ms); " +
+					"the preserved timeline diagnostic distinguishes QML presentation latency."
+			}
+			throw "Case '$($case.id)' exceeded the $($timelinePresentationBudgetMs) ms " +
+				"cached production presentation budget: " +
+				($timelinePresentation | ConvertTo-Json -Compress -Depth 8)
+		}
+		$presentationTimingDiagnostic["status"] = "passed"
+		$presentationTimingDiagnosticPath = Write-QmlPresentationTimingDiagnostic `
+			-OutputDirectory $output -CaseId ([string]$case.id) `
+			-Diagnostic $presentationTimingDiagnostic
 	}
 
 	$richBodyState = $null
@@ -1446,7 +1812,7 @@ foreach ($case in $selectedCases) {
 	}
 
 	$richPreviewCardState = $null
-	if ($expectRichPreview -and -not $isMediaSurface) {
+	if ($expectRichPreview -and -not $expectDeferredRichPreviewShell -and -not $isMediaSurface) {
 		$expectedProviderDetails = switch ($richPreviewVariant) {
 			"steam" {
 				[pscustomobject]@{ variant = "game"; token = "steam"; family = "commerce"; presentation = "commerce" }
@@ -1522,6 +1888,10 @@ foreach ($case in $selectedCases) {
 				"previewState", "compact", "expanded", "userExpanded", "rendered",
 				"visibleImages", "visibleImageCount", "imageReadyCount", "imageLoadingCount", "imageErrorCount",
 				"mediaVisible", "mediaWidth", "mediaHeight", "mediaX", "mediaY", "playVisible",
+				"documentGalleryVisible", "documentGalleryPaintedSurface",
+				"documentGalleryCurrentVisualStatusName", "documentViewportVisible",
+				"documentViewportWidth", "documentViewportHeight", "documentViewportX", "documentViewportY",
+				"documentPlaybackPromptVisible",
 				"openSurfaceVisible", "providerDetailsVisible", "providerVariant", "providerToken",
 				"providerFamily", "providerPresentation"
 			)
@@ -1557,15 +1927,16 @@ foreach ($case in $selectedCases) {
 			$visibleImages = @($richPreviewCardState.visibleImages)
 			$inlineMediaStageExpected = $richPreviewVariant -eq "direct-media" -or
 				-not [string]::IsNullOrWhiteSpace([string]$applied.rich_preview_embed_provider)
-			$expectedImageObjectName = if ($inlineMediaStageExpected) { "previewEmbedPoster" }
-				elseif ($richPreviewVariant -eq "steam") { "providerSteamHeroImage" }
+			$expectedImageObjectNames = if ($inlineMediaStageExpected) {
+				@("previewEmbedPoster", "embedDocumentMediaImage")
+			} elseif ($richPreviewVariant -eq "steam") { @("providerSteamHeroImage") }
 				elseif ($richPreviewVariant -in @(
 					"product", "vehicle", "property", "marketplace"
-				)) { "providerCommerceHeroImage" }
-				elseif ($richPreviewVariant -eq "article") { "providerArticleHeroImage" }
-				else { "previewCompactImage" }
+				)) { @("providerCommerceHeroImage") }
+				elseif ($richPreviewVariant -eq "article") { @("providerArticleHeroImage") }
+				else { @("previewCompactImage") }
 			$matchingVisibleImages = @($visibleImages | Where-Object {
-				[string]$_.objectName -eq $expectedImageObjectName -and [string]$_.statusName -eq "ready" -and
+				[string]$_.objectName -in $expectedImageObjectNames -and [string]$_.statusName -eq "ready" -and
 				[bool]$_.effectiveVisible -and [bool]$_.intersectsCard -and
 				[double]$_.visibleSceneRect.width -gt 0 -and [double]$_.visibleSceneRect.height -gt 0
 			})
@@ -1575,18 +1946,35 @@ foreach ($case in $selectedCases) {
 				 [int]$richPreviewCardState.imageLoadingCount -eq 0 -and
 				 [int]$richPreviewCardState.imageErrorCount -eq 0 -and
 				 $matchingVisibleImages.Count -ge 1)
-			$mediaInsideCard = -not $inlineMediaStageExpected -or
-				([bool]$richPreviewCardState.mediaVisible -and
+			$legacyMediaInsideCard = [bool]$richPreviewCardState.mediaVisible -and
 				 [double]$richPreviewCardState.mediaWidth -gt 0 -and [double]$richPreviewCardState.mediaHeight -gt 0 -and
 				 [double]$richPreviewCardState.mediaX -ge [double]$richPreviewCardState.cardX - 1 -and
 				 ([double]$richPreviewCardState.mediaX + [double]$richPreviewCardState.mediaWidth) -le
 					([double]$richPreviewCardState.cardX + [double]$richPreviewCardState.cardWidth + 1) -and
 				 [double]$richPreviewCardState.mediaY -ge [double]$richPreviewCardState.cardY - 1 -and
 				 ([double]$richPreviewCardState.mediaY + [double]$richPreviewCardState.mediaHeight) -le
-					([double]$richPreviewCardState.cardY + [double]$richPreviewCardState.cardHeight + 1))
+					([double]$richPreviewCardState.cardY + [double]$richPreviewCardState.cardHeight + 1)
+			$typedProviderDocumentInsideCard = [bool]$richPreviewCardState.documentGalleryVisible -and
+				[bool]$richPreviewCardState.documentViewportVisible -and
+				[double]$richPreviewCardState.documentViewportWidth -gt 0 -and
+				[double]$richPreviewCardState.documentViewportHeight -gt 0 -and
+				[double]$richPreviewCardState.documentViewportX -ge [double]$richPreviewCardState.cardX - 1 -and
+				([double]$richPreviewCardState.documentViewportX +
+				 [double]$richPreviewCardState.documentViewportWidth) -le
+					([double]$richPreviewCardState.cardX + [double]$richPreviewCardState.cardWidth + 1) -and
+				[double]$richPreviewCardState.documentViewportY -ge [double]$richPreviewCardState.cardY - 1 -and
+				([double]$richPreviewCardState.documentViewportY +
+				 [double]$richPreviewCardState.documentViewportHeight) -le
+					([double]$richPreviewCardState.cardY + [double]$richPreviewCardState.cardHeight + 1)
+			$typedProviderDocumentReady = $typedProviderDocumentInsideCard -and
+				[bool]$richPreviewCardState.documentGalleryPaintedSurface -and
+				[bool]$richPreviewCardState.documentPlaybackPromptVisible -and
+				[string]$richPreviewCardState.documentGalleryCurrentVisualStatusName -eq "ready"
+			$mediaInsideCard = -not $inlineMediaStageExpected -or
+				$legacyMediaInsideCard -or $typedProviderDocumentInsideCard
 			$embedReady = -not $inlineMediaStageExpected -or
 				($mediaInsideCard -and
-				 [bool]$richPreviewCardState.playVisible)
+				 ([bool]$richPreviewCardState.playVisible -or $typedProviderDocumentReady))
 			$openSurfaceReady = if ($inlineMediaStageExpected) {
 				-not [bool]$richPreviewCardState.openSurfaceVisible
 			} else {
@@ -1883,6 +2271,31 @@ foreach ($case in $selectedCases) {
 		logical_width = [int]$case.width; logical_height = [int]$case.height; device_pixel_ratio = [double]$case.device_pixel_ratio
 		minimum_main_grid_non_black_fraction = if ($null -eq $finalGridCoverage) { $null }
 			else { [double]$finalGridCoverage.minimum_non_black_fraction }
+		visual_coherence_passed = $true
+		apply_duration_ms = $applyDurationMs
+		cached_presentation_budget_ms = if ($requiresProductionTimelineHandshake) {
+			$timelinePresentationBudgetMs
+		} else { $null }
+		apply_rpc_budget_ms = if ($requiresProductionTimelineHandshake) {
+			$applyRpcBudgetMs
+		} else { $null }
+		uncached_presentation_budget_ms = 1000.0
+		uncached_presentation_exercised = $false
+		presentation_timing_diagnostic = $presentationTimingDiagnosticPath
+		timeline_presentation_wait_ms = [double]$applied.timeline_presentation_wait_ms
+		timeline_handshake_duration_ms = $timelineHandshakeDurationMs
+		fixture_scope_token = [string]$applied.fixture_scope_token
+		pre_apply_presentation_generation = $preApplyTimelineGeneration
+		fixture_presentation_generation = [long]$applied.presentation_generation
+		fixture_message_id_prefix = [string]$applied.fixture_message_id_prefix
+		data_ready_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.dataReadyDurationMs }
+		stable_ready_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.stableReadyDurationMs }
+		stable_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.stableFrameDurationMs }
+		visible_frame_duration_ms = if ($null -eq $timelinePresentation) { $null }
+			else { [double]$timelinePresentation.visibleFrameDurationMs }
 		image_width = $dimensions.width; image_height = $dimensions.height
 		image_sha256 = Get-QmlVisualFileSha256 $imagePath
 		accessibility_sha256 = Get-QmlVisualFileSha256 $accessibilityPath
@@ -1891,7 +2304,9 @@ foreach ($case in $selectedCases) {
 
 $manifest = [ordered]@{
 	schema_version = 1; frontend = "qml"; mode = if ($CandidateOnly) { "candidate-only" } else { "gate" }
-	matrix_sha256 = Get-QmlVisualFileSha256 $MatrixPath; cases = $results
+	matrix_sha256 = Get-QmlVisualFileSha256 $MatrixPath
+	process_id = $ExpectedProcessId
+	cases = $results
 }
 $manifestPath = Join-Path $output "manifest.json"
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM

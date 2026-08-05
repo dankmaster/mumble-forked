@@ -64,7 +64,7 @@ void PersistentChatController::setGateway(PersistentChatGateway *gateway) {
 }
 
 void PersistentChatController::reset() {
-	m_connectionGeneration++;
+	m_historyRequestConnectionGenerations.clear();
 	m_store.clear();
 	m_activeScope = PersistentChatScopeKey();
 	emit unreadStateChanged();
@@ -136,6 +136,8 @@ void PersistentChatController::warmupScopes(const QList< PersistentChatScopeKey 
 		for (const PersistentChatScopeKey &key : requestedKeys) {
 			PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
 			state.initialRequestInFlight           = true;
+			m_historyRequestConnectionGenerations.insert(
+				key.cacheKey(), m_gateway->connectionGeneration());
 			state.snapshot.loadingState = state.snapshot.messages.isEmpty() ? PersistentChatLoadingState::Initial
 																		   : PersistentChatLoadingState::Refreshing;
 		}
@@ -177,12 +179,15 @@ bool PersistentChatController::requestOlderForActiveScope() {
 	}
 
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(m_activeScope);
-	if (!state.snapshot.hasOlder || state.snapshot.oldestLoadedMessageId == 0 || state.olderRequestInFlight) {
+	if (!state.snapshot.hasOlder || state.snapshot.oldestLoadedMessageId == 0
+		|| state.initialRequestInFlight || state.olderRequestInFlight) {
 		return false;
 	}
 
 	state.olderRequestInFlight      = true;
 	state.snapshot.loadingState     = PersistentChatLoadingState::Older;
+	m_historyRequestConnectionGenerations.insert(
+		m_activeScope.cacheKey(), m_gateway->connectionGeneration());
 	m_gateway->requestOlder(m_activeScope.scope, m_activeScope.scopeID, state.snapshot.oldestLoadedMessageId);
 	emit activeSnapshotChanged();
 	return true;
@@ -265,18 +270,39 @@ bool PersistentChatController::applyReactionState(const MumbleProto::ChatReactio
 	return false;
 }
 
-void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHistoryResponse &response) {
+void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHistoryResponse &response,
+													  quint64 connectionGeneration) {
 	const PersistentChatScopeKey key = scopeKeyFromHistory(response);
-	PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
-	state.initialRequestInFlight      = false;
-	state.olderRequestInFlight        = false;
-	state.snapshot.loadingState       = PersistentChatLoadingState::Idle;
-	state.snapshot.initialLoaded      = true;
-	state.snapshot.errorMessage.clear();
-	state.snapshot.hasOlder =
+	PersistentChatStore::ScopeState *state = m_store.scopeState(key);
+	if (!state) {
+		// A response from a retired connection must not recreate a scope after
+		// reset. Only an explicit request, warmup, live message, or selection may
+		// establish cache ownership.
+		return;
+	}
+	const bool responseOwnsOlderRequest   = state->olderRequestInFlight;
+	const bool responseOwnsInitialRequest = state->initialRequestInFlight;
+	const auto generationIt = m_historyRequestConnectionGenerations.constFind(key.cacheKey());
+	if ((!responseOwnsOlderRequest && !responseOwnsInitialRequest)
+		|| generationIt == m_historyRequestConnectionGenerations.cend()
+		|| generationIt.value() != connectionGeneration
+		|| !m_gateway || m_gateway->connectionGeneration() != connectionGeneration) {
+		return;
+	}
+	m_historyRequestConnectionGenerations.erase(generationIt);
+	if (responseOwnsOlderRequest) {
+		state->olderRequestInFlight = false;
+	} else if (responseOwnsInitialRequest) {
+		state->initialRequestInFlight = false;
+	}
+	PersistentChatStore::ScopeState &ownedState = *state;
+	ownedState.snapshot.loadingState       = PersistentChatLoadingState::Idle;
+	ownedState.snapshot.initialLoaded      = true;
+	ownedState.snapshot.errorMessage.clear();
+	ownedState.snapshot.hasOlder =
 		response.has_has_older() ? response.has_older() : (response.has_has_more() ? response.has_more() : false);
 	if (response.has_last_read_message_id()) {
-		state.snapshot.lastReadMessageId = response.last_read_message_id();
+		ownedState.snapshot.lastReadMessageId = response.last_read_message_id();
 	}
 
 	QVector< MumbleProto::ChatMessage > incomingMessages;
@@ -286,16 +312,16 @@ void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHist
 	}
 
 	const PersistentChatStore::MergeMessagesResult mergeResult =
-		PersistentChatStore::mergeMessages(state.snapshot.messages, incomingMessages);
-	state.snapshot.prependedMessageCount = mergeResult.prependedMessageCount;
+		PersistentChatStore::mergeMessages(ownedState.snapshot.messages, incomingMessages);
+	ownedState.snapshot.prependedMessageCount = mergeResult.prependedMessageCount;
 	if (mergeResult.changed) {
-		++state.snapshot.messagesRevision;
+		++ownedState.snapshot.messagesRevision;
 	}
 
-	state.snapshot.oldestLoadedMessageId =
+	ownedState.snapshot.oldestLoadedMessageId =
 		response.has_oldest_message_id() ? response.oldest_message_id()
-										 : PersistentChatStore::oldestMessageID(state.snapshot.messages);
-	setUnreadFromMessages(state);
+										 : PersistentChatStore::oldestMessageID(ownedState.snapshot.messages);
+	setUnreadFromMessages(ownedState);
 
 	if (m_activeScope.cacheKey() == key.cacheKey()) {
 		emit activeSnapshotChanged();
@@ -343,7 +369,7 @@ void PersistentChatController::setUnreadFromMessages(PersistentChatStore::ScopeS
 
 bool PersistentChatController::startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload) {
 	if (!m_gateway || !m_gateway->isReady() || state.olderRequestInFlight
-		|| (!forceReload && state.initialRequestInFlight)) {
+		|| state.initialRequestInFlight) {
 		return false;
 	}
 
@@ -353,6 +379,8 @@ bool PersistentChatController::startInitialLoad(PersistentChatStore::ScopeState 
 	}
 
 	state.initialRequestInFlight      = true;
+	m_historyRequestConnectionGenerations.insert(
+		state.snapshot.key.cacheKey(), m_gateway->connectionGeneration());
 	state.snapshot.loadingState =
 		state.snapshot.initialLoaded ? PersistentChatLoadingState::Refreshing : PersistentChatLoadingState::Initial;
 	m_gateway->requestInitialPage(state.snapshot.key.scope, state.snapshot.key.scopeID);

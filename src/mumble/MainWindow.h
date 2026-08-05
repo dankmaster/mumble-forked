@@ -1237,7 +1237,6 @@ protected:
 	quint64 m_deferredPersistentChatNavigationGeneration   = 0;
 	QMetaObject::Connection m_persistentChatNavigationSyncConnection;
 	QMetaObject::Connection m_persistentChatNavigationSwapConnection;
-	QString m_preclearedPersistentChatNavigationScopeToken;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
 	QHash< QString, QSet< QString > > m_modernShellMessageDtoCacheKeysByMessage;
