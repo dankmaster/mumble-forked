@@ -5640,6 +5640,26 @@ ApplicationWindow {
 						return false
 					}
 
+					function scheduleNextVisiblePresentationHeightSettlement() {
+						const diagnostics = visiblePresentationDiagnostics()
+						for (let index = 0; index < diagnostics.rows.length; ++index) {
+							const row = diagnostics.rows[index] || ({})
+							if (row.presentationHeightPending !== true)
+								continue
+							const stableId = String(row.id || "")
+							const item = stableId.length > 0
+								? timelineDelegateForStableId(stableId) : null
+							if (!item || typeof item.schedulePresentationHeightObservation
+									!== "function"
+									|| item.presentationHeightQuietObservationEligible !== true)
+								continue
+							item.schedulePresentationHeightObservation()
+							root.update()
+							return true
+						}
+						return false
+					}
+
 					function historyLoadProbeAnchorState() {
 						const stableId = performanceHistoryProbeAnchorId
 						if (stableId.length === 0)
@@ -5796,6 +5816,10 @@ ApplicationWindow {
 						// serially under that anchor. A later commit rearms this timer.
 						if (visiblePresentationHeightConvergencePending()) {
 							clearViewportAnchorQuietRelease()
+							Qt.callLater(function() {
+								timeline.scheduleNextVisiblePresentationHeightSettlement()
+							})
+							root.update()
 							return
 						}
 						const currentContentHeight = Number(contentHeight || 0)
@@ -7677,6 +7701,10 @@ ApplicationWindow {
 							viewportAnchorActive = true
 						}
 						scheduleRichContentResume()
+						Qt.callLater(function() {
+							timeline.scheduleNextVisiblePresentationHeightSettlement()
+						})
+						root.update()
 					}
 
 					function extendDeferredPrependAnchorTarget(insertedCount) {
@@ -9148,6 +9176,7 @@ ApplicationWindow {
 					else if (timeline.viewportAnchorActive)
 						timeline.scheduleViewportAnchorQuietRelease()
 						timeline.scheduleViewportMembershipUpdate()
+					root.update()
 					if (commitsDeadlineRecovery && item)
 						item.completeRichLoaderResumeWhenReady()
 					return true

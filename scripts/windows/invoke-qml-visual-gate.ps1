@@ -1541,7 +1541,13 @@ foreach ($case in $selectedCases) {
 			"prepend_visible_frame_committed", "prepend_history_loader_visible",
 			"prepend_history_loader_height", "prepend_jump_to_latest_visible",
 			"prepend_composer_height", "prepend_composer_contiguous",
-			"prepend_settlement_observed", "prepend_exact_message_order",
+			"prepend_visible_blank_presentation_count", "prepend_visible_height_pending_count",
+			"prepend_visible_height_mismatch_count", "prepend_transaction_id",
+			"prepend_scope_token", "prepend_presentation_generation",
+			"prepend_settlement_receipt_baseline_sequence", "prepend_settlement_receipt_sequence",
+			"prepend_settlement_receipt_observed", "prepend_settlement_receipt",
+			"prepend_exact_message_order", "prepend_expected_message_id_hash",
+			"prepend_actual_message_id_hash",
 			"prepend_expected_message_ids", "prepend_actual_message_ids",
 			"prepend_start_frame_serial", "prepend_first_committed_frame_serial",
 			"prepend_second_committed_frame_serial",
@@ -1648,6 +1654,54 @@ foreach ($case in $selectedCases) {
 				$reportedOffsetDelta = [double]$chatState.anchor_offset_delta
 				$calculatedOffsetDelta = [Math]::Abs(
 					[double]$chatState.anchor_after_offset - [double]$chatState.anchor_before_offset)
+				$prependReceipt = $chatState.prepend_settlement_receipt
+				$requiredPrependReceiptProperties = @(
+					"sequence", "transaction_id", "scope_token", "presentation_generation",
+					"ordered_message_count", "ordered_message_id_hash", "qualifying_frame_count",
+					"first_geometry_fingerprint", "second_geometry_fingerprint",
+					"first_frame_serial", "second_frame_serial", "anchor_id", "anchor_offset",
+					"settlement_duration_ms"
+				)
+				$prependReceiptComplete = $null -ne $prependReceipt
+				foreach ($receiptProperty in $requiredPrependReceiptProperties) {
+					if (-not $prependReceiptComplete -or
+						-not ($prependReceipt.PSObject.Properties.Name -contains $receiptProperty)) {
+						$prependReceiptComplete = $false
+						break
+					}
+				}
+				$receiptIdentityMatches = $prependReceiptComplete -and
+					-not [string]::IsNullOrEmpty([string]$chatState.prepend_transaction_id) -and
+					[string]$prependReceipt.transaction_id -eq [string]$chatState.prepend_transaction_id -and
+					[string]$prependReceipt.scope_token -eq [string]$chatState.prepend_scope_token -and
+					[long]$prependReceipt.presentation_generation -eq
+						[long]$chatState.prepend_presentation_generation
+				$receiptSequenceAdvanced = $prependReceiptComplete -and
+					[long]$chatState.prepend_settlement_receipt_sequence -gt
+						[long]$chatState.prepend_settlement_receipt_baseline_sequence -and
+					[long]$prependReceipt.sequence -eq
+						[long]$chatState.prepend_settlement_receipt_sequence
+				$receiptOrderedIdentityMatches = $prependReceiptComplete -and
+					[int]$prependReceipt.ordered_message_count -eq 30 -and
+					-not [string]::IsNullOrEmpty([string]$prependReceipt.ordered_message_id_hash) -and
+					[string]$prependReceipt.ordered_message_id_hash -eq
+						[string]$chatState.prepend_expected_message_id_hash -and
+					[string]$chatState.prepend_actual_message_id_hash -eq
+						[string]$chatState.prepend_expected_message_id_hash
+				$receiptGeometryMatches = $prependReceiptComplete -and
+					[int]$prependReceipt.qualifying_frame_count -eq 2 -and
+					-not [string]::IsNullOrEmpty([string]$prependReceipt.first_geometry_fingerprint) -and
+					[string]$prependReceipt.first_geometry_fingerprint -eq
+						[string]$prependReceipt.second_geometry_fingerprint -and
+					[long]$prependReceipt.first_frame_serial -eq
+						[long]$chatState.prepend_first_committed_frame_serial -and
+					[long]$prependReceipt.second_frame_serial -eq
+						[long]$chatState.prepend_second_committed_frame_serial -and
+					[string]$prependReceipt.anchor_id -eq $expectedAnchor -and
+					[Math]::Abs([double]$prependReceipt.anchor_offset -
+						[double]$chatState.anchor_before_offset) -le 0.5 -and
+					[Math]::Abs([double]$prependReceipt.settlement_duration_ms -
+						[double]$chatState.prepend_stable_duration_ms) -le 0.001
 				if ([string]$chatState.anchor_id -ne $expectedAnchor -or
 					[int]$chatState.anchor_before_row -ne 11 -or [int]$chatState.anchor_after_row -ne 17 -or
 					-not [bool]$chatState.anchor_preserved -or -not [bool]$chatState.pure_prepend_applied -or
@@ -1669,14 +1723,20 @@ foreach ($case in $selectedCases) {
 					-not [bool]$chatState.prepend_jump_to_latest_visible -or
 					[double]$chatState.prepend_composer_height -le 1.0 -or
 					-not [bool]$chatState.prepend_composer_contiguous -or
-					-not [bool]$chatState.prepend_settlement_observed -or
+					[int]$chatState.prepend_visible_blank_presentation_count -ne 0 -or
+					[int]$chatState.prepend_visible_height_pending_count -ne 0 -or
+					[int]$chatState.prepend_visible_height_mismatch_count -ne 0 -or
+					-not [bool]$chatState.prepend_settlement_receipt_observed -or
+					-not $receiptSequenceAdvanced -or -not $receiptIdentityMatches -or
+					-not $receiptOrderedIdentityMatches -or -not $receiptGeometryMatches -or
 					-not [bool]$chatState.prepend_exact_message_order -or
 					-not $orderedPrependExportMatches -or
 					[long]$chatState.prepend_first_committed_frame_serial -le
 						[long]$chatState.prepend_start_frame_serial -or
 					[long]$chatState.prepend_second_committed_frame_serial -le
 						[long]$chatState.prepend_first_committed_frame_serial -or
-					[int]$chatState.prepend_matching_committed_frame_count -lt 2 -or
+					[int]$chatState.prepend_matching_committed_frame_count -ne 2 -or
+					[double]$chatState.prepend_stable_duration_ms -lt 0.0 -or
 					[double]$chatState.prepend_stable_duration_ms -gt 300.0 -or
 					[Math]::Abs($reportedOffsetDelta - $calculatedOffsetDelta) -gt 0.001) {
 					$chatJson = $chatState | ConvertTo-Json -Compress -Depth 8
@@ -2545,8 +2605,32 @@ foreach ($case in $selectedCases) {
 		prepend_matching_committed_frame_count = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
 			[int]$chatState.prepend_matching_committed_frame_count
 		} else { $null }
-		prepend_settlement_observed = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
-			[bool]$chatState.prepend_settlement_observed
+		prepend_settlement_receipt_observed = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[bool]$chatState.prepend_settlement_receipt_observed
+		} else { $null }
+		prepend_settlement_receipt_baseline_sequence = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[long]$chatState.prepend_settlement_receipt_baseline_sequence
+		} else { $null }
+		prepend_settlement_receipt_sequence = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[long]$chatState.prepend_settlement_receipt_sequence
+		} else { $null }
+		prepend_transaction_id = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[string]$chatState.prepend_transaction_id
+		} else { $null }
+		prepend_receipt_scope_token = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[string]$chatState.prepend_settlement_receipt.scope_token
+		} else { $null }
+		prepend_receipt_presentation_generation = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[long]$chatState.prepend_settlement_receipt.presentation_generation
+		} else { $null }
+		prepend_receipt_ordered_message_id_hash = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[string]$chatState.prepend_settlement_receipt.ordered_message_id_hash
+		} else { $null }
+		prepend_receipt_first_geometry_fingerprint = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[string]$chatState.prepend_settlement_receipt.first_geometry_fingerprint
+		} else { $null }
+		prepend_receipt_second_geometry_fingerprint = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[string]$chatState.prepend_settlement_receipt.second_geometry_fingerprint
 		} else { $null }
 		prepend_exact_message_order = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
 			[bool]$chatState.prepend_exact_message_order

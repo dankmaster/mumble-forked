@@ -47,6 +47,7 @@ private:
 	QString m_focusItemName;
 	QString m_focusState;
 	QString m_focusSurfaceVariant;
+	qulonglong m_prependSettlementReceiptSequence = 0;
 	qulonglong m_generation = 0;
 };
 

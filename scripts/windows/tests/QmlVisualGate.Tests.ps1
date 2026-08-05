@@ -494,6 +494,7 @@ Describe "Qt Quick visual manifest validation" {
 
 		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		$main = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\Main.qml"
 		foreach ($surface in @(
 			"chat-message-states", "chat-composer-states", "chat-attachment-states",
 			"chat-history-prepend-anchor")) {
@@ -523,18 +524,31 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'prepend_stable_duration_ms\s*-gt\s*300\.0'
 		$worker | Should Match 'prepend_history_loader_height'
 		$worker | Should Match 'prepend_composer_contiguous'
-		$worker | Should Match 'prepend_settlement_observed'
+		$worker | Should Match 'prepend_settlement_receipt_observed'
+		$worker | Should Match 'prepend_settlement_receipt_sequence\s*-gt'
+		$worker | Should Match 'first_geometry_fingerprint\s*-eq'
+		$worker | Should Match 'ordered_message_id_hash'
 		$worker | Should Match 'prepend_exact_message_order'
 		$worker | Should Match 'prepend_expected_message_ids'
 		$worker | Should Match 'prepend_actual_message_ids'
 		$worker | Should Match '\$orderedPrependExportMatches'
 		$worker | Should Match 'prepend_first_committed_frame_serial\s*-le'
 		$worker | Should Match 'prepend_second_committed_frame_serial\s*-le'
-		$worker | Should Match 'prepend_matching_committed_frame_count\s*-lt\s*2'
+		$worker | Should Match 'prepend_matching_committed_frame_count\s*-ne\s*2'
 		$worker | Should Match 'did not execute a settled 30-row production prepend receipt'
 		$controller | Should Match 'prependReceiptDeadlineMilliseconds\s*=\s*300'
-		$controller | Should Match 'prependSettlementObserved'
+		$controller | Should Match 'prependSettlementReceiptBaselineSequence'
+		$controller | Should Match '\+\+m_prependSettlementReceiptSequence'
+		$controller | Should Match 'prependSettlementReceiptSequence > prependSettlementReceiptBaselineSequence'
+		$controller | Should Match 'first_geometry_fingerprint'
+		$controller | Should Match 'expectedOrderedMessageIDHash'
+		$controller | Should Not Match 'prependSettlementObserved'
+		$controller | Should Not Match 'prepend_settlement_observed'
+		$controller | Should Match 'prependTimer\.start\(\);\s*const bool productionPrependQueued'
 		$controller | Should Match 'previousFrameSerial'
+		$main | Should Match 'function scheduleNextVisiblePresentationHeightSettlement\(\)'
+		$main | Should Match 'clearViewportAnchorQuietRelease\(\)\s*Qt\.callLater\(function\(\) \{\s*timeline\.scheduleNextVisiblePresentationHeightSettlement\(\)'
+		$main | Should Match 'timeline\.scheduleViewportMembershipUpdate\(\)\s*root\.update\(\)'
 		$controller | Should Not Match 'for \(int attempt = 0; attempt < 12; \+\+attempt\)'
 		$worker | Should Match '"chat-history-prepend-anchor"\s*\{\s*@\('
 		$worker | Should Match 'command\s*=\s*"qmlTimelinePresentationState"'
