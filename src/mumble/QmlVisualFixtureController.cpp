@@ -2506,9 +2506,11 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 				m_host->chatModel()->get(row).value(QStringLiteral("id")).toString());
 		}
 		const bool exactPrependMessageOrder = actualPrependMessageIDs == expectedPrependMessageIDs;
+		// The ListView count excludes the deferred prepend prefix rendered by its InlineHeader.
+		// Validate the complete ordered source model instead of that materialization proxy.
 		const bool purePrependApplied = exactPrependMessageOrder
 			&& anchorAfterRow == anchorBeforeRow + VisualHistoryPrependMessageCount
-			&& afterState.value(QStringLiteral("count")).toInt() == finalExpectedMessageCount;
+			&& m_host->chatModel()->rowCount() == finalExpectedMessageCount;
 		const QString actualOrderedMessageIDHash = QString::fromLatin1(QCryptographicHash::hash(
 			currentOrderedMessageIDs().join(QChar(0x1f)).toUtf8(), QCryptographicHash::Md5).toHex());
 		const bool anchorPreserved =

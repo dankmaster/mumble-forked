@@ -211,7 +211,8 @@ function Test-QmlTimelineFixtureIdentity {
 		[Parameter(Mandatory = $true)][long]$ExpectedGeneration,
 		[Parameter(Mandatory = $true)][AllowEmptyString()][string]$ExpectedStableIdPrefix,
 		[Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ExpectedStableIds,
-		[Parameter(Mandatory = $true)][int]$ExpectedMessageCount
+		[Parameter(Mandatory = $true)][int]$ExpectedMessageCount,
+		[ValidateRange(0, [int]::MaxValue)][int]$ExpectedModelIndexOffset = 0
 	)
 	if ([string]$Timeline.scopeToken -cne $ExpectedScopeToken -or
 		[long]$Timeline.generation -ne $ExpectedGeneration) {
@@ -250,7 +251,8 @@ function Test-QmlTimelineFixtureIdentity {
 		if ([string]::IsNullOrWhiteSpace($visibleId) -or
 			$expectedIndex -lt 0 -or $expectedIndex -le $previousModelIndex -or
 			$modelIndex -lt -1 -or
-			($modelIndex -ge 0 -and $modelIndex -ne $expectedIndex) -or
+			($modelIndex -ge 0 -and
+				($modelIndex + $ExpectedModelIndexOffset) -ne $expectedIndex) -or
 			-not $seenIds.Add($visibleId)) {
 			return $false
 		}
@@ -1360,8 +1362,22 @@ foreach ($case in $selectedCases) {
 	} catch {
 		$applyTimer.Stop()
 		$applyFailureMessage = [string]$_.Exception.Message
+		$applyFailureTimeline = $null
+		$applyFailureTimelineProbeError = ""
+		try {
+			$applyFailureTimelineResponse = Invoke-Automation @{
+				command = "qmlTimelinePresentationState"
+			}
+			if ($applyFailureTimelineResponse.PSObject.Properties.Name -contains "timeline") {
+				$applyFailureTimeline = $applyFailureTimelineResponse.timeline
+			}
+		} catch {
+			$applyFailureTimelineProbeError = [string]$_.Exception.Message
+		}
 		if (-not [string]::IsNullOrWhiteSpace($AutomationToken)) {
 			$applyFailureMessage = $applyFailureMessage.Replace($AutomationToken, "<redacted>")
+			$applyFailureTimelineProbeError =
+				$applyFailureTimelineProbeError.Replace($AutomationToken, "<redacted>")
 		}
 		if ($applyFailureMessage.Length -gt 1200) {
 			$applyFailureMessage = $applyFailureMessage.Substring(0, 1200)
@@ -1373,6 +1389,8 @@ foreach ($case in $selectedCases) {
 				apply_duration_ms = [Math]::Round($applyTimer.Elapsed.TotalMilliseconds, 3)
 				pre_apply_generation = $preApplyTimelineGeneration
 				error = $applyFailureMessage
+				failure_timeline = $applyFailureTimeline
+				failure_timeline_probe_error = $applyFailureTimelineProbeError
 			}) | Out-Null
 		throw
 	} finally {
@@ -1888,6 +1906,13 @@ foreach ($case in $selectedCases) {
 				-Diagnostic $presentationTimingDiagnostic
 			throw "Case '$($case.id)' did not return a complete production timeline identity."
 		}
+		$expectedTimelineModelIndexOffset = if ($surfaceVariant -eq "chat-history-prepend-anchor") {
+			[int]$applied.chat_fixture_state.prepend_count
+		} else {
+			0
+		}
+		$presentationTimingDiagnostic["expected_model_index_offset"] =
+			$expectedTimelineModelIndexOffset
 		$timelinePresentationReady = $false
 		$timelineHandshakeTimer = [Diagnostics.Stopwatch]::StartNew()
 		$timelinePresentationDeadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -1902,7 +1927,12 @@ foreach ($case in $selectedCases) {
 				-ExpectedGeneration $expectedFixtureGeneration `
 				-ExpectedStableIdPrefix $expectedFixtureStableIdPrefix `
 				-ExpectedStableIds $expectedFixtureStableIds `
-				-ExpectedMessageCount $expectedMessageCount
+				-ExpectedMessageCount $expectedMessageCount `
+				-ExpectedModelIndexOffset $expectedTimelineModelIndexOffset
+			$timelinePresentationPartitionReady =
+				$surfaceVariant -ne "chat-history-prepend-anchor" -or
+				([int]$timelinePresentation.richPresentationCount +
+					$expectedTimelineModelIndexOffset -eq $expectedMessageCount)
 			$sparseTimelineReady = $true
 			if ($isSparseChatSurface) {
 				if ($expectedMessageCount -eq 0) {
@@ -1924,6 +1954,7 @@ foreach ($case in $selectedCases) {
 					($surfaceVariant -eq "chat-history-prepend-anchor")
 			$timelinePresentationReady = $null -ne $timelinePresentation -and
 				$timelineIdentityReady -and
+				$timelinePresentationPartitionReady -and
 				[int]$timelinePresentation.count -eq $expectedMessageCount -and
 				-not [bool]$timelinePresentation.presentationPending -and
 				-not [bool]$timelinePresentation.presentationFinalizing -and

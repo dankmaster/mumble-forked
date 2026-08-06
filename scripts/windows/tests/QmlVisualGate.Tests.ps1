@@ -511,6 +511,8 @@ Describe "Qt Quick visual manifest validation" {
 		$controller | Should Match 'prependSecondCommittedFrameSerial > prependFirstCommittedFrameSerial'
 		$controller | Should Not Match 'm_host->chatModel\(\)->replaceMessages\(prependedMessages\)'
 		$controller | Should Match 'anchorAfterRow == anchorBeforeRow \+ VisualHistoryPrependMessageCount'
+		$controller | Should Match 'purePrependApplied\s*=\s*exactPrependMessageOrder[\s\S]*m_host->chatModel\(\)->rowCount\(\)\s*==\s*finalExpectedMessageCount'
+		$controller | Should Not Match 'afterState\.value\(QStringLiteral\("count"\)\)\.toInt\(\)\s*==\s*finalExpectedMessageCount'
 		$controller | Should Match 'exactPrependMessageOrder'
 		$controller | Should Match 'visualHistoryMessageID\(fixtureGeneration, expectedSequence\)'
 		$controller | Should Match 'visualFixtureSurfaceVariant'
@@ -536,6 +538,8 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match 'prepend_second_committed_frame_serial\s*-le'
 		$worker | Should Match 'prepend_matching_committed_frame_count\s*-ne\s*2'
 		$worker | Should Match 'did not execute a settled 30-row production prepend receipt'
+		$worker | Should Match 'failure_timeline\s*=\s*\$applyFailureTimeline'
+		$worker | Should Match 'failure_timeline_probe_error\s*=\s*\$applyFailureTimelineProbeError'
 		$controller | Should Match 'prependReceiptDeadlineMilliseconds\s*=\s*300'
 		$controller | Should Match 'prependSettlementReceiptBaselineSequence'
 		$controller | Should Not Match 'm_prependSettlementReceiptSequence'
@@ -709,9 +713,10 @@ Describe "Qt Quick visual manifest validation" {
 		$worker | Should Match '\$preApplyTimelineGeneration\s*=\s*\[long\]\$applied\.pre_apply_presentation_generation'
 		$worker | Should Match '\$expectedFixtureGeneration\s*=\s*\[long\]\$preApplyTimelineGeneration\s*\+\s*1'
 		$worker | Should Match '\$expectedIndex\s*=\s*\[Array\]::IndexOf\(\$stableIds,\s*\$visibleId\)'
-		$worker | Should Match '\$modelIndex\s*-ge\s*0\s*-and\s*\$modelIndex\s*-ne\s*\$expectedIndex'
+		$worker | Should Match '\$modelIndex\s*\+\s*\$ExpectedModelIndexOffset\)\s*-ne\s*\$expectedIndex'
 		$worker | Should Match '\$seenIds\.Add\(\$visibleId\)'
 		$worker | Should Match '\$expectedFixtureStableIdPrefix\s*=\s*\[string\]\$applied\.fixture_message_id_prefix'
+		$worker | Should Match '\$timelinePresentation\.richPresentationCount\s*\+\s*\$expectedTimelineModelIndexOffset\s*-eq\s*\$expectedMessageCount'
 	}
 
 	It "rejects stale or internally inconsistent timeline identity" -TestCases @(
@@ -777,6 +782,40 @@ Describe "Qt Quick visual manifest validation" {
 		(Test-QmlTimelineFixtureIdentity -Timeline $Timeline -ExpectedScopeToken $Scope `
 			-ExpectedGeneration $Generation -ExpectedStableIdPrefix $Prefix -ExpectedStableIds $Ids `
 			-ExpectedMessageCount $Count) | Should Be $Expected
+	}
+
+	It "accepts only the explicit prepend partition offset for presentation-model rows" {
+		$tokens = $null
+		$parseErrors = $null
+		$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+			"$PSScriptRoot\..\invoke-qml-visual-gate.ps1", [ref]$tokens, [ref]$parseErrors)
+		$parseErrors.Count | Should Be 0
+		$functionAst = $ast.Find({
+			param($node)
+			$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+				$node.Name -eq "Test-QmlTimelineFixtureIdentity"
+		}, $true)
+		$functionAst | Should Not BeNullOrEmpty
+		Invoke-Expression $functionAst.Extent.Text
+		$ids = @(0..8 | ForEach-Object { "391000000$_" })
+		$timeline = [pscustomobject]@{
+			scopeToken = "0:1000007"
+			generation = 12
+			visibleRows = @(
+				[pscustomobject]@{ id = $ids[6]; modelIndex = 0 },
+				[pscustomobject]@{ id = $ids[7]; modelIndex = 1 }
+			)
+		}
+		$params = @{
+			Timeline = $timeline
+			ExpectedScopeToken = "0:1000007"
+			ExpectedGeneration = 12
+			ExpectedStableIdPrefix = ""
+			ExpectedStableIds = $ids
+			ExpectedMessageCount = $ids.Count
+		}
+		(Test-QmlTimelineFixtureIdentity @params -ExpectedModelIndexOffset 6) | Should Be $true
+		(Test-QmlTimelineFixtureIdentity @params -ExpectedModelIndexOffset 5) | Should Be $false
 	}
 
 	It "records and gates distinct presentation milestones without treating fixture RPC time as product latency" {
