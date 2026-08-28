@@ -47,6 +47,11 @@ struct ScreenShareEditorStateInput {
 	bool runtimeProbePending = false;
 	QString runtimeError;
 	QVariant sourcesLoading;
+	bool portalCaptureAvailable = false;
+	bool portalSourcePicked = false;
+	QString portalSourceLabel;
+	QString portalSourceError;
+	bool portalSourcePicking = false;
 };
 
 QVariantMap certificateDialog(const CertificateDialogInput &input);

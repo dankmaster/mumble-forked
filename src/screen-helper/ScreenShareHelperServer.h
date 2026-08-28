@@ -39,6 +39,9 @@ public:
 		QProcess *process = nullptr;
 		QTimer *nativeFrameTimer = nullptr;
 		std::shared_ptr< Mumble::ScreenShare::FrameTransport > nativeFrameTransport;
+		// The XDG ScreenCast session handle backing this publish, when the capture came from a
+		// pre-negotiated portal source. Closed via the portal when the session stops.
+		QString portalSessionHandle;
 	};
 
 private slots:
@@ -50,6 +53,7 @@ private slots:
 private:
 	QJsonObject dispatchRequest(const QJsonObject &request);
 	QJsonObject handleQueryCapabilities() const;
+	QJsonObject handlePickSource();
 	QJsonObject handleStartPublish(const QJsonObject &payload);
 	QJsonObject handleStopPublish(const QJsonObject &payload);
 	QJsonObject handleStartView(const QJsonObject &payload);
@@ -58,6 +62,7 @@ private:
 	static void logPayloadWarnings(const QJsonObject &payload, const QString &label, const QString &streamID);
 	void stopAllSessions();
 	void stopSession(QHash< QString, ManagedSession > &sessions, const QString &streamID);
+	void closePendingPortalSource();
 	void attachProcessLogging(const QString &streamID, bool publish, const QString &label);
 	void refreshIdleTimer();
 
@@ -67,6 +72,14 @@ private:
 	QHash< QLocalSocket *, QByteArray > m_socketBuffers;
 	QHash< QString, ManagedSession > m_publishSessions;
 	QHash< QString, ManagedSession > m_viewSessions;
+	bool m_hasPendingPortalSource = false;
+	quint32 m_pendingPortalNodeId  = 0;
+	quint32 m_pendingPortalWidth   = 0;
+	quint32 m_pendingPortalHeight  = 0;
+	QString m_pendingPortalSourceType;
+	// ScreenCast session handle for the currently pending (not yet consumed) portal source. Empty
+	// when there is no pending portal source.
+	QString m_pendingPortalSessionHandle;
 };
 
 #endif // MUMBLE_SCREENHELPER_SCREENSHAREHELPERSERVER_H_

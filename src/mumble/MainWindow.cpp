@@ -40458,8 +40458,23 @@ QVariantMap MainWindow::buildModernScreenShareState(Channel *channel) {
 												  : QString());
 
 	// --- Video sources: Screens + (Windows on Win) ---
+	const ScreenShareHelperClient::CapabilitySnapshot capabilities =
+		m_screenShareManager ? m_screenShareManager->helperClient().capabilities()
+							 : ScreenShareHelperClient::CapabilitySnapshot();
+	// On Linux the XDG desktop portal is the single source picker: the user chooses the
+	// actual screen or window in the portal dialog, so local screen enumeration is skipped.
+	// The GStreamer LiveKit publish pipeline consumes a directly-negotiated PipeWire node,
+	// so its availability is the trigger for portal-based picking.
+	const bool portalCaptureAvailable =
+#ifdef Q_OS_LINUX
+		capabilities.probeComplete && capabilities.gstreamerLiveKitPublishAvailable;
+#else
+		false;
+#endif
+
 	QVariantList sources;
 	QVariantList screenItems;
+	if (!portalCaptureAvailable) {
 	const QList< QScreen * > screens = QGuiApplication::screens();
 	for (int i = 0; i < screens.size(); ++i) {
 		const QScreen *screen = screens.at(i);
@@ -40511,14 +40526,12 @@ QVariantMap MainWindow::buildModernScreenShareState(Channel *channel) {
 		sources.push_back(section);
 	}
 #endif
+	}
 	state.insert(QStringLiteral("sources"), sources);
 	state.insert(QStringLiteral("selectedSourceId"),
 				 screenItems.isEmpty() ? QString() : screenItems.first().toMap().value(QStringLiteral("id")).toString());
 
 	// --- Quality limits (match the native picker constraints) ---
-	const ScreenShareHelperClient::CapabilitySnapshot capabilities =
-		m_screenShareManager ? m_screenShareManager->helperClient().capabilities()
-							 : ScreenShareHelperClient::CapabilitySnapshot();
 	state.insert(QStringLiteral("runtimeProbePending"), !capabilities.probeComplete);
 	state.insert(QStringLiteral("runtimeError"),
 		capabilities.probeComplete && m_screenShareManager
@@ -40675,6 +40688,11 @@ QVariantMap MainWindow::buildModernScreenShareState(Channel *channel) {
 	input.qualityNote = state.value(QStringLiteral("qualityNote")).toString();
 	input.runtimeProbePending = state.value(QStringLiteral("runtimeProbePending")).toBool();
 	input.runtimeError = state.value(QStringLiteral("runtimeError")).toString();
+	input.portalCaptureAvailable = portalCaptureAvailable;
+	input.portalSourcePicked = state.value(QStringLiteral("portalSourcePicked")).toBool();
+	input.portalSourcePicking = state.value(QStringLiteral("portalSourcePicking")).toBool();
+	input.portalSourceLabel = state.value(QStringLiteral("portalSourceLabel")).toString();
+	input.portalSourceError = state.value(QStringLiteral("portalSourceError")).toString();
 	if (state.contains(QStringLiteral("sourcesLoading"))) {
 		input.sourcesLoading = state.value(QStringLiteral("sourcesLoading"));
 	}
@@ -41037,14 +41055,93 @@ bool MainWindow::handleModernScreenShareDialogAction(const QString &actionID, co
 		return true;
 	}
 
+	if (actionID == QLatin1String("screenShare.pickSource")) {
+		if (!m_screenShareManager) {
+			return true;
+		}
+		QVariantMap share = m_modernDialogController->state().value(QStringLiteral("screenShare")).toMap();
+		if (!share.value(QStringLiteral("portalCaptureAvailable")).toBool()) {
+			return true;
+		}
+		share.insert(QStringLiteral("portalSourcePicking"), true);
+		share.remove(QStringLiteral("portalSourceError"));
+		publishModernDialogState(m_modernDialogController->openGenericDialog(
+			Mumble::ModernProductDialogs::screenShareEditorDialog(share)));
+
+		const QString helperExecutable = m_screenShareManager->helperClient().capabilities().helperExecutable;
+		const bool useTestPattern = qEnvironmentVariable("MUMBLE_SCREENSHARE_CAPTURE_SOURCE").trimmed().toLower()
+										== QLatin1String("test-pattern");
+		if (useTestPattern) {
+			QVariantMap resultShare = share;
+			resultShare.insert(QStringLiteral("portalSourcePicking"), false);
+			resultShare.insert(QStringLiteral("portalSourcePicked"), true);
+			resultShare.insert(QStringLiteral("portalNodeId"), 424242);
+			resultShare.insert(QStringLiteral("portalSourceLabel"), tr("Test pattern"));
+			publishModernDialogState(m_modernDialogController->openGenericDialog(
+				Mumble::ModernProductDialogs::screenShareEditorDialog(resultShare)));
+			return true;
+		}
+
+		auto *watcher = new QFutureWatcher< ScreenShareHelperClient::PortalPickResult >(this);
+		connect(watcher, &QFutureWatcher< ScreenShareHelperClient::PortalPickResult >::finished, this,
+				[this, watcher]() {
+			const ScreenShareHelperClient::PortalPickResult result = watcher->result();
+			watcher->deleteLater();
+			if (!m_modernDialogController
+				|| m_modernDialogController->activeDialogID() != QLatin1String("screenShare")) {
+				return;
+			}
+			QVariantMap currentShare =
+				m_modernDialogController->state().value(QStringLiteral("screenShare")).toMap();
+			currentShare.insert(QStringLiteral("portalSourcePicking"), false);
+			if (result.valid) {
+				currentShare.insert(QStringLiteral("portalSourcePicked"), true);
+				currentShare.insert(QStringLiteral("portalNodeId"), static_cast< int >(result.nodeId));
+				QString sourceTypeLabel = result.sourceType == QLatin1String("window")
+					? tr("Window") : tr("Screen");
+				currentShare.insert(QStringLiteral("portalSourceLabel"),
+					(result.width > 0 && result.height > 0)
+						? tr("%1 (%2x%3)").arg(sourceTypeLabel).arg(result.width).arg(result.height)
+						: sourceTypeLabel);
+				currentShare.remove(QStringLiteral("portalSourceError"));
+			} else {
+				currentShare.insert(QStringLiteral("portalSourcePicked"), false);
+				currentShare.insert(QStringLiteral("portalSourceError"),
+					tr("Could not pick a source. Try again or cancel."));
+			}
+			publishModernDialogState(m_modernDialogController->openGenericDialog(
+				Mumble::ModernProductDialogs::screenShareEditorDialog(currentShare)));
+		});
+		watcher->setFuture(QtConcurrent::run([helperExecutable]() {
+			QString error;
+			return ScreenShareHelperClient::pickSource(helperExecutable, &error);
+		}));
+		return true;
+	}
+
 	if (actionID != QLatin1String("screenShare.start")) {
 		return false;
 	}
 
 	const QVariantMap shareState = m_modernDialogController->state().value(QStringLiteral("screenShare")).toMap();
-	QString sourceID = payload.value(QStringLiteral("sourceId")).toString().trimmed();
-	if (sourceID.isEmpty()) {
-		sourceID = shareState.value(QStringLiteral("selectedSourceId")).toString().trimmed();
+	const bool portalCaptureAvailable = shareState.value(QStringLiteral("portalCaptureAvailable")).toBool();
+	QString sourceID;
+	if (portalCaptureAvailable) {
+		const bool portalSourcePicked = shareState.value(QStringLiteral("portalSourcePicked")).toBool();
+		if (!portalSourcePicked) {
+			QVariantMap updatedShare = shareState;
+			updatedShare.insert(QStringLiteral("portalSourceError"),
+				tr("Pick a source before starting the share."));
+			publishModernDialogState(m_modernDialogController->openGenericDialog(
+				Mumble::ModernProductDialogs::screenShareEditorDialog(updatedShare)));
+			return true;
+		}
+		sourceID = QStringLiteral("portal-node:%1").arg(shareState.value(QStringLiteral("portalNodeId")).toInt());
+	} else {
+		sourceID = payload.value(QStringLiteral("sourceId")).toString().trimmed();
+		if (sourceID.isEmpty()) {
+			sourceID = shareState.value(QStringLiteral("selectedSourceId")).toString().trimmed();
+		}
 	}
 	std::optional< unsigned int > channelID;
 	const QVariant channelValue = payload.contains(QStringLiteral("channelId"))
@@ -41089,11 +41186,11 @@ bool MainWindow::handleModernScreenShareDialogAction(const QString &actionID, co
 			Mumble::ModernProductDialogs::screenShareEditorDialog(updatedShare)));
 	};
 
-	if (sourceID.isEmpty()) {
+	if (!portalCaptureAvailable && sourceID.isEmpty()) {
 		publishStartError(tr("Choose an available screen or window before starting."));
 		return true;
 	}
-	if (!sourceExistsInDialog(sourceID) || !screenShareCaptureSourceIsAvailable(sourceID)) {
+	if (!portalCaptureAvailable && (!sourceExistsInDialog(sourceID) || !screenShareCaptureSourceIsAvailable(sourceID))) {
 		publishStartError(tr("That screen or window is no longer available. Choose another source."), sourceID);
 		return true;
 	}

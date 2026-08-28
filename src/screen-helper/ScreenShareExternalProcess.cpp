@@ -15,6 +15,10 @@
 #	include "ScreenShareMacOSNativeCapture.h"
 #endif
 
+#ifdef Q_OS_LINUX
+#	include "ScreenShareLinuxPortalCapture.h"
+#endif
+
 #ifdef Q_OS_WIN
 #	include "win.h"
 #endif
@@ -36,7 +40,7 @@
 #include <optional>
 
 namespace {
-constexpr int PROBE_TIMEOUT_MSEC = 5000;
+constexpr int PROBE_TIMEOUT_MSEC = 15000;
 constexpr int START_TIMEOUT_MSEC = 3000;
 constexpr int START_SETTLE_MSEC  = 1000;
 
@@ -126,10 +130,10 @@ QStringList gstreamerRuntimeRootCandidates(const QString &program) {
 	return roots;
 }
 
-QString firstExistingDirectory(const QStringList &paths) {
+QString firstExistingFile(const QStringList &paths) {
 	for (const QString &path : paths) {
 		const QFileInfo info(path);
-		if (info.isDir()) {
+		if (info.isFile()) {
 			return info.absoluteFilePath();
 		}
 	}
@@ -137,10 +141,20 @@ QString firstExistingDirectory(const QStringList &paths) {
 	return QString();
 }
 
-QString firstExistingFile(const QStringList &paths) {
+QString firstExistingDirectoryWithPlugins(const QStringList &paths) {
 	for (const QString &path : paths) {
 		const QFileInfo info(path);
-		if (info.isFile()) {
+		if (!info.isDir()) {
+			continue;
+		}
+
+		const QDir dir(info.absoluteFilePath());
+#ifdef Q_OS_WIN
+		const QStringList filters = { QStringLiteral("*.dll") };
+#else
+		const QStringList filters = { QStringLiteral("*.so") };
+#endif
+		if (!dir.entryList(filters, QDir::Files).isEmpty()) {
 			return info.absoluteFilePath();
 		}
 	}
@@ -176,12 +190,17 @@ QProcessEnvironment processEnvironmentForExternalProgram(const QString &program)
 	QStringList scannerCandidates;
 	for (const QString &runtimeRoot : gstreamerRuntimeRootCandidates(program)) {
 		const QDir root(runtimeRoot);
+#ifdef Q_OS_LINUX
+		pluginPathCandidates << root.filePath(QStringLiteral("lib64/gstreamer-1.0"));
+		pluginPathCandidates << root.filePath(QStringLiteral("lib/x86_64-linux-gnu/gstreamer-1.0"));
+		pluginPathCandidates << root.filePath(QStringLiteral("lib/aarch64-linux-gnu/gstreamer-1.0"));
+#endif
 		pluginPathCandidates << root.filePath(QStringLiteral("lib/gstreamer-1.0"));
 		scannerCandidates << root.filePath(QStringLiteral("libexec/gstreamer-1.0/gst-plugin-scanner.exe"))
 						  << root.filePath(QStringLiteral("libexec/gstreamer-1.0/gst-plugin-scanner"));
 	}
 
-	const QString pluginPath = firstExistingDirectory(pluginPathCandidates);
+	const QString pluginPath = firstExistingDirectoryWithPlugins(pluginPathCandidates);
 	if (!pluginPath.isEmpty()) {
 		environment.insert(QStringLiteral("GST_PLUGIN_SYSTEM_PATH_1_0"), pluginPath);
 		environment.insert(QStringLiteral("GST_PLUGIN_PATH"), pluginPath);
@@ -351,6 +370,26 @@ bool anyNvidiaDevicePresent() {
 	return false;
 #endif
 }
+
+#ifdef Q_OS_LINUX
+QString defaultPulseMonitorSource() {
+	const QString envDevice = qEnvironmentVariable("MUMBLE_SCREENSHARE_PULSE_DEVICE").trimmed();
+	if (!envDevice.isEmpty()) {
+		return envDevice;
+	}
+
+	QProcess pactl;
+	pactl.start(QStringLiteral("pactl"), { QStringLiteral("get-default-sink") });
+	pactl.waitForFinished(3000);
+	if (pactl.exitCode() == 0) {
+		const QString sink = QString::fromUtf8(pactl.readAllStandardOutput()).trimmed();
+		if (!sink.isEmpty()) {
+			return sink + QStringLiteral(".monitor");
+		}
+	}
+	return QString();
+}
+#endif
 
 bool hasWindowedViewerSurface() {
 #if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
@@ -1139,6 +1178,19 @@ GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) 
 		return selection;
 	}
 
+#ifdef Q_OS_LINUX
+	// A pre-negotiated XDG desktop portal source is passed through as "portal-node:<nodeId>".
+	// The portal dialog was already answered by pick-source; the publish pipeline connects
+	// directly to that PipeWire node (handled separately in the launch builder), so this is a
+	// valid capture source. Recognize it here so we neither fall through to the primary-monitor
+	// fallback nor emit a misleading "unsupported" warning.
+	if (normalizedSourceID.startsWith(QLatin1String("portal-node:"))) {
+		selection.selectedCaptureSource =
+			QStringLiteral("xdg-portal-pipewire-source-").append(sourceID.mid(QStringLiteral("portal-node:").size()));
+		return selection;
+	}
+#endif
+
 	const QRegularExpression monitorExpression(QStringLiteral("^(?:monitor|screen|display):([0-9]+)$"));
 	const QRegularExpressionMatch monitorMatch = monitorExpression.match(normalizedSourceID);
 	if (monitorMatch.hasMatch()) {
@@ -1477,6 +1529,38 @@ ScreenShareExternalProcess::LaunchResult
 								|| qEnvironmentVariable("MUMBLE_SCREENSHARE_CAPTURE_SOURCE").trimmed().toLower()
 									   == QLatin1String("test-pattern");
 	const bool captureAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
+#ifdef Q_OS_LINUX
+	// A pre-negotiated portal source is passed through as "portal-node:<nodeId>". The XDG
+	// desktop portal dialog has already been shown (via a pick-source request) and returned a
+	// live PipeWire node, so skip the portal negotiation here and connect directly to it.
+	const QString capabilitySourceId = plan.value(QStringLiteral("capture_source_id")).toString().trimmed();
+	quint32 preNegotiatedPortalNodeId = 0;
+	if (capabilitySourceId.startsWith(QLatin1String("portal-node:"))) {
+		bool ok = false;
+		const qulonglong rawNode = capabilitySourceId.mid(QStringLiteral("portal-node:").size()).trimmed()
+									   .toULongLong(&ok);
+		if (ok && rawNode > 0 && rawNode <= std::numeric_limits< quint32 >::max()) {
+			preNegotiatedPortalNodeId = static_cast< quint32 >(rawNode);
+		} else {
+			launch.errorMessage = QStringLiteral("Invalid pre-negotiated portal capture source.");
+			return launch;
+		}
+		qInfo().nospace() << "GStreamerLiveKitPublish: using pre-negotiated portal node " << preNegotiatedPortalNodeId;
+	}
+
+	ScreenShareLinuxPortalCapture::NegotiationResult portalResult;
+	if (!useTestPattern && preNegotiatedPortalNodeId == 0) {
+		portalResult = ScreenShareLinuxPortalCapture::negotiate(capabilitySourceId);
+		if (!portalResult.valid) {
+			launch.errorMessage = portalResult.errorMessage;
+			return launch;
+		}
+	}
+	if (preNegotiatedPortalNodeId != 0) {
+		portalResult.nodeId = preNegotiatedPortalNodeId;
+		portalResult.valid  = true;
+	}
+#endif
 	const GStreamerCaptureSelection captureSelection = selectGStreamerCaptureSource(plan);
 	QStringList launchWarnings = captureSelection.warnings;
 
@@ -1519,6 +1603,25 @@ ScreenShareExternalProcess::LaunchResult
 						 .arg(height)
 						 .arg(fps)
 				  << QStringLiteral("!");
+#elif defined(Q_OS_LINUX)
+		// Constrain the portal PipeWire node to one of its advertised raw formats (BGRA/BGRx)
+		// immediately, otherwise pipewiresrc cannot resolve the dmabuf-only node ("target not
+		// found"). The source advertises a variable rate (framerate=0/1 ... max), so the target
+		// framerate must NOT be baked into the same caps as the size: doing so makes PipeWire
+		// negotiation fail ("no more input formats"). Size/format are fixed by the post-scale
+		// caps, and the framerate is applied separately through videorate after connect.
+		arguments << QStringLiteral("pipewiresrc") << QStringLiteral("path=%1").arg(portalResult.nodeId)
+				  << QStringLiteral("!");
+		arguments << QStringLiteral("video/x-raw,format=BGRA") << QStringLiteral("!");
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("videoscale")
+				  << QStringLiteral("!");
+		arguments << QStringLiteral("video/x-raw,format=%1,width=%2,height=%3")
+						 .arg(encoder.rawFormat)
+						 .arg(width)
+						 .arg(height)
+				  << QStringLiteral("!");
+		arguments << QStringLiteral("videorate") << QStringLiteral("!");
+		arguments << QStringLiteral("video/x-raw,framerate=%1/1").arg(fps) << QStringLiteral("!");
 #else
 		arguments << QStringLiteral("d3d11screencapturesrc")
 				  << QStringLiteral("capture-api=%1").arg(captureSelection.captureApi)
@@ -1557,6 +1660,25 @@ ScreenShareExternalProcess::LaunchResult
 			  << QStringLiteral("!") << QStringLiteral("sink.");
 
 	if (captureAudio) {
+#ifdef Q_OS_LINUX
+		if (support.gstPulseSrcAvailable && support.gstAudioConvertAvailable
+			&& support.gstAudioResampleAvailable) {
+			const QString monitorSource = defaultPulseMonitorSource();
+			QStringList audioProps;
+			if (!monitorSource.isEmpty()) {
+				audioProps << QStringLiteral("device=%1").arg(monitorSource);
+			}
+			arguments << QStringLiteral("pulsesrc") << audioProps << QStringLiteral("!")
+					  << QStringLiteral("audioconvert") << QStringLiteral("!")
+					  << QStringLiteral("audioresample") << QStringLiteral("!")
+					  << QStringLiteral("audio/x-raw,rate=48000,channels=2") << QStringLiteral("!")
+					  << QStringLiteral("queue") << QStringLiteral("leaky=downstream")
+					  << QStringLiteral("max-size-buffers=8") << QStringLiteral("!") << QStringLiteral("sink.");
+		} else {
+			launchWarnings.append(
+				QStringLiteral("System audio was requested, but the GStreamer PulseAudio elements are unavailable."));
+		}
+#else
 		if (support.gstWasapi2SrcAvailable && support.gstAudioConvertAvailable
 			&& support.gstAudioResampleAvailable) {
 			const QStringList audioSourceProperties = selectWasapiLoopbackSourceProperties(plan, &launchWarnings);
@@ -1570,6 +1692,7 @@ ScreenShareExternalProcess::LaunchResult
 			launchWarnings.append(
 				QStringLiteral("System audio was requested, but the bundled GStreamer audio capture elements are unavailable."));
 		}
+#endif
 	}
 
 	if (!useTestPattern && captureSelection.browserWindowFollow) {
@@ -1631,6 +1754,11 @@ ScreenShareExternalProcess::LaunchResult
 											   ? QStringLiteral("gstreamer-test-pattern")
 #ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
 											   : QStringLiteral("screencapturekit-gstreamer-livekit");
+#elif defined(Q_OS_LINUX)
+											   : QStringLiteral("xdg-portal-pipewire-%1")
+													 .arg(portalResult.sourceType.isEmpty()
+															  ? QStringLiteral("monitor")
+															  : portalResult.sourceType);
 #else
 											   : captureSelection.selectedCaptureSource;
 #endif
@@ -1860,6 +1988,9 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 	const ScreenShareMacOSNativeCapture::Capability nativeCapture = ScreenShareMacOSNativeCapture::probe();
 	support.macosScreenCaptureKitAvailable = nativeCapture.runtimeSupported;
 	support.macosScreenCapturePermissionGranted = nativeCapture.permissionGranted;
+#elif defined(Q_OS_LINUX)
+	const ScreenShareLinuxPortalCapture::Capability portalCap = ScreenShareLinuxPortalCapture::probe();
+	support.xdgPortalScreenCastAvailable = portalCap.portalAvailable;
 #endif
 
 	if (support.ffmpegAvailable) {
@@ -1934,6 +2065,8 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 		support.gstVideoScaleAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("videoscale"));
 		support.gstWasapi2SrcAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("wasapi2src"));
+		support.gstPipeWireSrcAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("pipewiresrc"));
+		support.gstPulseSrcAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("pulsesrc"));
 		support.gstAudioConvertAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("audioconvert"));
 		support.gstAudioResampleAvailable =
@@ -1969,6 +2102,9 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 #elif defined(MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT)
 			support.macosScreenCaptureKitAvailable && support.gstFdSrcAvailable
 				&& support.gstRawVideoParseAvailable && support.gstVideoConvertAvailable;
+#elif defined(Q_OS_LINUX)
+			support.xdgPortalScreenCastAvailable && support.gstPipeWireSrcAvailable
+				&& support.gstVideoConvertAvailable;
 #else
 			support.gstVideoTestSrcAvailable && envFlagEnabled("MUMBLE_SCREENSHARE_TEST_PATTERN");
 #endif
@@ -2011,6 +2147,12 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 									  support.gstRawVideoParseAvailable);
 		appendMissingGStreamerElement(&support, QStringLiteral("ScreenCaptureKit"),
 									  support.macosScreenCaptureKitAvailable);
+#elif defined(Q_OS_LINUX)
+		appendMissingGStreamerElement(&support, QStringLiteral("pipewiresrc"),
+									  support.gstPipeWireSrcAvailable);
+		if (!support.xdgPortalScreenCastAvailable) {
+			appendMissingGStreamerElement(&support, QStringLiteral("xdg-desktop-portal"), false);
+		}
 #else
 		appendMissingGStreamerElement(&support, QStringLiteral("videotestsrc"),
 									  support.gstVideoTestSrcAvailable
@@ -2030,6 +2172,11 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 										  false);
 		}
 	}
+
+#ifdef Q_OS_LINUX
+	support.linuxPortalPipeWireCaptureAvailable =
+		support.xdgPortalScreenCastAvailable && support.gstPipeWireSrcAvailable;
+#endif
 
 	cachedSupport = support;
 	return support;
@@ -2068,6 +2215,8 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 	payload.insert(QStringLiteral("gst_videoconvert_available"), support.gstVideoConvertAvailable);
 	payload.insert(QStringLiteral("gst_videoscale_available"), support.gstVideoScaleAvailable);
 	payload.insert(QStringLiteral("gst_wasapi2src_available"), support.gstWasapi2SrcAvailable);
+	payload.insert(QStringLiteral("gst_pipewiresrc_available"), support.gstPipeWireSrcAvailable);
+	payload.insert(QStringLiteral("gst_pulsesrc_available"), support.gstPulseSrcAvailable);
 	payload.insert(QStringLiteral("gst_audioconvert_available"), support.gstAudioConvertAvailable);
 	payload.insert(QStringLiteral("gst_audioresample_available"), support.gstAudioResampleAvailable);
 	payload.insert(QStringLiteral("gst_decodebin_available"), support.gstDecodeBinAvailable);
@@ -2108,6 +2257,9 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 	payload.insert(QStringLiteral("macos_screencapturekit_available"), support.macosScreenCaptureKitAvailable);
 	payload.insert(QStringLiteral("macos_screen_capture_permission_granted"),
 				   support.macosScreenCapturePermissionGranted);
+	payload.insert(QStringLiteral("xdg_portal_screencast_available"), support.xdgPortalScreenCastAvailable);
+	payload.insert(QStringLiteral("linux_portal_pipewire_capture_available"),
+				   support.linuxPortalPipeWireCaptureAvailable);
 	payload.insert(QStringLiteral("h264_nvenc_available"), support.h264NvencAvailable);
 	payload.insert(QStringLiteral("h264_vaapi_available"), support.h264VaapiAvailable);
 	payload.insert(QStringLiteral("h264_mf_available"), support.h264MfAvailable);

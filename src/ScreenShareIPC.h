@@ -21,7 +21,7 @@ namespace IPC {
 	constexpr int PROTOCOL_VERSION = 2;
 	constexpr int MINIMUM_PROTOCOL_VERSION = 1;
 
-	enum class Command { QueryCapabilities, StartPublish, StopPublish, StartView, StopView };
+	enum class Command { QueryCapabilities, PickSource, StartPublish, StopPublish, StartView, StopView };
 
 	QString commandName(Command command);
 	std::optional< Command > commandFromName(const QString &commandName);

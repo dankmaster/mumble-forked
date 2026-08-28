@@ -28,6 +28,13 @@ public:
 		quint64 generation = 0;
 		bool feedAvailable = false;
 	};
+	struct PortalPickResult {
+		bool valid   = false;
+		quint32 nodeId   = 0;
+		quint32 width    = 0;
+		quint32 height   = 0;
+		QString sourceType;
+	};
 	struct CapabilitySnapshot {
 		bool supportsSignaling       = true;
 		bool probeComplete           = false;
@@ -65,6 +72,7 @@ public:
 	static void applyAdvertisedCapabilities(MumbleProto::Version &msg);
 
 	const CapabilitySnapshot &capabilities() const;
+	static PortalPickResult pickSource(const QString &helperExecutable, QString *errorMessage = nullptr);
 	bool startPublish(const ScreenShareSession &session, QString *errorMessage = nullptr, qint64 *processID = nullptr);
 	bool stopPublish(const QString &streamID, QString *errorMessage = nullptr);
 	bool startView(const ScreenShareSession &session, QString *errorMessage = nullptr, qint64 *processID = nullptr,

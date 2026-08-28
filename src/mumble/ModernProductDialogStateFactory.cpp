@@ -52,6 +52,7 @@ namespace {
 		QT_TRANSLATE_NOOP("MainWindow", "Optional display name stored in the certificate."),
 		QT_TRANSLATE_NOOP("MainWindow", "Optional. Leave blank if you do not want an email address in the certificate."),
 		QT_TRANSLATE_NOOP("MainWindow", "Output"),
+		QT_TRANSLATE_NOOP("MainWindow", "Pick source"),
 		QT_TRANSLATE_NOOP("MainWindow", "Quick create"),
 		QT_TRANSLATE_NOOP("MainWindow", "Record the current voice session."),
 		QT_TRANSLATE_NOOP("MainWindow", "Recorder"),
@@ -278,6 +279,15 @@ QVariantMap screenShareEditorState(const ScreenShareEditorStateInput &input) {
 	}
 	if (!input.qualityNote.isEmpty()) result.insert(QStringLiteral("qualityNote"), input.qualityNote);
 	if (input.sourcesLoading.isValid()) result.insert(QStringLiteral("sourcesLoading"), input.sourcesLoading);
+	if (input.portalCaptureAvailable) {
+		result.insert(QStringLiteral("portalCaptureAvailable"), true);
+		result.insert(QStringLiteral("portalSourcePicked"), input.portalSourcePicked);
+		result.insert(QStringLiteral("portalSourcePicking"), input.portalSourcePicking);
+		if (!input.portalSourceLabel.isEmpty())
+			result.insert(QStringLiteral("portalSourceLabel"), input.portalSourceLabel);
+		if (!input.portalSourceError.trimmed().isEmpty())
+			result.insert(QStringLiteral("portalSourceError"), input.portalSourceError.trimmed());
+	}
 	return result;
 }
 
@@ -297,28 +307,58 @@ QVariantMap screenShareEditorDialog(const QVariantMap &state) {
 	const QString sourceError = state.value(QStringLiteral("sourceError")).toString().trimmed();
 	const bool runtimeProbePending = state.value(QStringLiteral("runtimeProbePending")).toBool();
 	const QString runtimeError = state.value(QStringLiteral("runtimeError")).toString().trimmed();
+	const bool portalCaptureAvailable = state.value(QStringLiteral("portalCaptureAvailable")).toBool();
+	const bool portalSourcePicked = state.value(QStringLiteral("portalSourcePicked")).toBool();
+	const bool portalSourcePicking = state.value(QStringLiteral("portalSourcePicking")).toBool();
+	const QString portalSourceError = state.value(QStringLiteral("portalSourceError")).toString().trimmed();
+
+	const bool startEnabled = portalCaptureAvailable
+		? (portalSourcePicked && !portalSourcePicking && !runtimeProbePending && runtimeError.isEmpty())
+		: (selectedSourceExists && !runtimeProbePending && runtimeError.isEmpty());
 	QVariantList actions { action(QStringLiteral("cancel"), productTr("Cancel"), true, QString(), true) };
+	if (portalCaptureAvailable) {
+		actions.push_back(action(QStringLiteral("screenShare.pickSource"), productTr("Pick source"),
+			!portalSourcePicking && !portalSourcePicked && !runtimeProbePending && runtimeError.isEmpty(),
+			QStringLiteral("secondary")));
+	}
 	if (!runtimeError.isEmpty()) {
 		actions.push_back(action(QStringLiteral("screenShare.retryRuntime"), productTr("Retry runtime check"), true,
 			QStringLiteral("accent")));
 	}
-	actions.push_back(action(QStringLiteral("screenShare.start"), productTr("Start sharing"),
-		selectedSourceExists && !runtimeProbePending && runtimeError.isEmpty(), QStringLiteral("accent"), false));
+	actions.push_back(action(QStringLiteral("screenShare.start"), productTr("Start sharing"), startEnabled,
+		QStringLiteral("accent"), false));
+
+	QString focusId;
+	if (portalCaptureAvailable) {
+		focusId = portalSourcePicked
+			? QStringLiteral("dialogAction_screenShare.start")
+			: (portalSourcePicking ? QStringLiteral("dialogAction_cancel")
+				: QStringLiteral("dialogAction_screenShare.pickSource"));
+	} else if (runtimeProbePending) {
+		focusId = QStringLiteral("dialogAction_cancel");
+	} else if (!runtimeError.isEmpty()) {
+		focusId = QStringLiteral("dialogAction_screenShare.retryRuntime");
+	} else if (selectedSourceExists) {
+		focusId = QStringLiteral("screenShareSource_%1").arg(selectedSourceId);
+	} else {
+		focusId = QStringLiteral("dialogAction_cancel");
+	}
 	QVariantMap result = dialog(QStringLiteral("screenShare"), QStringLiteral("screenShare"),
 		productTr("Start screen share"), productTr("Share to %1").arg(channelName), {},
 		actions,
 		QStringLiteral("screenShare.start"),
-		runtimeProbePending ? QStringLiteral("dialogAction_cancel")
-			: !runtimeError.isEmpty() ? QStringLiteral("dialogAction_screenShare.retryRuntime")
-			: selectedSourceExists ? QStringLiteral("screenShareSource_%1").arg(selectedSourceId)
-			: (firstSourceId.isEmpty() ? QStringLiteral("dialogAction_cancel")
-				: QStringLiteral("screenShareSource_%1").arg(firstSourceId)), QSize(720, 600));
+		focusId, QSize(720, 600));
 	result.insert(QStringLiteral("tone"), QStringLiteral("wide"));
 	result.insert(QStringLiteral("screenShare"), state);
 	if (!sourceError.isEmpty()) {
 		result.insert(QStringLiteral("errors"),
 			QVariantMap { { QStringLiteral("screenShare.source"), sourceError } });
 		result.insert(QStringLiteral("statusMessage"), sourceError);
+		result.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+	} else if (!portalSourceError.isEmpty()) {
+		result.insert(QStringLiteral("errors"),
+			QVariantMap { { QStringLiteral("screenShare.source"), portalSourceError } });
+		result.insert(QStringLiteral("statusMessage"), portalSourceError);
 		result.insert(QStringLiteral("tone"), QStringLiteral("danger"));
 	} else if (runtimeProbePending) {
 		result.insert(QStringLiteral("runtimeStatus"), productTr("Checking the local screen-share runtime…"));

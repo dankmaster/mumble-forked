@@ -2154,6 +2154,9 @@ Dialog {
 						function onSourceSelected(sourceId) {
 							dialogState.invokeAction("screenShare.selectSource", { "sourceId": sourceId })
 						}
+						function onPickSourceRequested() {
+							dialogState.invokeAction("screenShare.pickSource", {})
+						}
 					}
                     Loader {
 						id: stonksLoader

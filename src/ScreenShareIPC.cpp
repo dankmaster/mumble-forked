@@ -19,6 +19,8 @@ namespace IPC {
 		switch (command) {
 			case Command::QueryCapabilities:
 				return QStringLiteral("query-capabilities");
+			case Command::PickSource:
+				return QStringLiteral("pick-source");
 			case Command::StartPublish:
 				return QStringLiteral("start-publish");
 			case Command::StopPublish:
@@ -35,6 +37,9 @@ namespace IPC {
 	std::optional< Command > commandFromName(const QString &name) {
 		if (name == QLatin1String("query-capabilities")) {
 			return Command::QueryCapabilities;
+		}
+		if (name == QLatin1String("pick-source")) {
+			return Command::PickSource;
 		}
 		if (name == QLatin1String("start-publish")) {
 			return Command::StartPublish;

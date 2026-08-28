@@ -45,8 +45,10 @@ public:
 		bool gstVideoTestSrcAvailable         = false;
 		bool gstVideoConvertAvailable         = false;
 		bool gstVideoScaleAvailable           = false;
-		bool gstWasapi2SrcAvailable           = false;
-		bool gstAudioConvertAvailable         = false;
+		bool gstWasapi2SrcAvailable          = false;
+		bool gstPipeWireSrcAvailable         = false;
+		bool gstPulseSrcAvailable            = false;
+		bool gstAudioConvertAvailable        = false;
 		bool gstAudioResampleAvailable        = false;
 		bool gstDecodeBinAvailable            = false;
 		bool gstAutoVideoSinkAvailable        = false;
@@ -74,6 +76,8 @@ public:
 		bool windowsNativeCapturePipelineAvailable  = false;
 		bool macosScreenCaptureKitAvailable          = false;
 		bool macosScreenCapturePermissionGranted     = false;
+		bool xdgPortalScreenCastAvailable            = false;
+		bool linuxPortalPipeWireCaptureAvailable     = false;
 		bool h264NvencAvailable        = false;
 		bool h264VaapiAvailable        = false;
 		bool h264MfAvailable           = false;

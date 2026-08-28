@@ -32,6 +32,7 @@
 namespace {
 constexpr int HELPER_CONNECT_TIMEOUT_MSEC = 1000;
 constexpr int HELPER_REQUEST_TIMEOUT_MSEC = 45000;
+constexpr int HELPER_PICK_SOURCE_TIMEOUT_MSEC = 150000;
 constexpr int HELPER_START_TIMEOUT_MSEC   = 20000;
 constexpr qsizetype MAX_HELPER_REPLY_BYTES = 1024 * 1024;
 
@@ -166,6 +167,8 @@ QString commandToken(const Mumble::ScreenShare::IPC::Command command) {
 	switch (command) {
 		case Mumble::ScreenShare::IPC::Command::QueryCapabilities:
 			return QStringLiteral("query-capabilities");
+		case Mumble::ScreenShare::IPC::Command::PickSource:
+			return QStringLiteral("pick-source");
 		case Mumble::ScreenShare::IPC::Command::StartPublish:
 			return QStringLiteral("start-publish");
 		case Mumble::ScreenShare::IPC::Command::StopPublish:
@@ -184,6 +187,8 @@ int helperRequestTimeoutMsec(const Mumble::ScreenShare::IPC::Command command) {
 		case Mumble::ScreenShare::IPC::Command::StartPublish:
 		case Mumble::ScreenShare::IPC::Command::StartView:
 			return HELPER_REQUEST_TIMEOUT_MSEC;
+		case Mumble::ScreenShare::IPC::Command::PickSource:
+			return HELPER_PICK_SOURCE_TIMEOUT_MSEC;
 		case Mumble::ScreenShare::IPC::Command::QueryCapabilities:
 		case Mumble::ScreenShare::IPC::Command::StopPublish:
 		case Mumble::ScreenShare::IPC::Command::StopView:
@@ -708,6 +713,39 @@ bool ScreenShareHelperClient::startPublish(const ScreenShareSession &session, QS
 	qInfo().noquote()
 		<< QStringLiteral("ScreenShareHelperClient: start-publish stream=%1 accepted").arg(session.streamID);
 	return true;
+}
+
+ScreenShareHelperClient::PortalPickResult ScreenShareHelperClient::pickSource(const QString &helperExecutable,
+																			  QString *errorMessage) {
+	PortalPickResult result;
+	QString localError;
+	const QJsonObject reply =
+		sendRequest(Mumble::ScreenShare::IPC::Command::PickSource, QJsonObject(), helperExecutable, &localError, true);
+	if (reply.isEmpty() || !Mumble::ScreenShare::IPC::replySucceeded(reply, &localError)) {
+		if (errorMessage) {
+			*errorMessage = localError;
+		}
+		qWarning().noquote() << QStringLiteral("ScreenShareHelperClient: pick-source failed: %1")
+									.arg(localError.isEmpty() ? QStringLiteral("unknown error") : localError);
+		return result;
+	}
+
+	const QJsonObject payload = reply.value(QStringLiteral("payload")).toObject();
+	result.nodeId   = static_cast< quint32 >(qMax(0, payload.value(QStringLiteral("node_id")).toInt()));
+	result.width    = static_cast< quint32 >(qMax(0, payload.value(QStringLiteral("width")).toInt()));
+	result.height   = static_cast< quint32 >(qMax(0, payload.value(QStringLiteral("height")).toInt()));
+	result.sourceType = payload.value(QStringLiteral("source_type")).toString().trimmed();
+	result.valid = result.nodeId > 0;
+	if (!result.valid && errorMessage) {
+		*errorMessage = QStringLiteral("The portal did not return a usable capture source.");
+	}
+	qInfo().noquote()
+		<< QStringLiteral("ScreenShareHelperClient: pick-source accepted node=%1 size=%2x%3 type=%4")
+			   .arg(result.nodeId)
+			   .arg(result.width)
+			   .arg(result.height)
+			   .arg(result.sourceType.isEmpty() ? QStringLiteral("-") : result.sourceType);
+	return result;
 }
 
 bool ScreenShareHelperClient::stopPublish(const QString &streamID, QString *errorMessage) {

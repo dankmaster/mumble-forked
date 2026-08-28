@@ -9,6 +9,8 @@ add_executable(mumble-screen-helper
 	"ScreenShareExternalProcess.h"
 	"ScreenShareHelperServer.cpp"
 	"ScreenShareHelperServer.h"
+	"ScreenShareLinuxPortalCapture.cpp"
+	"ScreenShareLinuxPortalCapture.h"
 	"ScreenShareMediaSupport.cpp"
 	"ScreenShareMediaSupport.h"
 	"ScreenShareRelayClient.cpp"
@@ -66,6 +68,15 @@ endif()
 if(WIN32 AND screen-helper-cppwinrt-capture)
 	target_compile_definitions(mumble-screen-helper PRIVATE MUMBLE_SCREENSHARE_ENABLE_CPPWINRT_CAPTURE=1)
 	target_link_libraries(mumble-screen-helper PRIVATE runtimeobject)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	find_package(Qt6DBus QUIET)
+	if(Qt6DBus_FOUND)
+		target_link_libraries(mumble-screen-helper PRIVATE Qt6::DBus)
+	else()
+		message(WARNING "Qt6DBus not found - Linux portal screen capture will be non-functional")
+	endif()
 endif()
 
 if(APPLE AND TARGET mumble)

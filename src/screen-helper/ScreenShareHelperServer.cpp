@@ -8,6 +8,7 @@
 #include "ScreenShare.h"
 #include "ScreenShareExternalProcess.h"
 #include "ScreenShareIPC.h"
+#include "ScreenShareLinuxPortalCapture.h"
 #include "ScreenShareFrameTransport.h"
 #include "ScreenShareRelayClient.h"
 #include "ScreenShareSessionPlanner.h"
@@ -33,8 +34,22 @@
 
 namespace {
 constexpr int IDLE_TIMEOUT_MSEC        = 30000;
+constexpr int PICK_SOURCE_TIMEOUT_MSEC  = 120000;
 constexpr int SELF_TEST_FILE_WAIT_MSEC = 5000;
 
+// Releases an active XDG ScreenCast session (best effort) so the compositor stops treating the
+// captured screen as shared. No-op for an empty handle; closing an already-released session is a
+// no-op from the portal's perspective. Defined on all platforms so call sites need no guards.
+void closePortalSession(const QString &sessionHandle) {
+	if (sessionHandle.trimmed().isEmpty()) {
+		return;
+	}
+#ifdef Q_OS_LINUX
+	ScreenShareLinuxPortalCapture::close(sessionHandle);
+#else
+	(void)sessionHandle;
+#endif
+}
 QString streamIDFromPayload(const QJsonObject &payload) {
 	return payload.value(QStringLiteral("stream_id")).toString().trimmed();
 }
@@ -304,6 +319,8 @@ QJsonObject ScreenShareHelperServer::dispatchRequest(const QJsonObject &request)
 	switch (*command) {
 		case Mumble::ScreenShare::IPC::Command::QueryCapabilities:
 			return handleQueryCapabilities();
+		case Mumble::ScreenShare::IPC::Command::PickSource:
+			return handlePickSource();
 		case Mumble::ScreenShare::IPC::Command::StartPublish:
 			return handleStartPublish(payload);
 		case Mumble::ScreenShare::IPC::Command::StopPublish:
@@ -369,6 +386,55 @@ QJsonObject ScreenShareHelperServer::capabilityPayload() const {
 
 QJsonObject ScreenShareHelperServer::handleQueryCapabilities() const {
 	return Mumble::ScreenShare::IPC::makeSuccessReply(capabilityPayload());
+}
+
+QJsonObject ScreenShareHelperServer::handlePickSource() {
+#ifdef Q_OS_LINUX
+	qInfo("ScreenShareHelper: received pick-source");
+
+	ScreenShareLinuxPortalCapture::Capability capability = ScreenShareLinuxPortalCapture::probe();
+	if (!capability.portalAvailable) {
+		return Mumble::ScreenShare::IPC::makeErrorReply(
+			QStringLiteral("The XDG desktop portal ScreenCast interface is not available: %1")
+				.arg(capability.detail));
+	}
+
+	if (m_hasPendingPortalSource) {
+		// Reuse the already-negotiated portal source if the user opens the picker
+		// again without starting a share.
+		QJsonObject payload;
+		payload.insert(QStringLiteral("node_id"), static_cast< int >(m_pendingPortalNodeId));
+		payload.insert(QStringLiteral("width"), static_cast< int >(m_pendingPortalWidth));
+		payload.insert(QStringLiteral("height"), static_cast< int >(m_pendingPortalHeight));
+		payload.insert(QStringLiteral("source_type"), m_pendingPortalSourceType);
+		return Mumble::ScreenShare::IPC::makeSuccessReply(payload);
+	}
+
+	ScreenShareLinuxPortalCapture::NegotiationResult result =
+		ScreenShareLinuxPortalCapture::negotiate(QString(), PICK_SOURCE_TIMEOUT_MSEC);
+	if (!result.valid) {
+		return Mumble::ScreenShare::IPC::makeErrorReply(result.errorMessage);
+	}
+
+	m_hasPendingPortalSource = true;
+	m_pendingPortalNodeId    = result.nodeId;
+	m_pendingPortalWidth     = result.width;
+	m_pendingPortalHeight    = result.height;
+	m_pendingPortalSourceType = result.sourceType;
+	m_pendingPortalSessionHandle = result.sessionHandle;
+	qInfo().nospace() << "ScreenShareHelper: portal source negotiated node=" << result.nodeId << " size="
+					  << result.width << "x" << result.height << " type=" << result.sourceType;
+
+	QJsonObject payload;
+	payload.insert(QStringLiteral("node_id"), static_cast< int >(result.nodeId));
+	payload.insert(QStringLiteral("width"), static_cast< int >(result.width));
+	payload.insert(QStringLiteral("height"), static_cast< int >(result.height));
+	payload.insert(QStringLiteral("source_type"), result.sourceType);
+	refreshIdleTimer();
+	return Mumble::ScreenShare::IPC::makeSuccessReply(payload);
+#else
+	return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Portal source picking is only available on Linux."));
+#endif
 }
 
 QJsonObject ScreenShareHelperServer::runSelfTest() {
@@ -459,14 +525,35 @@ QJsonObject ScreenShareHelperServer::handleStartPublish(const QJsonObject &paylo
 	const QString streamID = plan.payload.value(QStringLiteral("stream_id")).toString();
 	stopSession(m_publishSessions, streamID);
 
+	// Transfers the ScreenCast session handle of a consumed pending portal source (if any) into
+	// the publish session so it is released when the publish stops.
+	QString sessionPortalHandle;
+	const QString captureSource = plan.payload.value(QStringLiteral("capture_source_id")).toString().trimmed();
+	if (m_hasPendingPortalSource && captureSource.startsWith(QLatin1String("portal-node:"))) {
+		// The user picked a portal source in a prior pick-source request; the pipeline
+		// will consume this negotiated PipeWire node directly instead of re-showing the
+		// portal dialog, so no longer hold the pending pick open.
+		qInfo("ScreenShareHelper: consuming pre-negotiated portal source for publish session %s",
+			  qPrintable(streamID));
+		m_hasPendingPortalSource = false;
+		// The underlying ScreenCast session is now owned by this publish; transfer ownership
+		// so the session is closed when the publish stops. Cleared here so a later idle
+		// teardown does not double-close it.
+		m_pendingPortalSessionHandle.swap(sessionPortalHandle);
+	}
+
 	ScreenShareExternalProcess::LaunchResult launch = ScreenShareExternalProcess::startPublish(plan.payload, this);
 	if (!launch.started) {
+		// The pending portal session was already transferred out of the pending state; if the
+		// publish itself failed to start, release it rather than leaking the ScreenCast session.
+		closePortalSession(sessionPortalHandle);
 		return Mumble::ScreenShare::IPC::makeErrorReply(launch.errorMessage, plan.payload);
 	}
 
 	ManagedSession session;
 	session.payload = plan.payload;
 	session.process = launch.process;
+	session.portalSessionHandle = sessionPortalHandle;
 	session.payload.insert(QStringLiteral("mode"),
 						   launch.usedStub ? QStringLiteral("publish-stub") : QStringLiteral("publish-live"));
 	session.payload.insert(QStringLiteral("execution_mode"), launch.executionMode);
@@ -697,6 +784,26 @@ void ScreenShareHelperServer::stopAllSessions() {
 	for (const QString &streamID : viewIDs) {
 		stopSession(m_viewSessions, streamID);
 	}
+
+	closePendingPortalSource();
+}
+
+void ScreenShareHelperServer::closePendingPortalSource() {
+	if (!m_hasPendingPortalSource) {
+		return;
+	}
+
+	if (!m_pendingPortalSessionHandle.isEmpty()) {
+		qInfo("ScreenShareHelper: closing pending ScreenCast session");
+		closePortalSession(m_pendingPortalSessionHandle);
+	}
+
+	m_hasPendingPortalSource     = false;
+	m_pendingPortalNodeId        = 0;
+	m_pendingPortalWidth         = 0;
+	m_pendingPortalHeight        = 0;
+	m_pendingPortalSourceType.clear();
+	m_pendingPortalSessionHandle.clear();
 }
 
 void ScreenShareHelperServer::stopSession(QHash< QString, ManagedSession > &sessions, const QString &streamID) {
@@ -711,6 +818,12 @@ void ScreenShareHelperServer::stopSession(QHash< QString, ManagedSession > &sess
 	}
 	if (session.process) {
 		ScreenShareExternalProcess::stop(session.process);
+	}
+	if (!session.portalSessionHandle.isEmpty()) {
+		// The capture came from a pre-negotiated ScreenCast session; release it so the compositor
+		// stops treating the screen as shared now that the publish has stopped.
+		qInfo().nospace() << "ScreenShareHelper: closing ScreenCast session " << streamID;
+		closePortalSession(session.portalSessionHandle);
 	}
 }
 
@@ -788,6 +901,12 @@ void ScreenShareHelperServer::attachProcessLogging(const QString &streamID, cons
 						finishedSession.nativeFrameTimer->stop();
 						finishedSession.nativeFrameTimer->deleteLater();
 					}
+					if (!finishedSession.portalSessionHandle.isEmpty()) {
+						// The pipeline exited on its own; release the ScreenCast session so the
+						// compositor does not keep treating the screen as shared.
+						qInfo().nospace() << "ScreenShareHelper: closing ScreenCast session " << streamID;
+						closePortalSession(finishedSession.portalSessionHandle);
+					}
 				}
 
 				const QString output = QString::fromUtf8(process->processChannelMode() == QProcess::SeparateChannels
@@ -805,7 +924,7 @@ void ScreenShareHelperServer::attachProcessLogging(const QString &streamID, cons
 }
 
 void ScreenShareHelperServer::refreshIdleTimer() {
-	if (!m_publishSessions.isEmpty() || !m_viewSessions.isEmpty()) {
+	if (!m_publishSessions.isEmpty() || !m_viewSessions.isEmpty() || m_hasPendingPortalSource) {
 		m_idleTimer.stop();
 		return;
 	}

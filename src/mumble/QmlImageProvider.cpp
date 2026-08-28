@@ -466,6 +466,8 @@ private:
 	bool m_stopping = false;
 };
 
+QmlImagePipeline::QmlImagePipeline() : QmlImagePipeline(Limits{}) {}
+
 QmlImagePipeline::QmlImagePipeline(Limits limits)
 	: m_limits(limits),
 	  m_animationDirectory(std::make_unique< QTemporaryDir >(

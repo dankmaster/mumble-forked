@@ -19,8 +19,14 @@ ColumnLayout {
 	// capture that application's audio directly. Keep the convenience automatic
 	// until the user deliberately chooses a different audio source.
 	property bool audioSelectionExplicit: false
+	readonly property bool portalCaptureAvailable: !!shareState.portalCaptureAvailable
+	readonly property bool portalSourcePicked: !!shareState.portalSourcePicked
+	readonly property bool portalSourcePicking: !!shareState.portalSourcePicking
+	readonly property string portalSourceLabel: String(shareState.portalSourceLabel || "")
+	readonly property string portalSourceError: String(shareState.portalSourceError || "").trim()
 	signal thumbnailRequested(string sourceId)
 	signal sourceSelected(string sourceId)
+	signal pickSourceRequested
 
 	function optionIndex(options, value) {
 		const target = String(value ?? "")
@@ -111,9 +117,10 @@ ColumnLayout {
 	}
 
 	onShareStateChanged: {
-		if (!sourceExists(selectedSourceId))
-			selectedSourceId = String(shareState.selectedSourceId || "")
-		Qt.callLater(synchronizeControls)
+		if (!root.sourceExists(root.selectedSourceId))
+			root.selectedSourceId = String(shareState.selectedSourceId || "")
+		if (resolution && frameRate && audio)
+			root.synchronizeControls()
 	}
 
 	spacing: Theme.space4
@@ -192,8 +199,73 @@ ColumnLayout {
 		Accessible.name: text
 	}
 
+	Rectangle {
+		objectName: "screenSharePortalStatus"
+		Layout.fillWidth: true
+		visible: root.portalCaptureAvailable
+		Layout.preferredHeight: portalStatusRow.implicitHeight + Theme.space4
+		radius: Theme.innerRadius
+		color: root.portalSourcePicking ? Theme.accentSubtle
+			: root.portalSourcePicked ? Theme.withAlpha(Theme.success, 0.08)
+			: Theme.strip
+		border.color: root.portalSourcePicking ? Theme.accent
+			: root.portalSourcePicked ? Theme.success : Theme.divider
+		border.width: 1
+
+		RowLayout {
+			id: portalStatusRow
+			anchors.fill: parent
+			anchors.margins: Theme.space2
+			spacing: Theme.space2
+
+			ModernBusyIndicator {
+				Layout.preferredWidth: Theme.rowHeight - Theme.space2
+				Layout.preferredHeight: Layout.preferredWidth
+				visible: root.portalSourcePicking
+				running: visible
+				Accessible.ignored: true
+			}
+			ModernIcon {
+				Layout.preferredWidth: 18
+				Layout.preferredHeight: 18
+				size: 18
+				visible: (root.portalSourceError.length > 0 || !root.portalSourcePicking)
+						 && !root.portalSourcePicked
+				name: root.portalSourceError.length > 0 ? "warning" : "screen-share"
+				color: root.portalSourceError.length > 0 ? Theme.danger : Theme.textMuted
+				Accessible.ignored: true
+			}
+			Label {
+				objectName: "screenSharePortalStatusLabel"
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: root.portalSourcePicking ? qsTr("Choose a screen or window in the system dialog…")
+					: root.portalSourceError.length > 0 ? root.portalSourceError
+					: root.portalSourcePicked
+						? qsTr("Selected: %1").arg(root.portalSourceLabel)
+						: qsTr("Pick a screen or window to share")
+				color: root.portalSourceError.length > 0 ? Theme.danger : Theme.textStrong
+				wrapMode: Text.Wrap
+				Accessible.ignored: true
+			}
+		}
+	}
+
+	ModernButton {
+		id: portalPickButton
+		objectName: "screenSharePickSource"
+		Layout.fillWidth: true
+		Layout.preferredHeight: Theme.rowHeight
+		visible: root.portalCaptureAvailable && !root.portalSourcePicking && !root.portalSourcePicked
+		text: qsTr("Pick source")
+		iconName: "screen-share"
+		enabled: !root.portalSourcePicking
+		onClicked: root.pickSourceRequested()
+	}
+
     Repeater {
         model: root.shareState.sources || []
+        visible: !root.portalCaptureAvailable
         delegate: ColumnLayout {
             required property var modelData
             Layout.fillWidth: true

@@ -34,7 +34,8 @@ public:
 	};
 	using RegistrationCallback = std::function< void(quint64 requestId, const QString &url) >;
 
-	explicit QmlImagePipeline(Limits limits = {});
+	explicit QmlImagePipeline();
+	explicit QmlImagePipeline(Limits limits);
 	~QmlImagePipeline();
 	QString registerEncoded(const QByteArray &bytes, const QByteArray &mimeType, const QString &stableKey);
 	QString registerFullResolutionEncoded(const QByteArray &bytes, const QByteArray &mimeType,

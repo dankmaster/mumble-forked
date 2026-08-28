@@ -5030,7 +5030,7 @@ bool MediaSessionBackend::openWithPresentation(const QUrl &url, const QString &p
 	invalidateNativePlaybackSources();
 	m_active = true;
 	m_url = normalized;
-	m_audioUrl = {};
+	m_audioUrl = QUrl();
 	m_provider = normalizedProvider;
 	m_detached = effectiveDetached;
 	m_mediaMime.clear();
@@ -5117,8 +5117,8 @@ void MediaSessionBackend::invalidateNativePlaybackSources() {
 	if (m_nativePreparationToken) m_nativePreparationToken->store(false, std::memory_order_release);
 	m_nativePreparationToken.reset();
 	const QStringList stalePaths = std::exchange(m_materializedPlaybackPaths, {});
-	m_playbackUrl = {};
-	m_playbackAudioUrl = {};
+	m_playbackUrl = QUrl();
+	m_playbackAudioUrl = QUrl();
 	m_playbackAudioWarning.clear();
 	m_playbackSourceReady = false;
 	m_playbackSourcePreparing = false;
@@ -5375,8 +5375,8 @@ void MediaSessionBackend::closePlayer() {
 		m_sharedGeneration = qMax(m_sharedGeneration, m_syncGeneration);
 	}
 	m_active = false;
-	m_url = {};
-	m_audioUrl = {};
+	m_url = QUrl();
+	m_audioUrl = QUrl();
 	m_provider.clear();
 	m_detached = true;
 	m_mediaMime.clear();
@@ -5735,7 +5735,7 @@ void MediaSessionBackend::clearSharedState() {
 	m_sharedTitle.clear();
 	m_sharedAspect = QStringLiteral("wide");
 	m_sharedSessionId.clear();
-	m_sharedUrl = {};
+	m_sharedUrl = QUrl();
 	m_sharedProvider.clear();
 	m_sharedScopeId = 0;
 	m_sharedHostSession = 0;
