@@ -119,6 +119,25 @@ Widgets is restricted to the documented operating-system and third-party-plugin
 allowlist. The manual Linux/macOS Qt Quick client workflow is diagnostic and
 non-gating; it is not a product-support promise.
 
+### Linux self-hosted (native install)
+
+For a Linux group you ship three things: the client, the `mumble-server` binary,
+and a LiveKit relay.
+
+- **Client** — run
+  [`scripts/install-linux-client.sh`](scripts/install-linux-client.sh). It
+  installs the GStreamer + PipeWire deps, then drops `mumble`,
+  `mumble-server`, and `mumble-screen-helper` into `/usr/local/bin` and adds a
+  desktop entry. The client auto-launches the helper; it finds the LiveKit
+  GStreamer elements automatically. Install natively for the lowest latency /
+  highest fps (system VAAPI/NVENC + zero sandbox overhead).
+- **Server** — ship the `mumble-server` binary (built with `-Dserver=ON`) plus
+  `auxiliary_files/mumble-server.ini`.
+- **Relay** — LiveKit is a separate service. Follow
+  [`docs/livekit-setup.md`](docs/livekit-setup.md) to run `livekit-server`,
+  generate an API key/secret, and wire the `screen_share_*` settings into
+  `mumble-server.ini`.
+
 ## Building
 
 General Mumble build instructions live in
