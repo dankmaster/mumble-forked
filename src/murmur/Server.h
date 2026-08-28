@@ -385,6 +385,9 @@ public:
 		QString qsRelayPublishToken;
 		QString qsRelayViewToken;
 		quint64 uiRelayTokenExpiresAt = 0;
+		// Set once the LiveKit relay room has been created via the RoomService API, so a
+		// given stream's room is only provisioned a single time.
+		bool bRelayRoomCreated = false;
 		MumbleProto::ScreenShareRelayTransport relayTransport = MumbleProto::ScreenShareRelayTransportUnknown;
 		quint64 uiCreatedAt = 0;
 		MumbleProto::ScreenShareLifecycleState state = MumbleProto::ScreenShareLifecycleStatePending;
@@ -578,6 +581,7 @@ public:
 	Channel *screenShareScopeChannel(MumbleProto::ScreenShareScope scope, unsigned int scopeID) const;
 	bool hasLiveKitScreenShareRelayConfig() const;
 	void ensureFreshScreenShareRelayCredentials(ScreenShareStream &stream);
+	void ensureLiveKitRoomCreated(ScreenShareStream &stream);
 	QString screenShareRelayTokenForRecipient(const ScreenShareStream &stream, const ServerUser *recipient) const;
 	QString liveKitScreenShareTokenForRecipient(const ScreenShareStream &stream, const ServerUser *recipient,
 												  quint64 expiresAt) const;

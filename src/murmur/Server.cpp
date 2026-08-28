@@ -43,6 +43,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QDirIterator>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
@@ -52,11 +53,15 @@
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
+#include <QtCore/QTimer>
 #include <QtCore/QUuid>
+#include <QtCore/QUrl>
 #include <QtCore/QXmlStreamAttributes>
 #include <QtCore/QtEndian>
 #include <QtNetwork/QHostInfo>
 #include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QSslConfiguration>
 
 #include "TracyConstants.h"
@@ -84,8 +89,9 @@ namespace msdb = ::mumble::server::db;
 
 namespace {
 constexpr quint64 SERVER_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC  = 5ULL * 60ULL * 1000ULL;
-constexpr quint64 LIVEKIT_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC = 5ULL * 60ULL * 1000ULL;
-constexpr quint64 SCREEN_SHARE_RELAY_TOKEN_REFRESH_SKEW_MSEC     = 60ULL * 1000ULL;
+constexpr quint64 LIVEKIT_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC    = 5ULL * 60ULL * 1000ULL;
+constexpr int LIVEKIT_SCREEN_SHARE_ROOM_CREATE_TIMEOUT_MSEC         = 5000;
+constexpr quint64 SCREEN_SHARE_RELAY_TOKEN_REFRESH_SKEW_MSEC        = 60ULL * 1000ULL;
 constexpr int SERVER_LOG_BACKLOG_MAX_ENTRIES                     = 200;
 constexpr unsigned int SERVER_LOG_ENTRY_MAX_BYTES                = 32U * 1024U;
 constexpr unsigned int SERVER_LOG_BACKLOG_MAX_BYTES              = 512U * 1024U;
@@ -1639,6 +1645,11 @@ QString Server::liveKitScreenShareTokenForRecipient(const ScreenShareStream &str
 
 	QJsonObject videoGrant;
 	videoGrant.insert(QStringLiteral("room"), stream.qsRelayRoomID);
+	// Participant tokens are join-only. The room itself is provisioned server-side by
+	// Server::ensureLiveKitRoomCreated using a dedicated room-provisioner admin token that
+	// never leaves this process. Withholding roomCreate from every participant token is the
+	// least-privilege trust boundary: a compromised/leaked share token can never create a
+	// room under the relay API identity, only join the specific server-created room it names.
 	videoGrant.insert(QStringLiteral("roomJoin"), true);
 	const bool publisherRole = relayRole == MumbleProto::ScreenShareRelayRolePublisher;
 	videoGrant.insert(QStringLiteral("canPublish"), publisherRole);
@@ -1685,6 +1696,108 @@ QString Server::liveKitScreenShareTokenForRecipient(const ScreenShareStream &str
 	return QString::fromLatin1(signingInput + '.' + base64UrlEncode(signature));
 }
 
+void Server::ensureLiveKitRoomCreated(ScreenShareStream &stream) {
+	if (stream.bRelayRoomCreated || !hasLiveKitScreenShareRelayConfig()
+		|| stream.relayTransport != MumbleProto::ScreenShareRelayTransportWebRTC
+		|| stream.qsRelayRoomID.trimmed().isEmpty()) {
+		return;
+	}
+
+	// Derive the RoomService HTTP endpoint from the relay websocket URL
+	// (e.g. wss://host/prefix -> https://host/prefix/twirp/livekit.RoomService/CreateRoom).
+	QString relayUrl = stream.qsRelayUrl.trimmed();
+	if (relayUrl.isEmpty()) {
+		relayUrl = qsScreenShareRelayUrl.trimmed();
+	}
+	if (relayUrl.isEmpty()) {
+		screenShareDiagnosticLog(QStringLiteral("Cannot create LiveKit relay room %1: no relay URL configured")
+									 .arg(stream.qsRelayRoomID));
+		return;
+	}
+	QUrl base(relayUrl);
+	const QString scheme = base.scheme().trimmed().toLower();
+	if (scheme == QLatin1String("wss")) {
+		base.setScheme(QStringLiteral("https"));
+	} else if (scheme == QLatin1String("ws")) {
+		base.setScheme(QStringLiteral("http"));
+	} else if (scheme != QLatin1String("https") && scheme != QLatin1String("http")) {
+		screenShareDiagnosticLog(QStringLiteral("Cannot create LiveKit relay room %1: unsupported relay scheme %2")
+									 .arg(stream.qsRelayRoomID, scheme));
+		return;
+	}
+	QString basePath = base.path();
+	if (!basePath.endsWith(QLatin1Char('/'))) {
+		basePath += QLatin1Char('/');
+	}
+	base.setPath(basePath + QLatin1String("twirp/livekit.RoomService/CreateRoom"));
+
+	// Mint a short-lived admin token with the roomCreate grant; CreateRoom only needs the
+	// API key/secret, no per-room participant grant.
+	const qint64 expiresAtSeconds = static_cast< qint64 >(QDateTime::currentSecsSinceEpoch()) + 60;
+	const qint64 notBeforeSeconds = static_cast< qint64 >(QDateTime::currentSecsSinceEpoch()) - 5;
+
+	QJsonObject header;
+	header.insert(QStringLiteral("alg"), QStringLiteral("HS256"));
+	header.insert(QStringLiteral("typ"), QStringLiteral("JWT"));
+
+	QJsonObject videoGrant;
+	videoGrant.insert(QStringLiteral("roomCreate"), true);
+
+	QJsonObject payload;
+	payload.insert(QStringLiteral("iss"), qsScreenShareRelayAPIKey);
+	payload.insert(QStringLiteral("sub"), QStringLiteral("mumble-room-provisioner"));
+	payload.insert(QStringLiteral("nbf"), notBeforeSeconds);
+	payload.insert(QStringLiteral("exp"), expiresAtSeconds);
+	payload.insert(QStringLiteral("jti"), QUuid::createUuid().toString(QUuid::WithoutBraces));
+	payload.insert(QStringLiteral("video"), videoGrant);
+
+	const QByteArray encodedHeader  = base64UrlEncode(QJsonDocument(header).toJson(QJsonDocument::Compact));
+	const QByteArray encodedPayload = base64UrlEncode(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+	const QByteArray signingInput   = encodedHeader + '.' + encodedPayload;
+	const QByteArray signature = QMessageAuthenticationCode::hash(signingInput, qsScreenShareRelayAPISecret.toUtf8(),
+																  QCryptographicHash::Sha256);
+	const QString adminToken = QString::fromLatin1(signingInput + '.' + base64UrlEncode(signature));
+
+	QJsonObject createBody;
+	createBody.insert(QStringLiteral("name"), stream.qsRelayRoomID);
+	// Auto-delete the ephemeral share room shortly after the last participant leaves so
+	// abandoned rooms do not accumulate, matching the relay's default empty_timeout.
+	createBody.insert(QStringLiteral("empty_timeout"), 300);
+
+	QNetworkRequest request(base);
+	request.setHeader(QNetworkRequest::ContentTypeHeader, QLatin1String("application/json"));
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + adminToken.toUtf8());
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+
+	QNetworkReply *reply = qnamNetwork->post(request, QJsonDocument(createBody).toJson(QJsonDocument::Compact));
+	if (!reply) {
+		screenShareDiagnosticLog(QStringLiteral("Failed to create LiveKit relay room %1: no network reply")
+									 .arg(stream.qsRelayRoomID));
+		return;
+	}
+
+	// Wait synchronously but with a bounded timeout so the room is guaranteed to exist
+	// before the relay credentials are handed out, without blocking the server indefinitely.
+	QEventLoop loop;
+	QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+	QTimer::singleShot(LIVEKIT_SCREEN_SHARE_ROOM_CREATE_TIMEOUT_MSEC, &loop, &QEventLoop::quit);
+	loop.exec();
+
+	const bool success = reply->error() == QNetworkReply::NoError;
+	const QByteArray responseBody = reply->readAll();
+	reply->deleteLater();
+
+	if (success && !responseBody.isEmpty() && responseBody.contains("sid")) {
+		stream.bRelayRoomCreated = true;
+		screenShareDiagnosticLog(QStringLiteral("Created LiveKit relay room %1 -> %2")
+									 .arg(stream.qsRelayRoomID, base.toString(QUrl::FullyEncoded)));
+	} else {
+		screenShareDiagnosticLog(QStringLiteral("Failed to create LiveKit relay room %1: %2")
+									 .arg(stream.qsRelayRoomID,
+										  QString::fromUtf8(responseBody).trimmed().left(200)));
+	}
+}
+
 QString Server::screenShareRelayTokenForRecipient(const ScreenShareStream &stream, const ServerUser *recipient) const {
 	if (!recipient) {
 		return QString();
@@ -1729,6 +1842,11 @@ void Server::ensureFreshScreenShareRelayCredentials(ScreenShareStream &stream) {
 		stream.uiRelayTokenExpiresAt = 0;
 		return;
 	}
+
+	// Ensure the LiveKit relay room exists before handing out any relay credentials so the
+	// publisher never receives a "room does not exist" 404 when connecting. Guarded internally
+	// by ScreenShareStream::bRelayRoomCreated so it only provisions a given room once.
+	ensureLiveKitRoomCreated(stream);
 
 	const quint64 tokenLifetimeMsec =
 		(stream.relayTransport == MumbleProto::ScreenShareRelayTransportWebRTC && hasLiveKitScreenShareRelayConfig())

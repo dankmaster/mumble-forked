@@ -147,7 +147,7 @@ bool SelfSignedCertificate::generate(CertificateType certificateType, QString cl
 		}
 	}
 
-	CHECK(X509_sign(x509, pkey, EVP_sha1()));
+	CHECK(X509_sign(x509, pkey, EVP_sha256()));
 
 	{
 		QByteArray crt;

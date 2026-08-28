@@ -541,6 +541,11 @@ namespace db {
 						throw InitException("Database has invalid encoding \"" + encoding + "\"");
 					}
 
+					// Set a busy timeout so that SQLite retries instead of immediately
+					// failing with "database is locked" when another process has only
+					// just released the file handle.
+					m_sql << "PRAGMA busy_timeout = 5000";
+
 					// Make sure that foreign key constraints are actually enforced
 					m_sql << "PRAGMA foreign_keys = ON";
 					int enabled;
