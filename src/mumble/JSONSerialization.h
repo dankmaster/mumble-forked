@@ -9,6 +9,9 @@
 #include "EnumStringConversions.h"
 #include "Settings.h"
 
+#include <QDataStream>
+#include <QIODevice>
+
 #include <sstream>
 #include <type_traits>
 
