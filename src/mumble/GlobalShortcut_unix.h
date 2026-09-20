@@ -12,6 +12,8 @@
 
 #include <X11/X.h>
 
+#undef CursorShape
+
 #define NUM_BUTTONS 0x2ff
 
 struct _XDisplay;

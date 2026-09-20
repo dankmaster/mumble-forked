@@ -26,6 +26,7 @@
 #include <QFlags>
 #include <QFont>
 #include <QHash>
+#include <QIODevice>
 #include <QList>
 #include <QMap>
 #include <QObject>

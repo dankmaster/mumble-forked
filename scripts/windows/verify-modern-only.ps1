@@ -21,8 +21,16 @@ function Find-Matches {
 
 $qmlResourcePath = Join-Path $repoRoot 'src\mumble\qml-shell.qrc'
 $qmlResource = [xml](Get-Content -LiteralPath $qmlResourcePath -Raw)
-$registeredQmlFiles = @($qmlResource.RCC.qresource.file | ForEach-Object { [string]$_.'#text' } | Sort-Object -Unique)
-$sourceQmlFiles = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\qml-shell') -File -Filter '*.qml' |
+# The embedded media player registers its JavaScript in a separate resource bundle.
+$mediaResourcePath = Join-Path $repoRoot 'src\mumble\adaptive-media-player.qrc'
+$mediaResource = [xml](Get-Content -LiteralPath $mediaResourcePath -Raw)
+$registeredQmlFiles = @(@(
+	$qmlResource.RCC.qresource.file | ForEach-Object { [string]$_.'#text' }
+	$mediaResource.RCC.qresource.file | ForEach-Object { [string]$_.'#text' } |
+		Where-Object { $_ -match '^qml-shell/[^/]+\.js$' }
+) | Sort-Object -Unique)
+$sourceQmlFiles = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\qml-shell') -File |
+	Where-Object { $_.Extension -in @('.qml', '.js') } |
 	ForEach-Object { "qml-shell/$($_.Name)" } | Sort-Object -Unique)
 $qmlResourceMismatch = @(Compare-Object -ReferenceObject $sourceQmlFiles -DifferenceObject $registeredQmlFiles |
 	ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" })
