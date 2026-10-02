@@ -9129,6 +9129,7 @@ ApplicationWindow {
 								required property string subtitle
 								required property string timestamp
 								required property int deferredPresentationHeight
+								required property bool deferredPresentationCompact
 								property bool accessibilityPooled: false
 								readonly property bool performanceTimelineDelegate: true
 								readonly property bool lightweightDeferredPresentation: true
@@ -9153,7 +9154,7 @@ ApplicationWindow {
 									&& y + height >= timeline.contentY
 									&& y <= timeline.contentY + timeline.height
 								width: timeline.width
-								height: deadlinePresentationFallback
+								height: deadlinePresentationFallback || deferredPresentationCompact
 									? timeline.deferredMessageRowHeight
 									: Math.max(timeline.deferredMessageRowHeight,
 										deferredPresentationHeight)
@@ -13639,6 +13640,7 @@ ApplicationWindow {
 			Component.onCompleted: append({
 				"stableId": "__delegate_warmup__",
 				"deferredPresentation": false,
+				"deferredPresentationCompact": false,
 				"deferredPresentationHeight": 58,
 				"own": false,
 				"title": "Warmup",

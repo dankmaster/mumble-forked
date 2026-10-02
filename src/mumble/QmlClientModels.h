@@ -358,7 +358,8 @@ public:
 		DateBoundaryRole,
 		DeferredPresentationHeightRole,
 		BodyHydrationPendingRole,
-		DeferredPresentationInlineRole
+		DeferredPresentationInlineRole,
+		DeferredPresentationCompactRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
@@ -384,6 +385,7 @@ signals:
 protected:
 	int indexOf(const QString &stableId) const;
 	int prependRows(const QVariantList &rows);
+	int appendRows(const QVariantList &rows);
 	// Model-owned asynchronous work may complete while an external fixture
 	// override is active. The caller must already have validated the row identity
 	// and generation; frontend/controller writes must continue through upsertRow().
@@ -571,6 +573,9 @@ private:
 	};
 
 	MessageMutation applyAcceptedMessage(const QVariantMap &message);
+	int appendMessagesNow(const QVariantList &messages, bool inlineDeferredPresentation);
+	static QString messageIdentity(const QVariantMap &message);
+	void makeDeferredSuffixInline(int firstRow);
 	QVariantMap messageRow(const QVariantMap &message, QList< RichBodyParseRequest > *requests = nullptr);
 	static void decoratePresentationRow(QVariantMap &row, const QVariantMap &previousRow);
 	static bool isUserHistoryRow(const QVariantMap &row);
