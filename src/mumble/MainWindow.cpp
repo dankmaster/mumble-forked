@@ -30903,10 +30903,9 @@ void MainWindow::publishPersistentChatSnapshotState(
 		const QVariantList appendedMessages =
 			buildModernShellMessageStates(target, previousMessageCount, appendedBuildMode);
 		// A cold persistent-history response normally follows the empty scope
-		// snapshot as one tail append. Admit its complete real rows one at a time
-		// as fixed-height placeholders, then let QML materialize the visible tail
-		// one row per presentation frame. This prevents both model insertion and
-		// attachment/provider construction from monopolizing a GUI heartbeat.
+		// snapshot as one tail append. Publish its lightweight summaries in
+		// ranges, then let QML materialize the visible tail one row per frame.
+		// Cached history size must not impose a timer delay per invisible row.
 		if (previousMessageCount == 0 && !appendedMessages.isEmpty()) {
 			const int deferred =
 				m_qmlShellHost->chatModel()->enqueueAppendMessages(appendedMessages, true);
@@ -30935,10 +30934,9 @@ void MainWindow::publishPersistentChatSnapshotState(
 	{
 		mumble::chatperf::ScopedDuration applyTrace("chat.publish.snapshot.apply");
 		// A cold scope keeps the complete authoritative snapshot while QML admits
-		// only the real rows intersecting the tail. Queue even the lightweight
-		// summaries one per frame: a cached rich room can otherwise make Qt Quick
-		// construct every fixed-height delegate in the synchronous scope-switch
-		// turn before the heavier provider admission queue has even started.
+		// only the real rows intersecting the tail. Queue the lightweight summary
+		// ranges together; ListView virtualizes them while QML controls the heavier
+		// provider admission work for the visible viewport.
 		if (switchingScope) {
 			// QML already owns a hidden replacement transaction. Retire the old
 			// rows and enqueue the target snapshot in this one GUI turn; never

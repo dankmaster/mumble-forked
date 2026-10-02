@@ -9,6 +9,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QEventLoop>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaProperty>
@@ -40,6 +41,10 @@ private slots:
 	void chatTimelineQueuedSnapshotHonorsMutationOwnership();
 	void chatTimelineQueuedSnapshotHonorsSubscriberRemoval();
 	void chatTimelineQueuedPrependUsesSingleDeferredBatch();
+	void chatTimelineHistoryAppendSerializesLiveMutations();
+	void chatTimelineLargeHistoryAppendsAsDeferredRanges_data();
+	void chatTimelineLargeHistoryAppendsAsDeferredRanges();
+	void chatTimelineMiddleMaterializationPreservesPresentationOrder();
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
 	void connectionHandoffBlocksRetiringServerSnapshots();
@@ -1321,6 +1326,207 @@ void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() 
 	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("prefix:0"));
 	QCOMPARE(model.get(1).value(QStringLiteral("id")).toString(), QStringLiteral("prefix:1"));
 	QCOMPARE(model.get(2).value(QStringLiteral("id")).toString(), QStringLiteral("tail:0"));
+}
+
+void TestQmlClientModels::chatTimelineHistoryAppendSerializesLiveMutations() {
+	const auto message = [](int id, const QString &text = QString()) {
+		return QVariantMap {
+			{ QStringLiteral("messageKey"), QString::number(id) },
+			{ QStringLiteral("plainText"), text.isEmpty() ? QString::number(id) : text }
+		};
+	};
+	QVariantList history;
+	for (int id = 1; id <= 10; ++id) history.push_back(message(id));
+	ChatTimelineModel model;
+	QCOMPARE(model.enqueueAppendMessages(history, true), 10);
+	QCOMPARE(model.appendMessages({ message(11) }), 1);
+	QCOMPARE(model.applyMessage(message(12)), ChatTimelineModel::MessageMutation::Inserted);
+	QCOMPARE(model.applyMessage(message(4, QStringLiteral("latest"))),
+		ChatTimelineModel::MessageMutation::Updated);
+	QVERIFY(model.removeMessage(QStringLiteral("5")));
+	QCOMPARE(model.rowCount(), 0);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.appendPending(), 5000);
+	QStringList actual;
+	for (int row = 0; row < model.rowCount(); ++row)
+		actual.push_back(model.get(row).value(QStringLiteral("id")).toString());
+	QCOMPARE(actual, QStringList({ "1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12" }));
+	QCOMPARE(model.get(3).value(QStringLiteral("source")).toMap()
+		.value(QStringLiteral("plainText")).toString(), QStringLiteral("latest"));
+
+	// Also deliver a live append between the non-deferred queue's drain turns.
+	ChatTimelineModel incremental;
+	QEventLoop firstRows;
+	connect(&incremental, &QAbstractItemModel::rowsInserted, &firstRows,
+		[&](const QModelIndex &, int, int) {
+			if (incremental.rowCount() == 4) firstRows.quit();
+		});
+	QCOMPARE(incremental.enqueueAppendMessages(history), 10);
+	QTimer::singleShot(5000, &firstRows, &QEventLoop::quit);
+	firstRows.exec();
+	QCOMPARE(incremental.rowCount(), 4);
+	QCOMPARE(incremental.appendMessages({ message(11) }), 1);
+	QTRY_VERIFY_WITH_TIMEOUT(!incremental.appendPending(), 5000);
+	QCOMPARE(incremental.rowCount(), 11);
+	for (int row = 0; row < incremental.rowCount(); ++row)
+		QCOMPARE(incremental.get(row).value(QStringLiteral("id")).toString(), QString::number(row + 1));
+
+	// A queued older page owns its IDs before insertion as well.
+	ChatTimelineModel prefix;
+	prefix.appendMessages({ message(3) });
+	QCOMPARE(prefix.enqueuePrependMessages({ message(1), message(2) }), 2);
+	QCOMPARE(prefix.applyMessage(message(1, QStringLiteral("updated prefix"))),
+		ChatTimelineModel::MessageMutation::Updated);
+	QVERIFY(prefix.removeMessage(QStringLiteral("2")));
+	QTRY_VERIFY_WITH_TIMEOUT(!prefix.prependPending(), 5000);
+	QCOMPARE(prefix.rowCount(), 2);
+	QCOMPARE(prefix.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("1"));
+	QCOMPARE(prefix.get(0).value(QStringLiteral("source")).toMap()
+		.value(QStringLiteral("plainText")).toString(), QStringLiteral("updated prefix"));
+	QCOMPARE(prefix.get(1).value(QStringLiteral("id")).toString(), QStringLiteral("3"));
+
+	// A scope change must cancel both its cached history and its live tail.
+	ChatTimelineModel cancelled;
+	cancelled.enqueueAppendMessages(history, true);
+	cancelled.appendMessages({ message(11) });
+	cancelled.replaceMessages({ message(100) });
+	QVERIFY(!cancelled.appendPending());
+	QTest::qWait(40);
+	QCOMPARE(cancelled.rowCount(), 1);
+	QCOMPARE(cancelled.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("100"));
+	for (const bool inlinePresentation : { false, true }) {
+		ChatTimelineModel removedTail;
+		removedTail.enqueuePrependMessages({ message(1) });
+		removedTail.enqueueAppendMessages({ message(2) }, inlinePresentation);
+		QVERIFY(removedTail.removeMessage(QStringLiteral("2")));
+		QTRY_VERIFY_WITH_TIMEOUT(!removedTail.prependPending() && !removedTail.appendPending(), 5000);
+		QCOMPARE(removedTail.rowCount(), 1);
+		QCOMPARE(removedTail.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("1"));
+	}
+	for (const bool appendFirst : { false, true }) {
+		ChatTimelineModel overlap;
+		const auto append = [&]() { overlap.enqueueAppendMessages({ message(2), message(3) }, true); };
+		if (appendFirst) append();
+		overlap.enqueuePrependMessages({ message(1), message(2) });
+		if (!appendFirst) append();
+		QTRY_VERIFY_WITH_TIMEOUT(!overlap.prependPending() && !overlap.appendPending(), 5000);
+		QCOMPARE(overlap.rowCount(), 3);
+		for (int row = 0; row < overlap.rowCount(); ++row)
+			QCOMPARE(overlap.get(row).value(QStringLiteral("id")).toString(), QString::number(row + 1));
+	}
+}
+
+void TestQmlClientModels::chatTimelineLargeHistoryAppendsAsDeferredRanges_data() {
+	QTest::addColumn< int >("messageCount");
+	QTest::newRow("1000 cached messages") << 1000;
+	QTest::newRow("10000 cached messages") << 10000;
+}
+
+void TestQmlClientModels::chatTimelineLargeHistoryAppendsAsDeferredRanges() {
+	QFETCH(int, messageCount);
+	ChatTimelineModel model;
+	QVariantList history;
+	for (int row = 0; row < messageCount; ++row) {
+		history.push_back(QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("cached:%1").arg(row) },
+			{ QStringLiteral("plainText"), QStringLiteral("Cached message %1").arg(row) }
+		});
+	}
+	QSignalSpy inserts(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy resets(&model, &QAbstractItemModel::modelReset);
+	QElapsedTimer elapsed;
+	elapsed.start();
+	QCOMPARE(model.enqueueAppendMessages(history, true), messageCount);
+	QVERIFY(model.appendPending());
+	QTRY_VERIFY_WITH_TIMEOUT(!model.appendPending(), 10000);
+	qInfo() << "Deferred cached history:" << messageCount << "rows," << elapsed.elapsed()
+		<< "ms," << inserts.count() << "contiguous ranges";
+	QCOMPARE(model.rowCount(), messageCount);
+	QVERIFY(!inserts.isEmpty());
+	QVERIFY(inserts.count() < messageCount / 4);
+	int nextRow = 0;
+	for (const QList< QVariant > &range : inserts) {
+		QCOMPARE(range.at(1).toInt(), nextRow);
+		nextRow = range.at(2).toInt() + 1;
+	}
+	QCOMPARE(nextRow, messageCount);
+	QCOMPARE(resets.count(), 0);
+	QCOMPARE(model.presentationModel()->rowCount(), messageCount);
+	QCOMPARE(model.deferredPresentationModel()->rowCount(), 0);
+	for (int row = 0; row < model.rowCount(); ++row) {
+		QCOMPARE(model.get(row).value(QStringLiteral("id")).toString(),
+			QStringLiteral("cached:%1").arg(row));
+		QVERIFY(model.get(row).value(QStringLiteral("deferredPresentation")).toBool());
+		QVERIFY(model.get(row).value(QStringLiteral("deferredPresentationInline")).toBool());
+	}
+}
+
+void TestQmlClientModels::chatTimelineMiddleMaterializationPreservesPresentationOrder() {
+	const auto message = [](int id) {
+		return QVariantMap {
+			{ QStringLiteral("messageKey"), QString::number(id) },
+			{ QStringLiteral("plainText"), QStringLiteral("Message %1").arg(id) }
+		};
+	};
+	ChatTimelineModel model;
+	model.replaceMessages({ message(6), message(7) });
+	QVariantList older;
+	for (int id = 1; id <= 5; ++id) {
+		QVariantMap entry = message(id);
+		if (id == 4) entry.insert(QStringLiteral("bodyHtml"),
+			QStringLiteral("<p>Message 4</p><img src=\"https://example.invalid/image.png\" />"));
+		older.push_back(entry);
+	}
+	QCOMPARE(model.enqueuePrependMessages(older), 5);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.prependPending(), 5000);
+	const auto displayedIds = [&]() {
+		QStringList ids;
+		for (const auto *proxy : { model.deferredPresentationModel(), model.presentationModel() })
+			for (int row = 0; row < proxy->rowCount(); ++row)
+				ids.push_back(proxy->get(row).value(QStringLiteral("id")).toString());
+		return ids;
+	};
+	const QStringList expected { "1", "2", "3", "4", "5", "6", "7" };
+	const int richEstimate = model.get(3).value(QStringLiteral("deferredPresentationHeight")).toInt();
+	QSignalSpy changes(&model, &QAbstractItemModel::dataChanged);
+	model.setQuery(QStringLiteral("Message 3"));
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("3"));
+	QVERIFY(model.materializeDeferredMessage(model.currentMatchStableId()));
+	QCOMPARE(displayedIds(), expected);
+	// Newer deferred rows keep their cheap presentation, now at their real
+	// chronological position in the main list rather than above the search hit.
+	for (int row : { 3, 4 }) {
+		QVERIFY(model.get(row).value(QStringLiteral("deferredPresentation")).toBool());
+		QVERIFY(model.get(row).value(QStringLiteral("deferredPresentationInline")).toBool());
+		QVERIFY(model.get(row).value(QStringLiteral("deferredPresentationCompact")).toBool());
+	}
+	QCOMPARE(model.get(3).value(QStringLiteral("deferredPresentationHeight")).toInt(), richEstimate);
+	QVERIFY(!model.deferredMessagePlainForMaterialization(QStringLiteral("4")));
+	bool notifiedPresentationRoles = false;
+	for (const QList< QVariant > &change : changes) {
+		const QList< int > roles = qvariant_cast< QList< int > >(change.at(2));
+		if (roles.contains(StableListModel::DeferredPresentationInlineRole)
+			&& roles.contains(StableListModel::DeferredPresentationCompactRole))
+			notifiedPresentationRoles = true;
+	}
+	QVERIFY(notifiedPresentationRoles);
+	model.replaceMessages(model.messages());
+	QCOMPARE(displayedIds(), expected);
+	QVERIFY(model.get(3).value(QStringLiteral("deferredPresentationInline")).toBool());
+	QVERIFY(model.get(3).value(QStringLiteral("deferredPresentationCompact")).toBool());
+	QVariantMap updated = message(4);
+	updated.insert(QStringLiteral("plainText"), QStringLiteral("Newest text"));
+	QCOMPARE(model.appendMessages({ updated }), 1);
+	QVERIFY(model.get(3).value(QStringLiteral("deferredPresentation")).toBool());
+	QCOMPARE(displayedIds(), expected);
+	QVERIFY(model.materializeDeferredMessage(QStringLiteral("4")));
+	QCOMPARE(model.get(3).value(QStringLiteral("source")).toMap()
+		.value(QStringLiteral("plainText")).toString(), QStringLiteral("Newest text"));
+	QCOMPARE(displayedIds(), expected);
+	QVERIFY(model.materializeDeferredMessage(QStringLiteral("1")));
+	QCOMPARE(displayedIds(), expected);
+	QVERIFY(model.materializeDeferredMessage(QStringLiteral("5")));
+	QCOMPARE(displayedIds(), expected);
+	QVERIFY(!model.get(4).value(QStringLiteral("deferredPresentationCompact")).toBool());
 }
 
 void TestQmlClientModels::chatTimelineQueuedPrependUsesSingleDeferredBatch() {

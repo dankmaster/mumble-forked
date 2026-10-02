@@ -359,7 +359,8 @@ public:
 		DateBoundaryRole,
 		DeferredPresentationHeightRole,
 		BodyHydrationPendingRole,
-		DeferredPresentationInlineRole
+		DeferredPresentationInlineRole,
+		DeferredPresentationCompactRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
@@ -573,6 +574,9 @@ private:
 	};
 
 	MessageMutation applyAcceptedMessage(const QVariantMap &message);
+	int appendMessagesNow(const QVariantList &messages, bool inlineDeferredPresentation);
+	static QString messageIdentity(const QVariantMap &message);
+	void makeDeferredSuffixInline(int firstRow);
 	QVariantMap messageRow(const QVariantMap &message, QList< RichBodyParseRequest > *requests = nullptr);
 	static void decoratePresentationRow(QVariantMap &row, const QVariantMap &previousRow);
 	static bool isUserHistoryRow(const QVariantMap &row);
