@@ -888,6 +888,17 @@ cleanup:
 	return pDevice;
 }
 
+QString WASAPISystem::inputEndpointForPreparedIdentity(
+	const QString &configuredDevice, const Mumble::InputEnhancement::DeviceIdentity &preparedIdentity) {
+	// Failed resolution can leave the default stable flag set without an endpoint.
+	// Keep the configured ID in that case: an empty ID would turn strict routing
+	// into FollowDefault and unexpectedly open the Windows default microphone.
+	if (preparedIdentity.stable && !preparedIdentity.physicalId.isEmpty()) {
+		return preparedIdentity.physicalId;
+	}
+	return configuredDevice;
+}
+
 Mumble::InputEnhancement::DeviceIdentity WASAPISystem::resolveInputDeviceIdentity(const QString &configuredDevice,
 																			   const ERole role, const QString &persistedIdentity,
 																			   const QString &routingPolicy,
@@ -943,8 +954,8 @@ void WASAPIInput::run() {
 	// configured/default endpoint disappeared during startup, the helper reports
 	// the actual fallback and AudioInput fails closed to Original below.
 	const Mumble::InputEnhancement::DeviceIdentity plannedInputIdentity = inputDeviceIdentity();
-	const QString plannedInputId = plannedInputIdentity.stable ? plannedInputIdentity.physicalId
-															  : Global::get().s.qsWASAPIInput;
+	const QString plannedInputId =
+		WASAPISystem::inputEndpointForPreparedIdentity(Global::get().s.qsWASAPIInput, plannedInputIdentity);
 	Mumble::InputEnhancement::DeviceIdentity openedInputIdentity;
 	pMicDevice = openNamedOrDefaultDevice(plannedInputId, eCapture, WASAPIRoleFromSettings(),
 		Global::get().s.qsWASAPIInputDeviceIdentity, Global::get().s.qsWASAPIInputRoutingPolicy,

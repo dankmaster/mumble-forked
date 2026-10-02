@@ -108,6 +108,7 @@ private slots:
 	void manualProfileChangeArmsExactProbationAndRollsBack();
 	void wasapiDefaultDeviceRolesMatchExactly();
 	void wasapiSettingsRoundTrip();
+	void wasapiPreparedInputPreservesStrictRouting();
 	void wasapiDeviceRoutingMatchesStableHardwareOnly();
 	void wasapiStableDeviceProfileSurvivesEndpointChurn();
 	void wasapiLatencyProfilesSelectValidEnginePeriods();
@@ -179,6 +180,41 @@ void TestInputEnhancementSettings::wasapiSettingsRoundTrip() {
 	QCOMPARE(restored.qsWASAPIInputRoutingPolicy, original.qsWASAPIInputRoutingPolicy);
 	QCOMPARE(restored.qsWASAPIOutputRoutingPolicy, original.qsWASAPIOutputRoutingPolicy);
 	QCOMPARE(restored.qsWASAPILatencyProfile, original.qsWASAPILatencyProfile);
+}
+
+void TestInputEnhancementSettings::wasapiPreparedInputPreservesStrictRouting() {
+#if defined(Q_OS_WIN) && defined(USE_WASAPI)
+	using namespace Mumble::WASAPI;
+	const QString configuredDevice = QStringLiteral("unavailable-selected-microphone");
+	// This is what failed endpoint resolution returns, including stable's default
+	// value. It must not erase the configured selection and enable default capture.
+	Mumble::InputEnhancement::DeviceIdentity prepared;
+	QString endpoint = WASAPISystem::inputEndpointForPreparedIdentity(configuredDevice, prepared);
+	QCOMPARE(endpoint, configuredDevice);
+	QCOMPARE(routingPolicyFromName(QStringLiteral("strict"), !endpoint.isEmpty()), RoutingPolicy::StrictSelected);
+	QCOMPARE(routingPolicyFromName(QStringLiteral("prefer"), !endpoint.isEmpty()), RoutingPolicy::PreferSelected);
+
+	prepared.physicalId = QStringLiteral("resolved-microphone");
+	prepared.stable     = false;
+	QCOMPARE(WASAPISystem::inputEndpointForPreparedIdentity(configuredDevice, prepared), configuredDevice);
+	prepared.stable = true;
+	endpoint = WASAPISystem::inputEndpointForPreparedIdentity(configuredDevice, prepared);
+	QCOMPARE(endpoint, prepared.physicalId);
+	QCOMPARE(routingPolicyFromName(QStringLiteral("strict"), !endpoint.isEmpty()), RoutingPolicy::StrictSelected);
+
+	// Explicit default routing and a genuinely unconfigured endpoint keep their
+	// existing behavior, with or without a successfully prepared physical ID.
+	prepared.followsSystemDefault = true;
+	endpoint = WASAPISystem::inputEndpointForPreparedIdentity(QString(), prepared);
+	QCOMPARE(endpoint, prepared.physicalId);
+	QCOMPARE(routingPolicyFromName(QStringLiteral("follow"), !endpoint.isEmpty()), RoutingPolicy::FollowDefault);
+	prepared.physicalId.clear();
+	endpoint = WASAPISystem::inputEndpointForPreparedIdentity(QString(), prepared);
+	QVERIFY(endpoint.isEmpty());
+	QCOMPARE(routingPolicyFromName(QStringLiteral("prefer"), !endpoint.isEmpty()), RoutingPolicy::FollowDefault);
+#else
+	QSKIP("WASAPI input routing is Windows-only");
+#endif
 }
 
 void TestInputEnhancementSettings::wasapiDeviceRoutingMatchesStableHardwareOnly() {
