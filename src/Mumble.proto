@@ -922,6 +922,8 @@ message ChatHistoryRequest {
 	optional uint32 start_offset = 3 [default = 0];
 	optional uint32 limit = 4 [default = 50];
 	optional uint32 before_message_id = 5;
+	// Echoed by supporting servers, including on failure. Zero is reserved for untracked requests.
+	optional uint64 request_id = 6;
 }
 
 // Sent by the client to ask the server for recent history in multiple scopes.
@@ -932,6 +934,14 @@ message ChatHistoryWarmupRequest {
 
 // Sent by the server to return a paginated chunk of chat history.
 message ChatHistoryResponse {
+	enum Error {
+		NoError = 0;
+		PermissionDenied = 1;
+		Unavailable = 2;
+		Unsupported = 3;
+		RateLimited = 4;
+	}
+
 	optional ChatScope scope = 1 [default = Channel];
 	optional uint32 scope_id = 2 [default = 0];
 	optional uint32 thread_id = 3;
@@ -941,6 +951,10 @@ message ChatHistoryResponse {
 	optional uint32 last_read_message_id = 7;
 	optional bool has_older = 8 [default = false];
 	optional uint32 oldest_message_id = 9;
+	optional uint64 request_id = 10;
+	// An error terminates the request without replacing cached messages or pagination state.
+	optional Error error = 11 [default = NoError];
+	optional string error_message = 12;
 }
 
 // Sent by the client or server to update persisted read state for a thread.

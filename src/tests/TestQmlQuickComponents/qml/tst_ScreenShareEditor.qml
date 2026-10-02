@@ -113,12 +113,37 @@ TestCase {
 		compare(editor.selectedSourceId, "window:42")
 		compare(editor.selectedAudioValue, "process:4242")
 		compare(editor.actionPayload().audio, "process:4242")
+		monitor.selectSource()
+		compare(editor.actionPayload().audio, "")
+		appWindow.selectSource()
+		compare(editor.actionPayload().audio, "process:4242")
 
 		editor.selectedAudioValue = "default-loopback"
 		editor.audioSelectionExplicit = true
 		monitor.selectSource()
 		appWindow.selectSource()
 		compare(editor.selectedAudioValue, "default-loopback")
+		editor.destroy()
+	}
+
+	function test_automatic_audio_tracks_new_app_and_missing_process_option() {
+		const editor = createEditor()
+		const state = screenShareState("")
+		state.sources[0].items.push({ id: "window:43", processId: 4343, audioAuto: true })
+		state.audioOptions.push({ value: "process:4343", label: "Second app" })
+		state.audioDefault = "default-loopback"
+		editor.shareState = state
+		tryVerify(function() { return editor.controlsInitialized })
+		editor.applyAutomaticAudioForSource("window:42")
+		compare(editor.actionPayload().audio, "process:4242")
+		editor.applyAutomaticAudioForSource("window:43")
+		compare(editor.actionPayload().audio, "process:4343")
+		state.audioOptions.pop()
+		editor.shareState = state
+		editor.applyAutomaticAudioForSource("window:43")
+		compare(editor.actionPayload().audio, "default-loopback")
+		editor.applyAutomaticAudioForSource("monitor:0")
+		compare(editor.actionPayload().audio, "default-loopback")
 		editor.destroy()
 	}
 

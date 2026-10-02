@@ -138,6 +138,18 @@ MumbleProto::ChatHistoryResponse emptyChatHistoryResponseForRequest(ServerUser *
 	response.set_start_offset(request.has_start_offset() ? request.start_offset() : 0);
 	response.set_has_more(false);
 	response.set_has_older(false);
+	if (request.has_request_id()) {
+		response.set_request_id(request.request_id());
+	}
+	return response;
+}
+
+MumbleProto::ChatHistoryResponse failedChatHistoryResponseForRequest(
+	ServerUser *uSource, const MumbleProto::ChatHistoryRequest &request,
+	MumbleProto::ChatHistoryResponse_Error error, const QString &reason) {
+	MumbleProto::ChatHistoryResponse response = emptyChatHistoryResponseForRequest(uSource, request);
+	response.set_error(error);
+	response.set_error_message(u8(reason));
 	return response;
 }
 
@@ -6251,17 +6263,13 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 															  ? std::optional< unsigned int >(msg.before_message_id())
 															  : std::nullopt;
 
-	MumbleProto::ChatHistoryResponse response;
-	response.set_scope(scope);
-	response.set_scope_id(scopeID);
-	response.set_start_offset(startOffset);
-	response.set_has_more(false);
-	response.set_has_older(false);
-	const auto sendEmptyWarmupResponse = [&]() {
-		if (!silentPermissionDenied) {
+	MumbleProto::ChatHistoryResponse response = emptyChatHistoryResponseForRequest(uSource, msg);
+	const auto sendFailureResponse = [&](MumbleProto::ChatHistoryResponse_Error error, const QString &reason) {
+		if (!msg.has_request_id() && !silentPermissionDenied) {
 			return false;
 		}
-
+		response.set_error(error);
+		response.set_error_message(u8(reason));
 		sendMessage(uSource, response);
 		return true;
 	};
@@ -6281,7 +6289,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 		case MumbleProto::TextChannel: {
 			std::optional<::msdb::DBTextChannel > textChannel = m_dbWrapper.getTextChannel(iServerNum, scopeID);
 			if (!textChannel) {
-				sendEmptyWarmupResponse();
+				sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_Unavailable,
+								tr("This chat is unavailable."));
 				return;
 			}
 
@@ -6291,7 +6300,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 		}
 		case MumbleProto::Private:
 			if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureDirectMessages)) {
-				if (sendEmptyWarmupResponse()) {
+				if (sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_Unsupported,
+									tr("This client did not advertise persistent direct-message support."))) {
 					return;
 				}
 				sendPersistentChatTextDenied(this, uSource,
@@ -6299,7 +6309,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 				return;
 			}
 			if (!sourceUserID) {
-				if (sendEmptyWarmupResponse()) {
+				if (sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_PermissionDenied,
+									tr("Register your user before loading direct-message history."))) {
 					return;
 				}
 				sendPersistentChatTextDenied(this, uSource,
@@ -6308,7 +6319,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 			}
 			if (!msg.has_scope_id() || scopeID == sourceUserID.value()
 				|| !m_dbWrapper.registeredUserExists(iServerNum, scopeID)) {
-				if (sendEmptyWarmupResponse()) {
+				if (sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_Unavailable,
+									tr("That direct-message recipient is unavailable."))) {
 					return;
 				}
 				sendPersistentChatTextDenied(this, uSource, tr("That direct-message recipient is unavailable."));
@@ -6318,7 +6330,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 			dbScope           = ::msdb::ChatThreadScope::Private;
 			break;
 		default:
-			sendEmptyWarmupResponse();
+			sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_Unsupported,
+							tr("This chat history scope is unsupported."));
 			return;
 	}
 
@@ -6364,7 +6377,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 		return registeredUserTextureHash(this, actorUserID, actorTextureHashCache);
 	};
 	if (scope == MumbleProto::ServerGlobal && !bPersistentGlobalChatEnabled) {
-		if (sendEmptyWarmupResponse()) {
+		if (sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_Unavailable,
+								tr("Global chat is disabled by this server."))) {
 			return;
 		}
 
@@ -6454,7 +6468,7 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 	}
 
 	if (!permissionChannel) {
-		sendEmptyWarmupResponse();
+		sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_Unavailable, tr("This chat is unavailable."));
 		return;
 	}
 
@@ -6470,7 +6484,8 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 		}
 	}
 	if (!effectiveAccess.allowed) {
-		if (sendEmptyWarmupResponse()) {
+		if (sendFailureResponse(MumbleProto::ChatHistoryResponse_Error_PermissionDenied,
+								tr("You do not have permission to view this chat history."))) {
 			return;
 		}
 
@@ -6549,12 +6564,18 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 
 	if (uSource->leakyBucket.ratelimit(1)) {
 		// History is request/response from the UI. A silent throttle leaves clients stuck in loading.
-		sendMessage(uSource, emptyChatHistoryResponseForRequest(uSource, msg));
+		sendMessage(uSource, failedChatHistoryResponseForRequest(uSource, msg,
+			MumbleProto::ChatHistoryResponse_Error_RateLimited, tr("Too many history requests. Try again shortly.")));
 		return;
 	}
 
 	if (!clientSupportsPersistentChat(uSource)) {
-		sendPersistentChatUnsupported(uSource);
+		if (msg.has_request_id()) {
+			sendMessage(uSource, failedChatHistoryResponseForRequest(uSource, msg,
+				MumbleProto::ChatHistoryResponse_Error_Unsupported, tr("Persistent chat history is unsupported.")));
+		} else {
+			sendPersistentChatUnsupported(uSource);
+		}
 		return;
 	}
 
@@ -6567,9 +6588,13 @@ void Server::msgChatHistoryWarmupRequest(ServerUser *uSource, MumbleProto::ChatH
 	MSG_SETUP(ServerUser::Authenticated);
 	QMutexLocker qml(&qmCache);
 
-	if (uSource->leakyBucket.ratelimit(1)) {
+	const bool rateLimited = uSource->leakyBucket.ratelimit(1);
+	const bool unsupported = !clientSupportsPersistentChat(uSource)
+		|| !clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureHistoryWarmup);
+	if (rateLimited || unsupported) {
 		QSet< QString > seenScopes;
 		int warmedScopes = 0;
+		bool legacyUnsupported = false;
 		for (int i = 0; i < msg.requests_size() && warmedScopes < MAX_CHAT_HISTORY_WARMUP_SCOPES; ++i) {
 			MumbleProto::ChatHistoryRequest request = msg.requests(i);
 			const MumbleProto::ChatScope scope      = request.has_scope() ? request.scope() : MumbleProto::Channel;
@@ -6590,15 +6615,20 @@ void Server::msgChatHistoryWarmupRequest(ServerUser *uSource, MumbleProto::ChatH
 			request.set_scope_id(scopeID);
 			request.set_start_offset(0);
 			request.clear_before_message_id();
-			sendMessage(uSource, emptyChatHistoryResponseForRequest(uSource, request));
+			if (rateLimited || request.has_request_id()) {
+				sendMessage(uSource, failedChatHistoryResponseForRequest(uSource, request,
+					rateLimited ? MumbleProto::ChatHistoryResponse_Error_RateLimited
+								: MumbleProto::ChatHistoryResponse_Error_Unsupported,
+					rateLimited ? tr("Too many history requests. Try again shortly.")
+								: tr("Chat history warmup is unsupported.")));
+			} else {
+				legacyUnsupported = true;
+			}
 			++warmedScopes;
 		}
-		return;
-	}
-
-	if (!clientSupportsPersistentChat(uSource)
-		|| !clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureHistoryWarmup)) {
-		sendPersistentChatUnsupported(uSource);
+		if (legacyUnsupported) {
+			sendPersistentChatUnsupported(uSource);
+		}
 		return;
 	}
 

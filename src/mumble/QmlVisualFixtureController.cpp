@@ -3544,6 +3544,7 @@ bool QmlVisualFixtureController::applySurface(const QString &surfaceVariant, QSt
 		session.fps = 30;
 		session.state = MumbleProto::ScreenShareLifecycleStateActive;
 		auto backend = std::make_unique< ScreenShareViewBackend >(session);
+		backend->setDetached(true);
 		backend->setIdentity(QStringLiteral("Alex"), QStringLiteral("Lobby"));
 		if (surfaceVariant == QLatin1String("screen-share-view-loading")) {
 			backend->setOperationState(QStringLiteral("loading"), {}, true);

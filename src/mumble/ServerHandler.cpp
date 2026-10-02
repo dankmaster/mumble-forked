@@ -1693,18 +1693,18 @@ void ServerHandler::setDefaultTextChannel(unsigned int textChannelID) {
 	sendMessage(sync);
 }
 
-void ServerHandler::requestChatHistory(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int startOffset,
-									   unsigned int limit, std::optional< unsigned int > beforeMessageID) {
+bool ServerHandler::requestChatHistory(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int startOffset,
+									   unsigned int limit, std::optional< unsigned int > beforeMessageID, quint64 requestID) {
 	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeaturePersistentHistory)) {
-		return;
+		return false;
 	}
 	if (scope == MumbleProto::TextChannel
 		&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
-		return;
+		return false;
 	}
 	if ((startOffset > 0 || beforeMessageID)
 		&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryPagination)) {
-		return;
+		return false;
 	}
 
 	MumbleProto::ChatHistoryRequest request;
@@ -1712,14 +1712,16 @@ void ServerHandler::requestChatHistory(MumbleProto::ChatScope scope, unsigned in
 	request.set_scope_id(scopeID);
 	request.set_start_offset(startOffset);
 	request.set_limit(limit);
+	request.set_request_id(requestID);
 	if (beforeMessageID) {
 		request.set_before_message_id(beforeMessageID.value());
 	}
 	sendMessage(request);
+	return true;
 }
 
 bool ServerHandler::requestChatHistoryWarmup(
-	const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes, unsigned int limitPerScope) {
+	const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes, unsigned int limitPerScope, quint64 requestID) {
 	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeaturePersistentHistory)
 		|| !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryWarmup) || scopes.isEmpty()) {
 		return false;
@@ -1729,7 +1731,8 @@ bool ServerHandler::requestChatHistoryWarmup(
 	for (const QPair< MumbleProto::ChatScope, unsigned int > &scope : scopes) {
 		if (scope.first == MumbleProto::TextChannel
 			&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
-			continue;
+			// Do not partially send a batch: the caller owns one pending request for every scope.
+			return false;
 		}
 
 		MumbleProto::ChatHistoryRequest *request = warmup.add_requests();
@@ -1737,6 +1740,7 @@ bool ServerHandler::requestChatHistoryWarmup(
 		request->set_scope_id(scope.second);
 		request->set_start_offset(0);
 		request->set_limit(limitPerScope);
+		request->set_request_id(requestID);
 	}
 
 	if (warmup.requests_size() == 0) {

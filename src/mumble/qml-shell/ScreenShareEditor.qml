@@ -69,13 +69,14 @@ ColumnLayout {
 			return false
 		const source = sourceState(sourceId)
 		const processId = Number(source.processId || 0)
-		if (!source.audioAuto || !Number.isFinite(processId) || processId <= 0)
-			return false
-		const preferred = "process:" + String(Math.floor(processId))
-		if (optionIndex(shareState.audioOptions || [], preferred) < 0)
-			return false
+		const options = shareState.audioOptions || []
+		const processValue = source.audioAuto && Number.isFinite(processId) && processId > 0
+			? "process:" + String(Math.floor(processId)) : ""
+		const defaultValue = String(shareState.audioDefault || "")
+		const preferred = processValue.length > 0 && optionIndex(options, processValue) >= 0
+			? processValue : optionIndex(options, defaultValue) >= 0 ? defaultValue : ""
 		selectedAudioValue = preferred
-		audio.currentIndex = optionIndex(shareState.audioOptions || [], preferred)
+		audio.currentIndex = optionIndex(options, preferred)
 		return true
 	}
 

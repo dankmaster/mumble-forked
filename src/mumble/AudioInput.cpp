@@ -191,6 +191,28 @@ bool AudioInput::voiceActivityTriggers(float level, float silenceThreshold, floa
 	return level > speechThreshold || (level > silenceThreshold && wasTransmitting);
 }
 
+bool AudioInput::applyVoiceActivityHold(bool speech, bool wasTransmitting, int configuredHoldFrames, int &holdFrames) {
+	if (speech) {
+		holdFrames = 0;
+		return true;
+	}
+
+	configuredHoldFrames = std::max(0, configuredHoldFrames);
+	if (!wasTransmitting) {
+		// A release delay extends an existing utterance. It must never open the
+		// microphone at startup or when the delay is increased while idle.
+		holdFrames = configuredHoldFrames;
+		return false;
+	}
+
+	// Keep the existing terminal-frame boundary without allowing an idle
+	// counter to grow indefinitely.
+	if (holdFrames < configuredHoldFrames) {
+		++holdFrames;
+	}
+	return holdFrames < configuredHoldFrames;
+}
+
 bool AudioInput::inputGateAllowsSpeechFor(Settings::InputGateMode mode, Settings::VADSource source,
 										  bool candidateSpeech, float amplitudeLevel, float speechProbability,
 										  bool &gateOpen, int &attackFrames, int &releaseFrames) {
@@ -2585,14 +2607,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 			iHoldFrames = Global::get().s.iVoiceHold;
 		}
 
-		if (!bIsSpeech) {
-			iHoldFrames++;
-			if (iHoldFrames < Global::get().s.iVoiceHold)
-				// Hold mic open until iVoiceHold threshold is reached
-				bIsSpeech = true;
-		} else {
-			iHoldFrames = 0;
-		}
+		bIsSpeech = applyVoiceActivityHold(bIsSpeech, bPreviousVoice, Global::get().s.iVoiceHold, iHoldFrames);
 	}
 	const bool acousticSpeech = bIsSpeech;
 

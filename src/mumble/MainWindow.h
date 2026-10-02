@@ -529,6 +529,10 @@ public:
 		bool historyLoading      = false;
 		bool historyLoaded       = false;
 		QString historyError;
+		quint64 historyRequestID = 0;
+		quint64 historyConnectionGeneration = 0;
+		bool historyReplyCorrelation = false;
+		bool historyLegacyAmbiguous = false;
 		unsigned int lastReadMessageID = 0;
 		unsigned int lastMessageID     = 0;
 		QSet< QString > persistentMessageKeys;
@@ -844,6 +848,7 @@ public:
 	bool mergeModernDirectMessageHistory(const MumbleProto::ChatHistoryResponse &response);
 	bool setModernDirectMessageMode(unsigned int session, const QString &mode);
 	void requestModernDirectMessageHistory(unsigned int session);
+	bool prepareModernDirectMessageHistoryRequest(unsigned int session, quint64 requestID);
 	void warmupModernDirectMessageHistory();
 	bool sendModernDirectMessage(unsigned int session, const QString &message,
 								 std::optional< unsigned int > replyMessageID = std::nullopt,
@@ -1256,6 +1261,7 @@ protected:
 	mutable QHash< QString, QString > m_persistentChatPreviewKeyCache;
 	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
 	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;
+	quint64 m_nextDirectHistoryRequestID = 0;
 	quint64 m_modernDirectMessageLocalID = 0;
 	bool m_modernDirectMessageTrayOpenProbe = false;
 	QTimer *m_modernShellPreviewHydrationTimer             = nullptr;

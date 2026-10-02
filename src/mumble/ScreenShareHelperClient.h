@@ -10,12 +10,17 @@
 #include "ScreenShareIPC.h"
 
 #include <QtCore/QJsonObject>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QHash>
+#include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <functional>
 
 struct ScreenShareSession;
+class ScreenShareAsyncRequest;
 
 class ScreenShareHelperClient : public QObject {
 private:
@@ -56,8 +61,16 @@ public:
 		QStringList drmSystems;
 		unsigned int queueBudgetFrames = 0;
 	};
+	struct AsyncResult {
+		bool success = false;
+		QString error;
+		qint64 processID = 0;
+		NativeFrameTransport frameTransport;
+	};
 
 	explicit ScreenShareHelperClient(QObject *parent = nullptr);
+	void requestAsync(Mumble::ScreenShare::IPC::Command command, const ScreenShareSession &session,
+					  std::function< void(const AsyncResult &) > callback);
 
 	static CapabilitySnapshot initialCapabilitySnapshot();
 	static CapabilitySnapshot advertisedCapabilities();
@@ -94,6 +107,8 @@ private:
 
 	CapabilitySnapshot m_capabilities;
 	bool m_capabilityRefreshInProgress = false;
+	QHash< QString, QPointer< ScreenShareAsyncRequest > > m_pendingRequests;
+	QElapsedTimer m_asyncHelperLaunch;
 };
 
 #endif // MUMBLE_MUMBLE_SCREENSHAREHELPERCLIENT_H_

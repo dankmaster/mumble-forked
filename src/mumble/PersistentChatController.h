@@ -12,6 +12,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QHash>
 #include <QtCore/QPointer>
+#include <QtCore/QSet>
 
 class PersistentChatController : public QObject {
 private:
@@ -19,7 +20,7 @@ private:
 	Q_DISABLE_COPY(PersistentChatController)
 
 public:
-	explicit PersistentChatController(QObject *parent = nullptr);
+	explicit PersistentChatController(QObject *parent = nullptr, int historyRequestTimeoutMs = 15000);
 
 	void setGateway(PersistentChatGateway *gateway);
 	void reset();
@@ -51,13 +52,31 @@ private slots:
 	void handleReadState(const MumbleProto::ChatReadStateUpdate &update);
 
 private:
+	struct PendingHistoryRequest {
+		quint64 connectionGeneration;
+		quint64 requestID;
+		PersistentChatScopeKey key;
+	};
+
 	void setUnreadFromMessages(PersistentChatStore::ScopeState &state);
 	bool startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload);
+	void handleConnectionChanged(quint64 connectionGeneration);
+	bool canRequestHistory(PersistentChatStore::ScopeState &state);
+	quint64 nextHistoryRequestID();
+	void trackHistoryRequest(const PersistentChatScopeKey &key, quint64 requestID);
+	void failHistoryRequest(const PersistentChatScopeKey &key, const PendingHistoryRequest &request,
+							const QString &errorMessage, bool timedOut = false);
 
 	QPointer< PersistentChatGateway > m_gateway;
 	PersistentChatStore m_store;
 	PersistentChatScopeKey m_activeScope;
-	QHash< QString, quint64 > m_historyRequestConnectionGenerations;
+	QHash< QString, PendingHistoryRequest > m_pendingHistoryRequests;
+	// Legacy replies have no ID. Once a request is abandoned, only tagged replies can safely satisfy a retry.
+	QSet< QString > m_ambiguousLegacyScopes;
+	quint64 m_historyConnectionGeneration = 0;
+	quint64 m_nextHistoryRequestID = 0;
+	bool m_serverCorrelatesHistory = false;
+	const int m_historyRequestTimeoutMs;
 };
 
 #endif // MUMBLE_MUMBLE_PERSISTENTCHATCONTROLLER_H_

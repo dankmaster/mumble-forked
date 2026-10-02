@@ -435,6 +435,7 @@ public:
 	float voiceActivityLevel() const;
 	static float voiceActivityLevelFor(Settings::VADSource source, float amplitudeLevel, float speechProbability);
 	static bool voiceActivityTriggers(float level, float silenceThreshold, float speechThreshold, bool wasTransmitting);
+	static bool applyVoiceActivityHold(bool speech, bool wasTransmitting, int configuredHoldFrames, int &holdFrames);
 	static bool inputGateAllowsSpeechFor(Settings::InputGateMode mode, Settings::VADSource source,
 										 bool candidateSpeech, float amplitudeLevel, float speechProbability,
 										 bool &gateOpen, int &attackFrames, int &releaseFrames);

@@ -17,7 +17,6 @@
 #include <QtCore/QSet>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
-#include <QtCore/QThreadPool>
 
 struct ScreenShareSession {
 	QString streamID;
@@ -97,6 +96,8 @@ public:
 	bool hasDetachedWindow(const QString &streamID) const;
 	bool hasRunningExternalRuntime(const QString &streamID) const;
 	bool focusOrReopenDetachedWindow(const QString &streamID);
+	QObject *viewBackend(const QString &streamID) const;
+	void dockView(const QString &streamID);
 	bool isUsingFallbackRuntime(const QString &streamID) const;
 	bool isUsingNativeGpuRuntime(const QString &streamID) const;
 	void requestStartChannelShare(unsigned int channelID = 0,
@@ -129,7 +130,7 @@ private:
 	bool shouldAutoViewSession(const ScreenShareSession &session) const;
 	bool restartExternalViewSession(const ScreenShareSession &session);
 	void retryExternalViewSession(const QString &streamID);
-	void showExternalViewWindow(const ScreenShareSession &session, qint64 processID);
+	void ensureViewBackend(const ScreenShareSession &session, qint64 processID);
 	void updateViewBackendIdentity(ScreenShareViewBackend *backend, const ScreenShareSession &session) const;
 	void startLocalPublishSession(const ScreenShareSession &session);
 	void startLocalViewSession(const ScreenShareSession &session);
@@ -180,7 +181,6 @@ private:
 	ScreenShareOperationTracker m_viewOperationTracker;
 	QHash< QString, QPair< quint64, int > > m_publishStopRetries;
 	QHash< QString, QPair< quint64, int > > m_viewStopRetries;
-	QThreadPool m_helperOperationPool;
 };
 
 #endif // MUMBLE_MUMBLE_SCREENSHAREMANAGER_H_

@@ -26348,6 +26348,8 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	const bool usingNativeGpu     = selfOwned && m_screenShareManager->isUsingNativeGpuRuntime(streamID);
 
 	shareState.insert(QStringLiteral("streamId"), streamID);
+	shareState.insert(QStringLiteral("backend"),
+		QVariant::fromValue(m_screenShareManager->viewBackend(streamID)));
 	shareState.insert(QStringLiteral("ownerLabel"), ownerLabel);
 	shareState.insert(QStringLiteral("ownerSession"), static_cast< qulonglong >(session.ownerSession));
 	shareState.insert(QStringLiteral("detachedWindowOpen"), detachedWindowOpen);
@@ -26382,7 +26384,7 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(
 			QStringLiteral("screenShareStop"), tr("Stop sharing"), true, false, QStringLiteral("danger")));
 	} else if (viewing || viewPending) {
-		const bool viewerWindowOpen = detachedWindowOpen;
+		const bool viewerWindowOpen = viewing;
 		shareState.insert(QStringLiteral("mode"),
 						  usingFallback ? QStringLiteral("fallback")
 										: (viewPending ? QStringLiteral("connecting")
@@ -26411,7 +26413,7 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		shareState.insert(QStringLiteral("mode"), canWatch || !joinedRoom ? QStringLiteral("available") : QStringLiteral("error"));
 		shareState.insert(QStringLiteral("statusLabel"), tr("%1 is sharing in this room").arg(ownerLabel));
 		shareState.insert(QStringLiteral("statusTone"), canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
-		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), canWatch, unavailableReason,
+		setPrimaryAction(QStringLiteral("screenShareWatch"), tr("Watch share"), canWatch, unavailableReason,
 						 canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
 	}
 
@@ -26434,10 +26436,12 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	}
 	QString loadingStateKey;
 	QString loadingLabel;
+	QString historyError;
 	if (target.valid && !target.serverLog && !target.directMessage && !target.ephemeralTextPath
 		&& m_persistentChatController) {
 		const PersistentChatScopeStateSnapshot activeSnapshot = m_persistentChatController->activeSnapshot();
 		if (activeSnapshot.key.matches(target.scope, target.scopeID)) {
+			historyError = activeSnapshot.errorMessage;
 			switch (activeSnapshot.loadingState) {
 				case PersistentChatLoadingState::Initial:
 					loadingStateKey = QStringLiteral("initial");
@@ -26537,7 +26541,7 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 						   : QStringLiteral("text"));
 	activeScope.insert(QStringLiteral("label"), target.label.isEmpty() ? tr("No room selected") : target.label);
 	activeScope.insert(QStringLiteral("description"), scopeDescription);
-	activeScope.insert(QStringLiteral("banner"), target.statusMessage);
+	activeScope.insert(QStringLiteral("banner"), historyError.isEmpty() ? target.statusMessage : historyError);
 	activeScope.insert(QStringLiteral("meta"), scopeMeta);
 	activeScope.insert(QStringLiteral("loading"), !loadingStateKey.isEmpty());
 	activeScope.insert(QStringLiteral("loadingState"), loadingStateKey);
@@ -26565,7 +26569,7 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	activeScope.insert(QStringLiteral("canAttachImages"),
 					   canSendToTarget && (supportsNativeAttachments || Global::get().bAllowHTML));
 	activeScope.insert(QStringLiteral("canAttachFiles"), canSendToTarget && supportsNativeAttachments);
-	activeScope.insert(QStringLiteral("emptyCopy"), target.serverLog
+	activeScope.insert(QStringLiteral("emptyCopy"), !historyError.isEmpty() ? historyError : target.serverLog
 		? tr("No server log entries are available yet.")
 		: (target.readOnly ? tr("This conversation is read-only.")
 						   : tr("Messages will appear here once the selected room has activity.")));
@@ -28208,9 +28212,7 @@ bool MainWindow::appendModernPersistentDirectMessage(const MumbleProto::ChatMess
 	conversation.label             = peer->qsName;
 	conversation.subtitle          = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
 	conversation.persistentHistory = true;
-	conversation.historyLoaded     = true;
-	conversation.historyLoading    = false;
-	conversation.historyError.clear();
+	// A live message must not complete or clear a concurrent history request.
 
 	const QString key = QStringLiteral("%1:%2")
 							.arg(static_cast< qulonglong >(message.thread_id()))
@@ -28360,21 +28362,37 @@ bool MainWindow::mergeModernDirectMessageHistory(const MumbleProto::ChatHistoryR
 		return false;
 	}
 
-	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[peer->uiSession];
-	conversation.peerSession       = peer->uiSession;
-	conversation.peerUserID        = response.scope_id();
-	conversation.label             = peer->qsName;
-	conversation.subtitle          = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
-	conversation.persistentHistory = true;
-	conversation.historyLoading    = false;
-	conversation.historyLoaded     = true;
-	conversation.historyError.clear();
-	if (response.has_last_read_message_id()) {
-		conversation.lastReadMessageID = response.last_read_message_id();
+	const auto conversationIt = m_modernDirectMessageConversations.find(peer->uiSession);
+	if (conversationIt == m_modernDirectMessageConversations.end() || !m_persistentChatGateway) return true;
+	ModernDirectMessageConversation &conversation = conversationIt.value();
+	if (!conversation.historyLoading || conversation.peerUserID != response.scope_id()
+		|| conversation.historyConnectionGeneration != m_persistentChatGateway->connectionGeneration()) return true;
+	if (response.has_request_id()) {
+		if (response.request_id() != conversation.historyRequestID) return true;
+		conversation.historyReplyCorrelation = true;
+	} else if (conversation.historyReplyCorrelation || conversation.historyLegacyAmbiguous) {
+		return true;
 	}
+	if (response.error() != MumbleProto::ChatHistoryResponse::NoError) {
+		conversation.historyLoading = false;
+		conversation.historyError = response.has_error_message() && !u8(response.error_message()).trimmed().isEmpty()
+			? u8(response.error_message()) : tr("Direct-message history is unavailable.");
+	} else {
+		conversation.peerSession       = peer->uiSession;
+		conversation.peerUserID        = response.scope_id();
+		conversation.label             = peer->qsName;
+		conversation.subtitle          = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
+		conversation.persistentHistory = true;
+		conversation.historyLoading    = false;
+		conversation.historyLoaded     = true;
+		conversation.historyError.clear();
+		if (response.has_last_read_message_id()) {
+			conversation.lastReadMessageID = response.last_read_message_id();
+		}
 
-	for (int i = 0; i < response.messages_size(); ++i) {
-		appendModernPersistentDirectMessage(response.messages(i), false, false);
+		for (int i = 0; i < response.messages_size(); ++i) {
+			appendModernPersistentDirectMessage(response.messages(i), false, false);
+		}
 	}
 	publishQmlDirectMessagesState();
 	return true;
@@ -28395,6 +28413,8 @@ bool MainWindow::setModernDirectMessageMode(const unsigned int session, const QS
 		const QString unavailableReason = modernDirectMessagePersistentHistoryUnavailableReason(peer);
 		if (!unavailableReason.isEmpty()) {
 			conversation.persistentHistory = false;
+			if (conversation.historyLoading && !conversation.historyReplyCorrelation)
+				conversation.historyLegacyAmbiguous = true;
 			conversation.historyLoading    = false;
 			conversation.historyError      = unavailableReason;
 			publishModernToast(QStringLiteral("error"), tr("Direct messages"), conversation.historyError);
@@ -28410,6 +28430,8 @@ bool MainWindow::setModernDirectMessageMode(const unsigned int session, const QS
 	}
 
 	conversation.persistentHistory = false;
+	if (conversation.historyLoading && !conversation.historyReplyCorrelation)
+		conversation.historyLegacyAmbiguous = true;
 	conversation.historyLoading    = false;
 	conversation.historyError.clear();
 	publishModernToast(QStringLiteral("info"), tr("Direct messages"), tr("Private DM mode enabled for this window."));
@@ -28417,19 +28439,57 @@ bool MainWindow::setModernDirectMessageMode(const unsigned int session, const QS
 	return true;
 }
 
-void MainWindow::requestModernDirectMessageHistory(const unsigned int session) {
+bool MainWindow::prepareModernDirectMessageHistoryRequest(const unsigned int session, const quint64 requestID) {
 	ClientUser *peer = ClientUser::get(session);
-	if (!peer || !m_persistentChatGateway || !modernDirectMessagePersistentHistoryAvailable(peer)) {
-		return;
-	}
-
+	if (!peer || !m_persistentChatGateway || !modernDirectMessagePersistentHistoryAvailable(peer)) return false;
 	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
-	conversation.peerSession    = session;
-	conversation.peerUserID     = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
+	const quint64 connectionGeneration = m_persistentChatGateway->connectionGeneration();
+	if (conversation.historyConnectionGeneration != connectionGeneration) {
+		conversation.historyReplyCorrelation = false;
+		conversation.historyLegacyAmbiguous = false;
+		conversation.historyLoading = false;
+	}
+	if (conversation.historyLoading) return false;
+	if (conversation.historyLegacyAmbiguous && !conversation.historyReplyCorrelation) {
+		conversation.historyError = tr("History timed out. Reconnect before retrying on this server.");
+		return false;
+	}
+	conversation.peerSession = session;
+	conversation.peerUserID = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
+	conversation.historyRequestID = requestID;
+	conversation.historyConnectionGeneration = connectionGeneration;
 	conversation.historyLoading = true;
 	conversation.historyError.clear();
+	const unsigned int peerUserID = conversation.peerUserID;
+	QTimer::singleShot(15000, this, [this, session, peerUserID, requestID, connectionGeneration]() {
+		auto it = m_modernDirectMessageConversations.find(session);
+		if (it == m_modernDirectMessageConversations.end() || !m_persistentChatGateway
+			|| m_persistentChatGateway->connectionGeneration() != connectionGeneration) return;
+		ModernDirectMessageConversation &pending = it.value();
+		if (!pending.historyLoading || pending.peerUserID != peerUserID || pending.historyRequestID != requestID
+			|| pending.historyConnectionGeneration != connectionGeneration) return;
+		pending.historyLoading = false;
+		pending.historyLegacyAmbiguous = !pending.historyReplyCorrelation;
+		pending.historyError = pending.historyLegacyAmbiguous
+			? tr("History timed out. Reconnect before retrying on this server.")
+			: tr("History timed out. Try again.");
+		publishQmlDirectMessagesState();
+	});
+	return true;
+}
+
+void MainWindow::requestModernDirectMessageHistory(const unsigned int session) {
+	if (!m_persistentChatGateway) return;
 	syncPersistentChatGatewayHandler();
-	m_persistentChatGateway->requestInitialPage(MumbleProto::Private, conversation.peerUserID);
+	if (++m_nextDirectHistoryRequestID == 0) ++m_nextDirectHistoryRequestID;
+	const quint64 requestID = m_nextDirectHistoryRequestID;
+	if (prepareModernDirectMessageHistoryRequest(session, requestID)) {
+		ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+		if (!m_persistentChatGateway->requestInitialPage(MumbleProto::Private, conversation.peerUserID, requestID)) {
+			conversation.historyLoading = false;
+			conversation.historyError = tr("Direct-message history could not be requested. Try again when connected.");
+		}
+	}
 	publishQmlDirectMessagesState();
 }
 
@@ -28581,31 +28641,30 @@ void MainWindow::warmupModernDirectMessageHistory() {
 	}
 
 	syncPersistentChatGatewayHandler();
-	if (!m_persistentChatGateway->requestWarmupPages(requests, 20)) {
-		return;
-	}
-
-	bool changed = false;
+	if (++m_nextDirectHistoryRequestID == 0) ++m_nextDirectHistoryRequestID;
+	const quint64 requestID = m_nextDirectHistoryRequestID;
+	QList< QPair< MumbleProto::ChatScope, unsigned int > > acceptedRequests;
+	QList< unsigned int > acceptedSessions;
 	for (const unsigned int session : std::as_const(requestedSessions)) {
+		if (!prepareModernDirectMessageHistoryRequest(session, requestID)) continue;
 		ClientUser *peer = ClientUser::get(session);
-		if (!peer) {
-			continue;
-		}
-
 		ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
-		conversation.peerSession       = session;
-		conversation.peerUserID        = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
-		conversation.label             = peer->qsName;
-		conversation.subtitle          = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
+		conversation.label = peer->qsName;
+		conversation.subtitle = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
 		conversation.persistentHistory = true;
-		conversation.historyLoading    = true;
-		conversation.historyError.clear();
-		changed = true;
+		acceptedRequests.push_back(qMakePair(MumbleProto::Private, conversation.peerUserID));
+		acceptedSessions.push_back(session);
 	}
+	if (!acceptedRequests.isEmpty()
+		&& !m_persistentChatGateway->requestWarmupPages(acceptedRequests, 20, requestID)) {
+		for (const unsigned int session : std::as_const(acceptedSessions)) {
+			ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+			conversation.historyLoading = false;
+			conversation.historyError = tr("Direct-message history could not be requested. Try again when connected.");
+		}
+	}
+	publishQmlDirectMessagesState();
 
-	if (changed) {
-		publishQmlDirectMessagesState();
-	}
 }
 
 bool MainWindow::sendModernDirectMessage(const unsigned int session, const QString &message,
@@ -28936,7 +28995,8 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 					m_screenShareManager->requestStopShare(streamID);
 					handled = true;
 				} else if (normalizedActionID == QLatin1String("screenShareWatch")) {
-					handled = openScreenShareWindowOrStatus(streamID);
+					m_screenShareManager->requestStartViewing(streamID);
+					handled = true;
 				} else if (normalizedActionID == QLatin1String("screenShareStopWatching")) {
 					m_screenShareManager->requestStopViewing(streamID);
 					handled = true;
@@ -29446,7 +29506,8 @@ bool MainWindow::handleModernShellParticipantAction(const qulonglong session, co
 				m_screenShareManager->requestStopShare(streamID);
 				handled = true;
 			} else if (normalizedActionID == QLatin1String("screenShareWatch")) {
-				handled = openScreenShareWindowOrStatus(streamID);
+				m_screenShareManager->requestStartViewing(streamID);
+				handled = true;
 			} else if (normalizedActionID == QLatin1String("screenShareStopWatching")) {
 				m_screenShareManager->requestStopViewing(streamID);
 				handled = true;
@@ -39325,7 +39386,8 @@ void MainWindow::refreshPersistentChatView(bool forceReload) {
 											   forceReload, historyAvailable);
 	const PersistentChatScopeStateSnapshot snapshot = m_persistentChatController->activeSnapshot();
 	if (historyAvailable && !snapshot.initialLoaded && snapshot.messages.isEmpty()) {
-		renderPersistentChatView(tr("Loading %1...").arg(target.label));
+		renderPersistentChatView(snapshot.errorMessage.isEmpty()
+			? tr("Loading %1...").arg(target.label) : snapshot.errorMessage);
 		return;
 	}
 
@@ -42289,28 +42351,16 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		return true;
 	}
 
-	bool startedViewing = false;
-	if (!m_screenShareManager->isViewingSession(streamID)) {
+	if (!m_screenShareManager->viewBackend(streamID)) {
 		if (!m_screenShareManager->canViewSession(streamID)) {
 			notifyScreenShareIssue(tr("The screen-share window could not be opened right now."));
 			return false;
 		}
-
 		m_screenShareManager->requestStartViewing(streamID);
-		startedViewing = m_screenShareManager->isViewingSession(streamID);
 		scheduleQmlRoomStateUpdate();
 	}
-
 	const bool opened = m_screenShareManager->focusOrReopenDetachedWindow(streamID);
-	if (startedViewing) {
-		for (const int delayMsec : { 350, 1000, 2500, 5000 }) {
-			QTimer::singleShot(delayMsec, this, [this, streamID]() {
-				if (m_screenShareManager && m_screenShareManager->isViewingSession(streamID)) {
-					m_screenShareManager->focusOrReopenDetachedWindow(streamID);
-				}
-			});
-		}
-	}
+
 	if (!opened) {
 		if (m_screenShareManager->isViewingSession(streamID)) {
 			if (m_screenShareManager->hasRunningExternalRuntime(streamID)) {

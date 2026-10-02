@@ -7,6 +7,8 @@
 
 #include "ScreenShare.h"
 #include "ScreenShareExternalProcess.h"
+#include "ScreenShareProcessJob.h"
+#include "ScreenShareProcessOwner.h"
 #include "ScreenShareIPC.h"
 #include "ScreenShareFrameTransport.h"
 #include "ScreenShareRelayClient.h"
@@ -17,23 +19,52 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
-#include <QtCore/QElapsedTimer>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonParseError>
 #include <QtCore/QProcess>
-#include <QtCore/QStandardPaths>
-#include <QtCore/QThread>
+#include <QtCore/QTemporaryDir>
 #include <QtCore/QUrl>
 #include <QtCore/QUuid>
 #include <QtNetwork/QLocalSocket>
 
-#include <limits>
-
 namespace {
 constexpr int IDLE_TIMEOUT_MSEC        = 30000;
 constexpr int SELF_TEST_FILE_WAIT_MSEC = 5000;
+
+struct ProcessOwnerIdentity {
+	bool present = false;
+	bool valid = true;
+	qint64 processID = 0;
+	QString identity;
+	quint64 sequence = 0;
+};
+
+ProcessOwnerIdentity processOwnerFromPayload(const QJsonObject &payload) {
+	ProcessOwnerIdentity owner;
+	owner.present = payload.contains(QStringLiteral("owner_process_id"))
+		|| payload.contains(QStringLiteral("owner_process_identity"))
+		|| payload.contains(QStringLiteral("owner_operation_sequence"));
+	if (!owner.present) return owner;
+	bool validProcess = false;
+	bool validIdentity = false;
+	owner.processID = payload.value(QStringLiteral("owner_process_id")).toVariant().toLongLong(&validProcess);
+	const quint64 identity = payload.value(QStringLiteral("owner_process_identity")).toString().toULongLong(&validIdentity, 16);
+	owner.valid = validProcess && owner.processID > 0 && validIdentity && identity != 0;
+	owner.identity = QString::number(identity, 16);
+	if (payload.contains(QStringLiteral("owner_operation_sequence"))) {
+		bool validSequence = false;
+		owner.sequence = payload.value(QStringLiteral("owner_operation_sequence")).toString().toULongLong(&validSequence);
+		owner.valid = owner.valid && validSequence && owner.sequence > 0;
+	}
+	return owner;
+}
+
+bool ownerMayReplace(const ProcessOwnerIdentity &owner, const ScreenShareHelperServer::ManagedSession &session) {
+	return session.ownerProcessID == 0 || (owner.present && owner.processID == session.ownerProcessID
+		&& owner.identity == session.ownerProcessIdentity);
+}
 
 QString streamIDFromPayload(const QJsonObject &payload) {
 	return payload.value(QStringLiteral("stream_id")).toString().trimmed();
@@ -101,17 +132,6 @@ QJsonArray stringListToJson(const QStringList &values) {
 	return array;
 }
 
-QString redactEndpointForLog(const QString &endpointUrl) {
-	const QUrl url(endpointUrl);
-	if (!url.isValid() || url.scheme().trimmed().toLower() == QLatin1String("file")) {
-		return endpointUrl;
-	}
-
-	QUrl redacted = url;
-	redacted.setQuery(QString());
-	return redacted.toString(QUrl::FullyEncoded);
-}
-
 bool replySucceeded(const QJsonObject &reply, QString *errorMessage = nullptr) {
 	return Mumble::ScreenShare::IPC::replySucceeded(reply, errorMessage);
 }
@@ -151,26 +171,13 @@ QJsonObject makeSelfTestPayload(const QString &streamID, const QString &relayUrl
 	return payload;
 }
 
-bool waitForFileToAppear(const QString &filePath, qint64 *fileSize = nullptr) {
-	const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + SELF_TEST_FILE_WAIT_MSEC;
-	while (QDateTime::currentMSecsSinceEpoch() < deadline) {
-		const QFileInfo fileInfo(filePath);
-		if (fileInfo.exists() && fileInfo.isFile() && fileInfo.size() > 0) {
-			if (fileSize) {
-				*fileSize = fileInfo.size();
-			}
-			return true;
-		}
-
-		QThread::msleep(100);
-	}
-
-	if (fileSize) {
-		*fileSize = QFileInfo(filePath).size();
-	}
-	return false;
-}
 } // namespace
+
+struct ScreenShareHelperServer::OwnerOperations {
+	std::unique_ptr< ScreenShareProcessOwner > process;
+	// Keep stop tombstones until this exact owner exits, including absent jobs.
+	QHash< QString, QPair< quint64, bool > > latest;
+};
 
 ScreenShareHelperServer::ScreenShareHelperServer(QObject *parent)
 	: QObject(parent), m_server(new QLocalServer(this)), m_capabilities(ScreenShareMediaSupport::probe()) {
@@ -232,6 +239,7 @@ void ScreenShareHelperServer::handleSocketReadyRead() {
 	if (!socket || !m_socketBuffers.contains(socket)) {
 		return;
 	}
+	if (socket->state() != QLocalSocket::ConnectedState) return;
 
 	QByteArray &buffer = m_socketBuffers[socket];
 	buffer.append(socket->readAll());
@@ -246,22 +254,22 @@ void ScreenShareHelperServer::handleSocketReadyRead() {
 	// whole buffer, so a fragmented or pipelined send is not silently truncated.
 	buffer.remove(0, newlineIndex + 1);
 
-	QJsonObject reply;
-	if (rawRequest.isEmpty()) {
-		reply = Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Empty request."));
-	} else {
-		QJsonParseError parseError;
-		const QJsonDocument requestDoc = QJsonDocument::fromJson(rawRequest, &parseError);
-		if (parseError.error != QJsonParseError::NoError || !requestDoc.isObject()) {
-			reply = Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Malformed JSON request."));
-		} else {
-			reply = dispatchRequest(requestDoc.object());
-		}
+	const QPointer< QLocalSocket > guardedSocket(socket);
+	const auto reply = [guardedSocket](const QJsonObject &result) {
+		if (!guardedSocket || guardedSocket->state() != QLocalSocket::ConnectedState) return;
+		guardedSocket->write(serializeReply(result));
+		guardedSocket->flush();
+		guardedSocket->disconnectFromServer();
+	};
+	if (rawRequest.isEmpty()) { reply(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Empty request."))); return; }
+	QJsonParseError parseError;
+	const QJsonDocument requestDoc = QJsonDocument::fromJson(rawRequest, &parseError);
+	if (parseError.error != QJsonParseError::NoError || !requestDoc.isObject()) {
+		reply(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Malformed JSON request."))); return;
 	}
-
-	socket->write(serializeReply(reply));
-	socket->flush();
-	socket->disconnectFromServer();
+	// One request per connection, with a deferred response for starting/stopping jobs.
+	disconnect(socket, &QLocalSocket::readyRead, this, &ScreenShareHelperServer::handleSocketReadyRead);
+	dispatchRequest(requestDoc.object(), reply, socket);
 }
 
 void ScreenShareHelperServer::handleSocketDisconnected() {
@@ -270,6 +278,14 @@ void ScreenShareHelperServer::handleSocketDisconnected() {
 		return;
 	}
 
+	// Successful start replies close their socket too. Only an unfinished start is cancelled.
+	for (auto *sessions : { &m_publishSessions, &m_viewSessions }) {
+		const auto snapshot = *sessions;
+		for (auto it = snapshot.cbegin(); it != snapshot.cend(); ++it) {
+			if (it->requestSocket == socket && it->job && it->job->state() != ScreenShareProcessJob::State::Running)
+				stopSession(*sessions, it.key());
+		}
+	}
 	m_socketBuffers.remove(socket);
 	socket->deleteLater();
 	refreshIdleTimer();
@@ -285,36 +301,23 @@ void ScreenShareHelperServer::handleIdleTimeout() {
 	QCoreApplication::quit();
 }
 
-QJsonObject ScreenShareHelperServer::dispatchRequest(const QJsonObject &request) {
+void ScreenShareHelperServer::dispatchRequest(const QJsonObject &request, ReplyCallback callback, QLocalSocket *socket) {
 	const int version = request.value(QStringLiteral("version")).toInt();
 	if (version < Mumble::ScreenShare::IPC::MINIMUM_PROTOCOL_VERSION
 		|| version > Mumble::ScreenShare::IPC::PROTOCOL_VERSION) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unsupported protocol version."));
+		callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unsupported protocol version."))); return;
 	}
-
-	const QString commandName = request.value(QStringLiteral("command")).toString();
-	const std::optional< Mumble::ScreenShare::IPC::Command > command =
-		Mumble::ScreenShare::IPC::commandFromName(commandName);
-	if (!command.has_value()) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unknown command."));
-	}
-
+	const auto command = Mumble::ScreenShare::IPC::commandFromName(request.value(QStringLiteral("command")).toString());
+	if (!command) { callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unknown command."))); return; }
 	QJsonObject payload = request.value(QStringLiteral("payload")).toObject();
 	if (version < 2) payload.insert(QStringLiteral("native_frame_requested"), false);
 	switch (*command) {
-		case Mumble::ScreenShare::IPC::Command::QueryCapabilities:
-			return handleQueryCapabilities();
-		case Mumble::ScreenShare::IPC::Command::StartPublish:
-			return handleStartPublish(payload);
-		case Mumble::ScreenShare::IPC::Command::StopPublish:
-			return handleStopPublish(payload);
-		case Mumble::ScreenShare::IPC::Command::StartView:
-			return handleStartView(payload);
-		case Mumble::ScreenShare::IPC::Command::StopView:
-			return handleStopView(payload);
+		case Mumble::ScreenShare::IPC::Command::QueryCapabilities: callback(handleQueryCapabilities()); break;
+		case Mumble::ScreenShare::IPC::Command::StartPublish: startSession(payload, true, callback, socket); break;
+		case Mumble::ScreenShare::IPC::Command::StartView: startSession(payload, false, callback, socket); break;
+		case Mumble::ScreenShare::IPC::Command::StopPublish: stopSessionRequest(payload, true, callback); break;
+		case Mumble::ScreenShare::IPC::Command::StopView: stopSessionRequest(payload, false, callback); break;
 	}
-
-	return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unhandled command."));
 }
 
 QJsonObject ScreenShareHelperServer::capabilityPayload() const {
@@ -371,320 +374,183 @@ QJsonObject ScreenShareHelperServer::handleQueryCapabilities() const {
 	return Mumble::ScreenShare::IPC::makeSuccessReply(capabilityPayload());
 }
 
-QJsonObject ScreenShareHelperServer::runSelfTest() {
-	const QString tempBase = QStandardPaths::writableLocation(QStandardPaths::TempLocation).trimmed().isEmpty()
-								 ? QDir::tempPath()
-								 : QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-	const QString relayDirectory = QDir(tempBase).filePath(QStringLiteral("mumble-screen-share/self-test-relay"));
-	QDir(relayDirectory).removeRecursively();
-	QDir().mkpath(relayDirectory);
-
-	const QString streamID = QStringLiteral("self-test-%1").arg(QString::number(QDateTime::currentMSecsSinceEpoch()));
-	const QString relayRoomID = QStringLiteral("room-%1").arg(streamID);
-	const QString relayUrl    = QUrl::fromLocalFile(relayDirectory + QDir::separator()).toString();
-
-	const QJsonObject publishPayload =
-		makeSelfTestPayload(streamID, relayUrl, relayRoomID, MumbleProto::ScreenShareRelayRolePublisher);
-	const QJsonObject publishReply = handleStartPublish(publishPayload);
-	QString errorMessage;
-	if (!replySucceeded(publishReply, &errorMessage)) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(
-			QStringLiteral("Self-test publish start failed: %1").arg(errorMessage), publishReply);
+void ScreenShareHelperServer::startSession(const QJsonObject &payload, bool publish, ReplyCallback callback,
+										   QLocalSocket *socket) {
+	const auto owner = processOwnerFromPayload(payload);
+	if (!owner.valid) {
+		callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Invalid client process ownership."))); return;
 	}
-
-	const QJsonObject publishResult = publishReply.value(QStringLiteral("payload")).toObject();
-	const QString outputUrl         = publishResult.value(QStringLiteral("active_endpoint_url")).toString();
-	const QString outputPath        = QUrl(outputUrl).toLocalFile();
-	qint64 outputSize               = 0;
-	if (outputPath.isEmpty() || !waitForFileToAppear(outputPath, &outputSize)) {
-		handleStopPublish(QJsonObject{ { QStringLiteral("stream_id"), streamID } });
-		return Mumble::ScreenShare::IPC::makeErrorReply(
-			QStringLiteral("Self-test did not observe a non-empty relay file."),
-			QJsonObject{
-				{ QStringLiteral("stream_id"), streamID },
-				{ QStringLiteral("active_endpoint_url"), outputUrl },
-				{ QStringLiteral("observed_file_size"), QString::number(outputSize) },
-			});
+	const auto plan = publish ? ScreenShareSessionPlanner::planPublish(payload, m_capabilities)
+							  : ScreenShareSessionPlanner::planView(payload, m_capabilities);
+	if (!plan.valid) { callback(Mumble::ScreenShare::IPC::makeErrorReply(plan.errorMessage)); return; }
+	const QString streamID = streamIDFromPayload(plan.payload);
+	const QString label = publish ? QStringLiteral("publish") : QStringLiteral("view");
+	auto &sessions = publish ? m_publishSessions : m_viewSessions;
+	if (!ownerMayReplace(owner, sessions.value(streamID))) {
+		callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("The session belongs to another client process."))); return;
 	}
-
-	const QJsonObject stopPublishReply = handleStopPublish(QJsonObject{ { QStringLiteral("stream_id"), streamID } });
-	if (!replySucceeded(stopPublishReply, &errorMessage)) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(
-			QStringLiteral("Self-test publish stop failed: %1").arg(errorMessage), stopPublishReply);
+	QString operationError;
+	if (owner.present && !acceptOwnerOperation(owner.processID, owner.identity, streamID,
+		publish, false, owner.sequence, &operationError)) {
+		callback(Mumble::ScreenShare::IPC::makeErrorReply(operationError)); return;
 	}
-
-	const QJsonObject viewPayload =
-		makeSelfTestPayload(streamID, relayUrl, relayRoomID, MumbleProto::ScreenShareRelayRoleViewer);
-	const QJsonObject viewReply = handleStartView(viewPayload);
-	if (!replySucceeded(viewReply, &errorMessage)) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(
-			QStringLiteral("Self-test view start failed: %1").arg(errorMessage), viewReply);
+	auto *job = new ScreenShareProcessJob([plan, publish](int attempt, QObject *processParent) {
+		QJsonObject attemptPlan = plan.payload;
+		attemptPlan.insert(QStringLiteral("_launch_attempt"), attempt);
+		return publish ? ScreenShareExternalProcess::preparePublish(attemptPlan, processParent)
+					   : ScreenShareExternalProcess::prepareView(attemptPlan, processParent);
+	}, this);
+	QString ownerError;
+	if (owner.present && !job->bindOwnerProcess(owner.processID, owner.identity, &ownerError)) {
+		delete job;
+		callback(Mumble::ScreenShare::IPC::makeErrorReply(ownerError)); return;
 	}
-
-	QThread::msleep(500);
-	const QJsonObject stopViewReply = handleStopView(QJsonObject{ { QStringLiteral("stream_id"), streamID } });
-	if (!replySucceeded(stopViewReply, &errorMessage)) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(
-			QStringLiteral("Self-test view stop failed: %1").arg(errorMessage), stopViewReply);
-	}
-
-	QJsonObject result;
-	result.insert(QStringLiteral("stream_id"), streamID);
-	result.insert(QStringLiteral("relay_url"), relayUrl);
-	result.insert(QStringLiteral("relay_room_id"), relayRoomID);
-	result.insert(QStringLiteral("output_file"), outputPath);
-	result.insert(QStringLiteral("output_size"), QString::number(outputSize));
-	result.insert(QStringLiteral("publish_reply"), publishResult);
-	result.insert(QStringLiteral("view_reply"), viewReply.value(QStringLiteral("payload")).toObject());
-	result.insert(QStringLiteral("runtime_support"),
-				  ScreenShareExternalProcess::runtimeSupportToJson(ScreenShareExternalProcess::probeRuntimeSupport()));
-	return Mumble::ScreenShare::IPC::makeSuccessReply(result);
-}
-
-QJsonObject ScreenShareHelperServer::handleStartPublish(const QJsonObject &payload) {
-	const QString requestedStreamID = streamIDFromPayload(payload);
-	const QString requestedCodec    = codecTokenFromPayload(payload);
-	qInfo().noquote() << QStringLiteral("ScreenShareHelper: received start-publish stream=%1 codec=%2")
-							 .arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
-								  requestedCodec.isEmpty() ? QStringLiteral("-") : requestedCodec);
-	const ScreenShareSessionPlanner::Plan plan = ScreenShareSessionPlanner::planPublish(payload, m_capabilities);
-	if (!plan.valid) {
-		qWarning().noquote() << QStringLiteral("ScreenShareHelper: rejected start-publish stream=%1: %2")
-									.arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
-										 plan.errorMessage);
-		return Mumble::ScreenShare::IPC::makeErrorReply(plan.errorMessage);
-	}
-	logSessionPlanSummary(plan.payload, QStringLiteral("publish"), QStringLiteral("planned"));
-
-	const QString streamID = plan.payload.value(QStringLiteral("stream_id")).toString();
-	stopSession(m_publishSessions, streamID);
-
-	ScreenShareExternalProcess::LaunchResult launch = ScreenShareExternalProcess::startPublish(plan.payload, this);
-	if (!launch.started) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(launch.errorMessage, plan.payload);
-	}
-
+	const auto previous = sessions.take(streamID);
+	const bool waitForPrevious = previous.job && previous.job->state() != ScreenShareProcessJob::State::Terminal;
 	ManagedSession session;
 	session.payload = plan.payload;
-	session.process = launch.process;
-	session.payload.insert(QStringLiteral("mode"),
-						   launch.usedStub ? QStringLiteral("publish-stub") : QStringLiteral("publish-live"));
-	session.payload.insert(QStringLiteral("execution_mode"), launch.executionMode);
-	if (!launch.endpointUrl.isEmpty()) {
-		session.payload.insert(QStringLiteral("active_endpoint_url"), launch.endpointUrl);
+	session.job = job;
+	session.requestSocket = socket;
+	session.ownerProcessID = owner.processID;
+	session.ownerProcessIdentity = owner.identity;
+	// Registration precedes both process preparation and start, including replacement shutdown.
+	sessions.insert(streamID, session);
+	job->terminated = [this, job, streamID, publish]() {
+		auto &current = publish ? m_publishSessions : m_viewSessions;
+		if (current.value(streamID).job == job) current.remove(streamID);
+		job->deleteLater();
+		refreshIdleTimer();
+	};
+	job->start([this, job, streamID, publish, label, callback](bool success, const QString &error) {
+		auto &current = publish ? m_publishSessions : m_viewSessions;
+		if (!success || current.value(streamID).job != job) {
+			callback(Mumble::ScreenShare::IPC::makeErrorReply(error.isEmpty()
+				? QStringLiteral("Screen sharing startup was superseded.") : error));
+			return;
+		}
+		auto &active = current[streamID];
+		const auto &launch = job->launch();
+		const QString mode = label + (launch.usedStub ? QStringLiteral("-stub") : QStringLiteral("-live"));
+		active.payload.insert(QStringLiteral("mode"), mode);
+		active.payload.insert(QStringLiteral("execution_mode"), launch.executionMode);
+		active.payload.insert(QStringLiteral("active_endpoint_url"), launch.endpointUrl);
+		active.payload.insert(QStringLiteral("active_encoder_backend"), launch.selectedEncoder);
+		active.payload.insert(QStringLiteral("active_capture_source"), launch.selectedCaptureSource);
+		active.payload.insert(QStringLiteral("active_renderer_backend"), launch.selectedRenderer);
+		active.payload.insert(QStringLiteral("active_process_id"), QString::number(launch.processID));
+		active.payload.insert(QStringLiteral("actual_fps"), active.payload.value(QStringLiteral("fps")));
+		active.payload.insert(QStringLiteral("actual_bitrate_kbps"), active.payload.value(QStringLiteral("bitrate_kbps")));
+		active.payload.insert(QStringLiteral("dropped_frames"), 0);
+		active.payload.insert(QStringLiteral("adaptive_downgrade_reason"), QString());
+		active.payload.insert(QStringLiteral("native_frame_feed_available"), !job->frameKey().isEmpty());
+		active.payload.insert(QStringLiteral("native_frame_shared_memory_key"), job->frameKey());
+		active.payload.insert(QStringLiteral("native_frame_generation"), QString::number(job->frameGeneration()));
+		appendWarnings(&active.payload, launch.warnings);
+		logSessionPlanSummary(active.payload, label, QStringLiteral("ready"));
+		logPayloadWarnings(active.payload, label, streamID);
+		attachProcessLogging(streamID, publish, label);
+		// Clearing request ownership before the success reply distinguishes normal socket close from cancellation.
+		active.requestSocket.clear();
+		callback(Mumble::ScreenShare::IPC::makeSuccessReply(active.payload));
+	}, waitForPrevious);
+	if (waitForPrevious) {
+		auto *oldJob = previous.job.data();
+		const auto terminated = oldJob->terminated;
+		const QPointer< ScreenShareProcessJob > replacement(job);
+		oldJob->terminated = [terminated, replacement]() {
+			if (terminated) terminated();
+			if (replacement) replacement->resumeStart();
+		};
+		oldJob->cancel();
 	}
-	if (!launch.selectedEncoder.isEmpty()) {
-		session.payload.insert(QStringLiteral("active_encoder_backend"), launch.selectedEncoder);
-	}
-	if (!launch.selectedCaptureSource.isEmpty()) {
-		session.payload.insert(QStringLiteral("active_capture_source"), launch.selectedCaptureSource);
-	}
-	if (launch.processID > 0) {
-		session.payload.insert(QStringLiteral("active_process_id"), QString::number(launch.processID));
-	}
-	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
-	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
-						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
-	session.payload.insert(QStringLiteral("dropped_frames"), 0);
-	session.payload.insert(QStringLiteral("adaptive_downgrade_reason"), QString());
-	appendWarnings(&session.payload, launch.warnings);
-	logSessionPlanSummary(session.payload, QStringLiteral("publish"), QStringLiteral("started"));
-	logPayloadWarnings(session.payload, QStringLiteral("publish"), streamID);
-	m_publishSessions.insert(streamID, session);
-	if (launch.process) {
-		attachProcessLogging(streamID, true, QStringLiteral("publish"));
-	}
-	qInfo().nospace() << "ScreenShareHelper: started publish session " << streamID << " via "
-					  << session.payload.value(QStringLiteral("active_encoder_backend"))
-							 .toString(session.payload.value(QStringLiteral("planned_encoder_backend")).toString())
-					  << " -> "
-					  << redactEndpointForLog(
-							 session.payload.value(QStringLiteral("active_endpoint_url"))
-								 .toString(session.payload.value(QStringLiteral("relay_url")).toString()));
-
 	refreshIdleTimer();
-	return Mumble::ScreenShare::IPC::makeSuccessReply(session.payload);
 }
 
-QJsonObject ScreenShareHelperServer::handleStopPublish(const QJsonObject &payload) {
+void ScreenShareHelperServer::stopSessionRequest(const QJsonObject &payload, bool publish, ReplyCallback callback) {
 	const QString streamID = streamIDFromPayload(payload);
-	if (streamID.isEmpty()) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("stop-publish requires stream_id."));
+	if (streamID.isEmpty()) { callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Stop requires stream_id."))); return; }
+	const auto owner = processOwnerFromPayload(payload);
+	auto &sessions = publish ? m_publishSessions : m_viewSessions;
+	if (!owner.valid || !ownerMayReplace(owner, sessions.value(streamID))) {
+		callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("The session belongs to another client process."))); return;
 	}
-
-	stopSession(m_publishSessions, streamID);
+	QString operationError;
+	if (owner.present && !acceptOwnerOperation(owner.processID, owner.identity, streamID,
+		publish, true, owner.sequence, &operationError)) {
+		callback(Mumble::ScreenShare::IPC::makeErrorReply(operationError)); return;
+	}
+	stopSession(sessions, streamID, [callback, streamID]() {
+		callback(Mumble::ScreenShare::IPC::makeSuccessReply(QJsonObject{ { QStringLiteral("stream_id"), streamID } }));
+	});
 	refreshIdleTimer();
-	return Mumble::ScreenShare::IPC::makeSuccessReply(QJsonObject{ { QStringLiteral("stream_id"), streamID } });
 }
 
-QJsonObject ScreenShareHelperServer::handleStartView(const QJsonObject &payload) {
-	const QString requestedStreamID = streamIDFromPayload(payload);
-	const QString requestedCodec    = codecTokenFromPayload(payload);
-	qInfo().noquote() << QStringLiteral("ScreenShareHelper: received start-view stream=%1 codec=%2")
-							 .arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
-								  requestedCodec.isEmpty() ? QStringLiteral("-") : requestedCodec);
-	const ScreenShareSessionPlanner::Plan plan = ScreenShareSessionPlanner::planView(payload, m_capabilities);
-	if (!plan.valid) {
-		qWarning().noquote() << QStringLiteral("ScreenShareHelper: rejected start-view stream=%1: %2")
-									.arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
-										 plan.errorMessage);
-		return Mumble::ScreenShare::IPC::makeErrorReply(plan.errorMessage);
+bool ScreenShareHelperServer::acceptOwnerOperation(qint64 processID, const QString &identity,
+	const QString &streamID, bool publish, bool stop, quint64 sequence, QString *error) {
+	const QString ownerKey = QString::number(processID) + QLatin1Char(':') + identity;
+	auto operations = m_ownerOperations.value(ownerKey);
+	if (!operations) {
+		operations = std::make_shared< OwnerOperations >();
+		operations->process = std::make_unique< ScreenShareProcessOwner >(this);
+		if (!operations->process->watch(processID, identity, [this, ownerKey]() {
+			QTimer::singleShot(0, this, [this, ownerKey]() { m_ownerOperations.remove(ownerKey); });
+		}, error)) return false;
+		m_ownerOperations.insert(ownerKey, operations);
 	}
-	logSessionPlanSummary(plan.payload, QStringLiteral("view"), QStringLiteral("planned"));
+	const QString streamKey = (publish ? QStringLiteral("publish:") : QStringLiteral("view:")) + streamID;
+	const auto latest = operations->latest.value(streamKey);
+	if (sequence < latest.first || (sequence != 0 && sequence == latest.first && latest.second && !stop)) {
+		if (error) *error = QStringLiteral("The screen sharing operation was superseded.");
+		return false;
+	}
+	// A same-sequence start retry can negotiate a legacy/native fallback. A
+	// stop tombstone cannot be retried as a start, and a lower sequence can
+	// neither resurrect a cancelled job nor stop its newer replacement.
+	if (sequence != 0) operations->latest.insert(streamKey, qMakePair(sequence, stop));
+	return true;
+}
 
-	const QString streamID = plan.payload.value(QStringLiteral("stream_id")).toString();
-	stopSession(m_viewSessions, streamID);
-
-	ScreenShareExternalProcess::LaunchResult launch = ScreenShareExternalProcess::startView(plan.payload, this);
-	if (!launch.started) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(launch.errorMessage, plan.payload);
-	}
-
-	ManagedSession session;
-	session.payload = plan.payload;
-	session.process = launch.process;
-	session.payload.insert(QStringLiteral("mode"),
-						   launch.usedStub ? QStringLiteral("view-stub") : QStringLiteral("view-live"));
-	session.payload.insert(QStringLiteral("execution_mode"), launch.executionMode);
-	if (!launch.endpointUrl.isEmpty()) {
-		session.payload.insert(QStringLiteral("active_endpoint_url"), launch.endpointUrl);
-	}
-	if (!launch.selectedRenderer.isEmpty()) {
-		session.payload.insert(QStringLiteral("active_renderer_backend"), launch.selectedRenderer);
-	}
-	if (launch.processID > 0) {
-		session.payload.insert(QStringLiteral("active_process_id"), QString::number(launch.processID));
-	}
-	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
-	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
-						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
-	session.payload.insert(QStringLiteral("dropped_frames"), 0);
-	const bool testPattern = qEnvironmentVariableIntValue("MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN") == 1;
-	if (launch.nativeFrameFeed && launch.process && !testPattern) {
-		const quint64 frameBytes64 = static_cast< quint64 >(launch.nativeFrameWidth) * launch.nativeFrameHeight * 4U;
-		if (frameBytes64 > 0 && frameBytes64 <= std::numeric_limits< quint32 >::max()) {
-			const quint32 frameBytes = static_cast< quint32 >(frameBytes64);
-			const QString key = QStringLiteral("mumble-screen-frame-%1")
-								.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-			session.nativeFrameTransport = std::make_shared< Mumble::ScreenShare::FrameTransport >();
-			if (session.nativeFrameTransport->create(key, frameBytes)) {
-				const quint64 generation = static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch());
-				session.payload.insert(QStringLiteral("native_frame_shared_memory_key"), key);
-				session.payload.insert(QStringLiteral("native_frame_generation"), QString::number(generation));
-				session.payload.insert(QStringLiteral("native_frame_feed_available"), true);
-				auto transport = session.nativeFrameTransport;
-				auto assembler = std::make_shared< Mumble::ScreenShare::RawBgraFrameAssembler >(frameBytes, 2);
-				auto sequence = std::make_shared< quint64 >(0);
-				auto published = std::make_shared< quint64 >(0);
-				const quint32 width = launch.nativeFrameWidth;
-				const quint32 height = launch.nativeFrameHeight;
-				const auto consumeFrames = [process = launch.process, transport, assembler, sequence, published, generation,
-											 width, height]() {
-							const quint64 droppedBefore = assembler->droppedFrames();
-							const QList< QByteArray > frames = assembler->push(process->readAllStandardOutput());
-							*sequence += assembler->droppedFrames() - droppedBefore;
-							for (const QByteArray &bytes : frames) {
-								Mumble::ScreenShare::NativeFrame frame;
-								frame.generation = generation;
-								frame.sequence = ++*sequence;
-								frame.timestampUsec = QDateTime::currentMSecsSinceEpoch() * 1000;
-								frame.width = width;
-								frame.height = height;
-								frame.stride = width * 4U;
-								frame.bgra = bytes;
-								if (transport->publish(frame)) ++*published;
-							}
-					};
-				connect(launch.process, &QProcess::readyReadStandardOutput, this, consumeFrames);
-				consumeFrames();
-				QElapsedTimer firstFrameTimer;
-				firstFrameTimer.start();
-				while (*published == 0 && launch.process->state() != QProcess::NotRunning
-					   && firstFrameTimer.elapsed() < 10000) {
-					launch.process->waitForReadyRead(100);
-					consumeFrames();
-				}
-				if (*published == 0) {
-					ScreenShareExternalProcess::stop(launch.process);
-					return Mumble::ScreenShare::IPC::makeErrorReply(
-						QStringLiteral("The native decoder did not produce a complete BGRA frame during startup."));
-				}
-			} else {
-				ScreenShareExternalProcess::stop(launch.process);
-				return Mumble::ScreenShare::IPC::makeErrorReply(
-					QStringLiteral("Unable to allocate the bounded native frame shared-memory ring."));
-			}
-		} else {
-			ScreenShareExternalProcess::stop(launch.process);
-			return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Invalid native frame dimensions."));
-		}
-	}
-	// This producer remains test-only; production frames above come from the decoder's bounded raw BGRA pipe.
-	if (testPattern) {
-		if (launch.nativeFrameFeed && launch.process) {
-			const auto drainDecoder = [process = launch.process]() { process->readAllStandardOutput(); };
-			connect(launch.process, &QProcess::readyReadStandardOutput, launch.process, drainDecoder);
-			QTimer::singleShot(0, launch.process, drainDecoder);
-		}
-		const QString key = QStringLiteral("mumble-screen-frame-%1")
-							.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-		session.nativeFrameTransport = std::make_shared< Mumble::ScreenShare::FrameTransport >();
-		if (session.nativeFrameTransport->create(key, 320U * 180U * 4U)) {
-			const quint64 generation = static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch());
-			session.payload.insert(QStringLiteral("native_frame_shared_memory_key"), key);
-			session.payload.insert(QStringLiteral("native_frame_generation"), QString::number(generation));
-			session.payload.insert(QStringLiteral("native_frame_feed_available"), true);
-			session.nativeFrameTimer = new QTimer(this);
-			auto transport = session.nativeFrameTransport;
-			auto sequence = std::make_shared< quint64 >(0);
-			connect(session.nativeFrameTimer, &QTimer::timeout, this, [transport, sequence, generation]() {
-				Mumble::ScreenShare::NativeFrame frame;
-				frame.generation = generation;
-				frame.sequence = ++*sequence;
-				frame.timestampUsec = QDateTime::currentMSecsSinceEpoch() * 1000;
-				frame.width = 320;
-				frame.height = 180;
-				frame.stride = frame.width * 4;
-				frame.bgra.resize(static_cast< qsizetype >(frame.stride) * frame.height);
-				for (qsizetype pixel = 0; pixel < frame.bgra.size(); pixel += 4) {
-					frame.bgra[pixel] = static_cast< char >((*sequence * 3) & 0xff);
-					frame.bgra[pixel + 1] = static_cast< char >((pixel / 4) & 0xff);
-					frame.bgra[pixel + 2] = static_cast< char >((*sequence * 7) & 0xff);
-					frame.bgra[pixel + 3] = static_cast< char >(0xff);
-				}
-				transport->publish(frame);
+void ScreenShareHelperServer::runSelfTest(ReplyCallback callback) {
+	// Each test owns its temporary relay directory. Poll with timers so media and IPC continue to run.
+	const auto directory = std::make_shared< QTemporaryDir >(QDir::tempPath() + QStringLiteral("/mumble-screen-self-test-XXXXXX"));
+	if (!directory->isValid()) { callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unable to create self-test relay."))); return; }
+	const QString streamID = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	const QString relayUrl = QUrl::fromLocalFile(directory->path() + QDir::separator()).toString();
+	const auto payload = makeSelfTestPayload(streamID, relayUrl, streamID, MumbleProto::ScreenShareRelayRolePublisher);
+	startSession(payload, true, [this, directory, streamID, relayUrl, callback](const QJsonObject &publishReply) {
+		if (!replySucceeded(publishReply)) { callback(publishReply); return; }
+		const auto result = publishReply.value(QStringLiteral("payload")).toObject();
+		const QString path = QUrl(result.value(QStringLiteral("active_endpoint_url")).toString()).toLocalFile();
+		auto *poll = new QTimer(this);
+		const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + SELF_TEST_FILE_WAIT_MSEC;
+		connect(poll, &QTimer::timeout, this, [this, directory, streamID, relayUrl, callback, result, path, poll, deadline]() {
+			const qint64 size = QFileInfo(path).size();
+			if (size <= 0 && QDateTime::currentMSecsSinceEpoch() < deadline) return;
+			poll->stop(); poll->deleteLater();
+			stopSession(m_publishSessions, streamID, [this, directory, streamID, relayUrl, callback, result, path, size]() {
+				if (size <= 0) { callback(Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Self-test relay remained empty."))); return; }
+				const auto viewer = makeSelfTestPayload(streamID, relayUrl, streamID, MumbleProto::ScreenShareRelayRoleViewer);
+				startSession(viewer, false, [this, directory, streamID, callback, result, path, size](const QJsonObject &viewReply) {
+					if (!replySucceeded(viewReply)) { callback(viewReply); return; }
+					QTimer::singleShot(500, this, [this, directory, streamID, callback, result, path, size, viewReply]() {
+						stopSession(m_viewSessions, streamID, [directory, streamID, callback, result, path, size, viewReply]() {
+							// Preserve the self-test artifact and its existing JSON contract for diagnostics.
+							directory->setAutoRemove(false);
+							callback(Mumble::ScreenShare::IPC::makeSuccessReply(QJsonObject{
+								{ QStringLiteral("stream_id"), streamID }, { QStringLiteral("relay_room_id"), streamID },
+								{ QStringLiteral("relay_url"), QUrl::fromLocalFile(directory->path() + QDir::separator()).toString() },
+								{ QStringLiteral("output_file"), path }, { QStringLiteral("output_size"), QString::number(size) },
+								{ QStringLiteral("publish_reply"), result },
+								{ QStringLiteral("view_reply"), viewReply.value(QStringLiteral("payload")).toObject() },
+								{ QStringLiteral("runtime_support"), ScreenShareExternalProcess::runtimeSupportToJson(
+									ScreenShareExternalProcess::probeRuntimeSupport()) } }));
+						});
+					});
+				}, nullptr);
 			});
-			session.nativeFrameTimer->start(33);
-		}
-	}
-	if (!session.payload.contains(QStringLiteral("native_frame_feed_available")))
-		session.payload.insert(QStringLiteral("native_frame_feed_available"), false);
-	session.payload.insert(QStringLiteral("adaptive_downgrade_reason"), QString());
-	appendWarnings(&session.payload, launch.warnings);
-	logSessionPlanSummary(session.payload, QStringLiteral("view"), QStringLiteral("started"));
-	logPayloadWarnings(session.payload, QStringLiteral("view"), streamID);
-	m_viewSessions.insert(streamID, session);
-	if (launch.process) {
-		attachProcessLogging(streamID, false, QStringLiteral("view"));
-	}
-	qInfo().nospace() << "ScreenShareHelper: started viewer session " << streamID << " -> "
-					  << redactEndpointForLog(
-							 session.payload.value(QStringLiteral("active_endpoint_url"))
-								 .toString(session.payload.value(QStringLiteral("relay_url")).toString()));
-
-	refreshIdleTimer();
-	return Mumble::ScreenShare::IPC::makeSuccessReply(session.payload);
-}
-
-QJsonObject ScreenShareHelperServer::handleStopView(const QJsonObject &payload) {
-	const QString streamID = streamIDFromPayload(payload);
-	if (streamID.isEmpty()) {
-		return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("stop-view requires stream_id."));
-	}
-
-	stopSession(m_viewSessions, streamID);
-	refreshIdleTimer();
-	return Mumble::ScreenShare::IPC::makeSuccessReply(QJsonObject{ { QStringLiteral("stream_id"), streamID } });
+		});
+		poll->start(100);
+	}, nullptr);
 }
 
 void ScreenShareHelperServer::stopAllSessions() {
@@ -699,19 +565,17 @@ void ScreenShareHelperServer::stopAllSessions() {
 	}
 }
 
-void ScreenShareHelperServer::stopSession(QHash< QString, ManagedSession > &sessions, const QString &streamID) {
-	if (streamID.isEmpty() || !sessions.contains(streamID)) {
-		return;
-	}
-
-	const ManagedSession session = sessions.take(streamID);
-	if (session.nativeFrameTimer) {
-		session.nativeFrameTimer->stop();
-		session.nativeFrameTimer->deleteLater();
-	}
-	if (session.process) {
-		ScreenShareExternalProcess::stop(session.process);
-	}
+void ScreenShareHelperServer::stopSession(QHash< QString, ManagedSession > &sessions, const QString &streamID,
+										std::function< void() > stopped) {
+	// Retain stopping jobs until termination. A replacement must wait for the old
+	// capture/decoder to exit instead of briefly running both processes together.
+	const auto session = sessions.value(streamID);
+	if (!session.job) { if (stopped) stopped(); return; }
+	auto *job = session.job.data();
+	if (job->state() == ScreenShareProcessJob::State::Terminal) { if (stopped) stopped(); return; }
+	const auto previous = job->terminated;
+	job->terminated = [previous, stopped]() { if (previous) previous(); if (stopped) stopped(); };
+	job->cancel();
 }
 
 void ScreenShareHelperServer::logSessionPlanSummary(const QJsonObject &payload, const QString &label,
@@ -757,11 +621,11 @@ void ScreenShareHelperServer::logPayloadWarnings(const QJsonObject &payload, con
 
 void ScreenShareHelperServer::attachProcessLogging(const QString &streamID, const bool publish, const QString &label) {
 	QHash< QString, ManagedSession > &sessions = publish ? m_publishSessions : m_viewSessions;
-	if (!sessions.contains(streamID) || !sessions.value(streamID).process) {
+	if (!sessions.contains(streamID) || !sessions.value(streamID).job || !sessions.value(streamID).job->launch().process) {
 		return;
 	}
 
-	QProcess *process = sessions.value(streamID).process;
+	QProcess *process = sessions.value(streamID).job->launch().process;
 	const bool binaryStdout = sessions.value(streamID).payload.value(QStringLiteral("native_frame_feed_available")).toBool();
 	if (binaryStdout) process->setReadChannel(QProcess::StandardError);
 	const auto logOutput = [process, streamID, label, binaryStdout]() {
@@ -779,29 +643,6 @@ void ScreenShareHelperServer::attachProcessLogging(const QString &streamID, cons
 									.arg(static_cast< int >(error));
 	});
 
-	connect(process, qOverload< int, QProcess::ExitStatus >(&QProcess::finished), this,
-			[this, streamID, publish, label, process](const int exitCode, const QProcess::ExitStatus exitStatus) {
-				QHash< QString, ManagedSession > &sessionMap = publish ? m_publishSessions : m_viewSessions;
-				if (sessionMap.contains(streamID) && sessionMap.value(streamID).process == process) {
-					const ManagedSession finishedSession = sessionMap.take(streamID);
-					if (finishedSession.nativeFrameTimer) {
-						finishedSession.nativeFrameTimer->stop();
-						finishedSession.nativeFrameTimer->deleteLater();
-					}
-				}
-
-				const QString output = QString::fromUtf8(process->processChannelMode() == QProcess::SeparateChannels
-																 ? process->readAllStandardError()
-																 : process->readAll()).trimmed();
-				if (!output.isEmpty()) {
-					qInfo().noquote() << QStringLiteral("ScreenShareHelper[%1:%2]: %3").arg(label, streamID, output);
-				}
-
-				qInfo().nospace() << "ScreenShareHelper: " << label << " session " << streamID << " exited with code "
-								  << exitCode << " status " << static_cast< int >(exitStatus);
-				process->deleteLater();
-				refreshIdleTimer();
-			});
 }
 
 void ScreenShareHelperServer::refreshIdleTimer() {

@@ -4,6 +4,7 @@
 #define MUMBLE_MUMBLE_SCREENSHAREVIEWBACKEND_H_
 
 #include "ScreenShareManager.h"
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtGui/QWindow>
@@ -23,6 +24,7 @@ class ScreenShareViewBackend final : public QObject {
 	Q_PROPERTY(QString detail READ detail NOTIFY sessionChanged)
 	Q_PROPERTY(QString status READ status NOTIFY statusChanged)
 	Q_PROPERTY(bool paused READ paused WRITE setPaused NOTIFY pausedChanged)
+	Q_PROPERTY(bool detached READ detached NOTIFY detachedChanged)
 	Q_PROPERTY(bool audioMuted READ audioMuted WRITE setAudioMuted NOTIFY audioMutedChanged)
 	Q_PROPERTY(bool audioAvailable READ audioAvailable NOTIFY sessionChanged)
 	Q_PROPERTY(int audioVolume READ audioVolume WRITE setAudioVolume NOTIFY audioVolumeChanged)
@@ -51,6 +53,7 @@ public:
 	QString detail() const;
 	QString status() const;
 	bool paused() const;
+	bool detached() const;
 	bool audioMuted() const;
 	bool audioAvailable() const;
 	int audioVolume() const;
@@ -73,6 +76,7 @@ public:
 	void setProcessId(qint64 processId);
 	void setNativeFrameTransport(const QString &sharedMemoryKey, quint64 generation);
 	void setOperationState(const QString &status, const QString &error, bool cancellable);
+	void setDetached(bool detached);
 #if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	void setVisualFixtureFrame(const QImage &frame);
 #endif
@@ -82,11 +86,15 @@ public:
 	Q_INVOKABLE void requestRetry();
 	Q_INVOKABLE void requestStop();
 	Q_INVOKABLE void requestClose();
+	Q_INVOKABLE void requestDetach();
+	Q_INVOKABLE void requestDock();
+	Q_INVOKABLE void requestFullscreen();
 
 signals:
 	void sessionChanged();
 	void statusChanged();
 	void pausedChanged();
+	void detachedChanged();
 	void audioMutedChanged();
 	void audioVolumeChanged();
 	void audioControlStateChanged();
@@ -104,6 +112,9 @@ signals:
 	void retryRequested(const QString &streamId);
 	void stopRequested(const QString &streamId);
 	void closeRequested(const QString &streamId);
+	void detachRequested(const QString &streamId);
+	void dockRequested(const QString &streamId);
+	void fullscreenRequested(const QString &streamId);
 
 private slots:
 	void pollForVideoWindow();
@@ -111,6 +122,8 @@ private slots:
 	void dispatchAudioControls();
 	void handleAudioControlsApplied(quint64 generation, qint64 processId, bool applied,
 								const QString &errorCode);
+	void handleNativeFrameTransportActive(quint64 configuration, quint64 generation, bool active);
+	void checkNativeFrameFreshness();
 
 private:
 	void clearVideoWindow();
@@ -118,6 +131,8 @@ private:
 	void setAudioControlState(const QString &status, const QString &error = {});
 	QString audioControlErrorForCode(const QString &errorCode) const;
 	void setStatus(const QString &status);
+	void setNativeFrameStalled(bool stalled);
+	void resetNativeFrameFreshness();
 
 	ScreenShareSession m_session;
 	QString m_ownerLabel;
@@ -125,10 +140,12 @@ private:
 	QTimer *m_windowPollTimer = nullptr;
 	QTimer *m_audioRetryTimer = nullptr;
 	QTimer *m_audioDispatchTimer = nullptr;
+	QTimer *m_frameFreshnessTimer = nullptr;
 	QPointer< QWindow > m_videoWindow;
 	QString m_status;
 	qint64 m_processId = 0;
 	bool m_paused = false;
+	bool m_detached = false;
 	bool m_audioMuted = false;
 	int m_audioVolume = 100;
 	int m_audioRetryAttempts = 0;
@@ -144,7 +161,11 @@ private:
 	ScreenShareNativeFrameReader *m_frameReader = nullptr;
 	bool m_nativeFrameActive = false;
 	quint64 m_nativeFrameGeneration = 0;
+	quint64 m_nativeFrameConfiguration = 0;
+	quint64 m_nativeFrameSequence = 0;
 	bool m_acceptNativeFrames = false;
+	bool m_nativeFrameStalled = false;
+	QElapsedTimer m_nativeFrameFreshness;
 	QString m_operationStatus = QStringLiteral("idle");
 	QString m_operationError;
 	bool m_operationCancellable = false;

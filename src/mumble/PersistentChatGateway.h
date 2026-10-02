@@ -30,10 +30,11 @@ public:
 	quint64 connectionGeneration() const;
 	bool isReady() const;
 
-	void requestInitialPage(MumbleProto::ChatScope scope, unsigned int scopeID);
+	bool requestInitialPage(MumbleProto::ChatScope scope, unsigned int scopeID, quint64 requestID = 0);
 	bool requestWarmupPages(const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes,
-							unsigned int limitPerScope);
-	void requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID);
+							unsigned int limitPerScope, quint64 requestID = 0);
+	bool requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID,
+					  quint64 requestID = 0);
 	void send(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &body,
 			  MumbleProto::ChatBodyFormat bodyFormat = MumbleProto::ChatBodyFormatPlainText,
 			  std::optional< unsigned int > replyToMessageID = std::nullopt,
@@ -50,6 +51,7 @@ public:
 	void handleIncomingReadState(const MumbleProto::ChatReadStateUpdate &update);
 
 signals:
+	void connectionChanged(quint64 connectionGeneration);
 	void historyReceived(const MumbleProto::ChatHistoryResponse &response, quint64 connectionGeneration);
 	void messageReceived(const MumbleProto::ChatMessage &message);
 	void readStateReceived(const MumbleProto::ChatReadStateUpdate &update);

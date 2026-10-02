@@ -26,14 +26,43 @@
 #include <QtCore/QProcessEnvironment>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
+#include <QtCore/QTimer>
 #include <QtConcurrent>
 #include <QtNetwork/QLocalSocket>
+
+#include <atomic>
+
+#ifdef Q_OS_WIN
+# ifndef NOMINMAX
+#  define NOMINMAX
+# endif
+# include <windows.h>
+#endif
 
 namespace {
 constexpr int HELPER_CONNECT_TIMEOUT_MSEC = 1000;
 constexpr int HELPER_REQUEST_TIMEOUT_MSEC = 45000;
 constexpr int HELPER_START_TIMEOUT_MSEC   = 20000;
 constexpr qsizetype MAX_HELPER_REPLY_BYTES = 1024 * 1024;
+
+void appendClientProcessOwner(QJsonObject &payload) {
+#ifdef Q_OS_WIN
+	static std::atomic< quint64 > nextOperation { 0 };
+	FILETIME created {}, exited {}, kernel {}, user {};
+	QString identity;
+	if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
+		const quint64 timestamp = (static_cast< quint64 >(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+		identity = QString::number(timestamp, 16);
+	}
+	// Include both fields even on failure so a new client cannot accidentally
+	// fall back to an unowned session that survives its exit.
+	payload.insert(QStringLiteral("owner_process_id"), QString::number(QCoreApplication::applicationPid()));
+	payload.insert(QStringLiteral("owner_process_identity"), identity);
+	payload.insert(QStringLiteral("owner_operation_sequence"), QString::number(++nextOperation));
+#else
+	(void) payload;
+#endif
+}
 
 QMutex g_cachedCapabilitiesMutex;
 ScreenShareHelperClient::CapabilitySnapshot g_cachedCapabilities;
@@ -317,6 +346,185 @@ QJsonObject runCapabilityProbeProcess(const QString &helperExecutable, QString *
 	return replyDoc.object();
 }
 } // namespace
+
+// A request owns its socket until the single final reply. Cancelling closes that
+// socket immediately, so a pending helper job is cancelled even during first-frame startup.
+class ScreenShareAsyncRequest : public QObject {
+public:
+	using Completion = std::function< void(ScreenShareAsyncRequest *, const QJsonObject &, const QString &) >;
+	ScreenShareAsyncRequest(Mumble::ScreenShare::IPC::Command command, QJsonObject payload,
+		QString socketPath, std::function< bool(QString *) > launch, Completion completion, QObject *parent)
+		: QObject(parent), m_command(command), m_payload(std::move(payload)), m_socketPath(std::move(socketPath)),
+		  m_launch(std::move(launch)), m_completion(std::move(completion)) {
+		m_deadline.setSingleShot(true);
+		connect(&m_deadline, &QTimer::timeout, this, [this]() {
+			finish({}, QStringLiteral("Screen sharing helper request timed out."));
+		});
+		m_connectDeadline.start();
+		m_deadline.start(isStop() ? 5000 : HELPER_REQUEST_TIMEOUT_MSEC);
+		QTimer::singleShot(0, this, [this]() { connectSocket(); });
+	}
+	~ScreenShareAsyncRequest() override {
+		// The manager's C++ members may already be gone when QObject deletes its
+		// child client. Abandon the callback before aborting the request socket.
+		m_completion = {};
+		m_deadline.stop();
+		discardSocket();
+	}
+	void cancel() { finish({}, QStringLiteral("Screen sharing request was cancelled.")); }
+
+private:
+	bool isStop() const {
+		return m_command == Mumble::ScreenShare::IPC::Command::StopPublish
+			|| m_command == Mumble::ScreenShare::IPC::Command::StopView;
+	}
+	void discardSocket() {
+		if (!m_socket) return;
+		m_socket->disconnect(this);
+		m_socket->abort();
+		m_socket->deleteLater();
+		m_socket = nullptr;
+	}
+	void connectSocket() {
+		if (!m_completion) return;
+		discardSocket();
+		m_buffer.clear();
+		auto *socket = new QLocalSocket(this);
+		m_socket = socket;
+		connect(socket, &QLocalSocket::connected, this, [this, socket]() {
+			if (m_socket != socket || !m_completion) return;
+			m_sent = true;
+			const auto request = Mumble::ScreenShare::IPC::makeRequest(m_command, m_payload,
+				m_fallback == 2 ? Mumble::ScreenShare::IPC::MINIMUM_PROTOCOL_VERSION : Mumble::ScreenShare::IPC::PROTOCOL_VERSION);
+			if (socket->write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n') < 0)
+				finish({}, socket->errorString());
+		});
+		connect(socket, &QLocalSocket::readyRead, this, [this, socket]() {
+			if (m_socket == socket) consumeReply();
+		});
+		connect(socket, &QLocalSocket::disconnected, this, [this, socket]() {
+			if (m_socket != socket || !m_completion) return;
+			consumeReply();
+			if (m_socket == socket && m_completion && m_sent)
+				finish({}, QStringLiteral("Screen sharing helper closed an incomplete reply."));
+		});
+		connect(socket, &QLocalSocket::errorOccurred, this, [this, socket](QLocalSocket::LocalSocketError errorCode) {
+			if (m_socket != socket || !m_completion) return;
+			if (m_sent) {
+				consumeReply();
+				if (m_socket == socket && m_completion) finish({}, socket->errorString());
+				return;
+			}
+			if (isStop()) {
+				// A missing helper cannot retain a media session.
+				if (errorCode == QLocalSocket::ServerNotFoundError || errorCode == QLocalSocket::ConnectionRefusedError)
+					finish(Mumble::ScreenShare::IPC::makeSuccessReply(), {});
+				else finish({}, socket->errorString());
+				return;
+			}
+			if (!m_launched) {
+				m_launched = true;
+				QString error;
+				if (!m_launch(&error)) { finish({}, error); return; }
+			}
+			if (m_connectDeadline.elapsed() >= HELPER_START_TIMEOUT_MSEC) {
+				finish({}, QStringLiteral("Screen sharing helper did not become available.")); return;
+			}
+			QTimer::singleShot(100, this, [this]() { connectSocket(); });
+		});
+		socket->connectToServer(m_socketPath);
+	}
+	void consumeReply() {
+		if (!m_socket || !m_completion) return;
+		m_buffer += m_socket->readAll();
+		if (m_buffer.size() > MAX_HELPER_REPLY_BYTES) { finish({}, QStringLiteral("Helper reply exceeded the size limit.")); return; }
+		const auto newline = m_buffer.indexOf('\n');
+		if (newline < 0) return;
+		QJsonParseError error;
+		const auto document = QJsonDocument::fromJson(m_buffer.left(newline), &error);
+		if (error.error != QJsonParseError::NoError || !document.isObject()) {
+			finish({}, QStringLiteral("Malformed helper reply.")); return;
+		}
+		const auto reply = document.object();
+		if (m_command == Mumble::ScreenShare::IPC::Command::StartView && m_fallback < 2
+			&& !Mumble::ScreenShare::IPC::replySucceeded(reply)) {
+			++m_fallback;
+			m_payload.insert(QStringLiteral("native_frame_requested"), false);
+			m_sent = false;
+			discardSocket();
+			QTimer::singleShot(0, this, [this]() { connectSocket(); });
+			return;
+		}
+		finish(reply, {});
+	}
+	void finish(const QJsonObject &reply, const QString &error) {
+		if (!m_completion) return;
+		auto completion = std::move(m_completion);
+		m_completion = {};
+		m_deadline.stop();
+		discardSocket();
+		completion(this, reply, error);
+		deleteLater();
+	}
+	Mumble::ScreenShare::IPC::Command m_command;
+	QJsonObject m_payload;
+	QString m_socketPath;
+	std::function< bool(QString *) > m_launch;
+	Completion m_completion;
+	QPointer< QLocalSocket > m_socket;
+	QTimer m_deadline;
+	QElapsedTimer m_connectDeadline;
+	QByteArray m_buffer;
+	int m_fallback = 0;
+	bool m_sent = false;
+	bool m_launched = false;
+};
+
+void ScreenShareHelperClient::requestAsync(Mumble::ScreenShare::IPC::Command command,
+	const ScreenShareSession &session, std::function< void(const AsyncResult &) > callback) {
+	const bool publish = command == Mumble::ScreenShare::IPC::Command::StartPublish
+		|| command == Mumble::ScreenShare::IPC::Command::StopPublish;
+	const QString key = (publish ? QStringLiteral("publish:") : QStringLiteral("view:")) + session.streamID;
+	const auto previous = m_pendingRequests.take(key);
+	QJsonObject payload = payloadFromSession(session);
+	if (command == Mumble::ScreenShare::IPC::Command::StartView)
+		payload.insert(QStringLiteral("native_frame_requested"), true);
+	const QString executable = m_capabilities.helperExecutable;
+	// The request object is registered before its queued first connection attempt.
+	auto *request = new ScreenShareAsyncRequest(command, payload, helperSocketPath(),
+		[this, executable](QString *error) {
+			// Several stream requests can arrive while the helper is still probing.
+			// Launch one helper; competing instances must not replace its named pipe.
+			if (m_asyncHelperLaunch.isValid() && m_asyncHelperLaunch.elapsed() < HELPER_START_TIMEOUT_MSEC) return true;
+			if (!ensureHelperRunning(executable, error)) return false;
+			m_asyncHelperLaunch.start();
+			return true;
+		},
+		[this, command, key, callback](ScreenShareAsyncRequest *completed, const QJsonObject &reply,
+								 const QString &transportError) {
+			if (m_pendingRequests.value(key) == completed) m_pendingRequests.remove(key);
+			const bool startReply = command == Mumble::ScreenShare::IPC::Command::StartPublish
+				|| command == Mumble::ScreenShare::IPC::Command::StartView;
+			if ((!reply.isEmpty() && startReply) || (m_asyncHelperLaunch.isValid()
+				&& m_asyncHelperLaunch.elapsed() >= HELPER_START_TIMEOUT_MSEC)) m_asyncHelperLaunch.invalidate();
+			AsyncResult result;
+			result.error = transportError;
+			result.success = !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, &result.error);
+			if (result.success) {
+				result.processID = activeProcessIDFromReply(reply);
+				const auto response = reply.value(QStringLiteral("payload")).toObject();
+				result.frameTransport.sharedMemoryKey = response.value(QStringLiteral("native_frame_shared_memory_key")).toString();
+				result.frameTransport.generation = response.value(QStringLiteral("native_frame_generation")).toVariant().toULongLong();
+				result.frameTransport.feedAvailable = response.value(QStringLiteral("native_frame_feed_available")).toBool();
+			}
+			logReplyWarnings(reply, command);
+			callback(result);
+		}, this);
+	m_pendingRequests.insert(key, request);
+	// Register the replacement before cancellation invokes the previous callback.
+	// A callback may itself issue another request for the same stream.
+	if (previous) previous->cancel();
+}
 
 ScreenShareHelperClient::ScreenShareHelperClient(QObject *parent)
 	: QObject(parent), m_capabilities(advertisedCapabilities()) {
@@ -620,6 +828,7 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 
 QJsonObject ScreenShareHelperClient::payloadFromSession(const ScreenShareSession &session) {
 	QJsonObject payload;
+	appendClientProcessOwner(payload);
 	payload.insert(QStringLiteral("stream_id"), session.streamID);
 	payload.insert(QStringLiteral("owner_session"), static_cast< int >(session.ownerSession));
 	payload.insert(QStringLiteral("scope"), static_cast< int >(session.scope));
@@ -712,6 +921,7 @@ bool ScreenShareHelperClient::startPublish(const ScreenShareSession &session, QS
 
 bool ScreenShareHelperClient::stopPublish(const QString &streamID, QString *errorMessage) {
 	QJsonObject payload;
+	appendClientProcessOwner(payload);
 	payload.insert(QStringLiteral("stream_id"), streamIDForStopPayload(streamID));
 	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StopPublish, payload,
 										  m_capabilities.helperExecutable, errorMessage, false);
@@ -774,6 +984,7 @@ bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QStri
 
 bool ScreenShareHelperClient::stopView(const QString &streamID, QString *errorMessage) {
 	QJsonObject payload;
+	appendClientProcessOwner(payload);
 	payload.insert(QStringLiteral("stream_id"), streamIDForStopPayload(streamID));
 	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StopView, payload,
 										  m_capabilities.helperExecutable, errorMessage, false);
