@@ -13,7 +13,6 @@
 #include "Utils.h"
 #include "Global.h"
 
-#include <QtConcurrent/QtConcurrentRun>
 #include <QtCore/QThread>
 #include <QtCore/QThreadPool>
 
@@ -30,7 +29,6 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
-#include <thread>
 
 std::mutex AudioOutputSpeech::s_audioCachesMutex;
 std::vector< AudioOutputCache > AudioOutputSpeech::s_audioCaches(100);
@@ -186,25 +184,26 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 	m_remoteSpeechCleanupRequested = user && user->isRemoteSpeechCleanupEnabled();
 	m_remoteSpeechCleanupPreset    = Global::get().s.remoteSpeechCleanupPreset;
 	m_remoteSpeechCleanupMixFactor = remoteSpeechCleanupMixFactor(m_remoteSpeechCleanupPreset);
+	m_remoteSpeechCleanupFrameStaging = m_remoteSpeechCleanupRequested
+		&& m_remoteSpeechCleanupSelection.backend == Settings::DeepFilterNetBackend;
 	if (m_remoteSpeechCleanupRequested) {
 		const Mumble::SpeechCleanup::Selection selection = m_remoteSpeechCleanupSelection;
-		m_remoteSpeechCleanupPreparation = QtConcurrent::run(
-			&remoteSpeechCleanupPreparationPool(),
-			[selection]() -> std::unique_ptr< SpeechCleanupProcessor > {
+		const unsigned int maximumBurstFrames = static_cast< unsigned int >(std::ceil(
+			(static_cast< double >(systemMaxBufferSize) + INTERAURAL_DELAY) * SAMPLE_RATE
+			/ (static_cast< double >(freq) * ReceiveSpeechCleanupProcessor::frameSamples)));
+		m_remoteSpeechCleanupPreparation = std::make_unique< SpeechCleanupPreparation >(
+			remoteSpeechCleanupPreparationPool(),
+			[selection, maximumBurstFrames]() -> std::unique_ptr< SpeechCleanupProcessor > {
 				// Windows' background mode lowers CPU, memory, and I/O resource
 				// scheduling together. QThread::LowestPriority alone only
 				// lowers CPU scheduling, so DLL/model paging could still steal
 				// a complete QML heartbeat during cold room entry.
 				RemoteSpeechCleanupBackgroundMode backgroundMode;
-				std::this_thread::sleep_until(g_remoteSpeechCleanupEarliestInitialization);
-				try {
-					return createSpeechCleanupProcessor(selection);
-				} catch (...) {
-					// Model initialization must never propagate into the realtime
-					// audio callback when the completed future is adopted.
-					return {};
-				}
-			});
+				auto processor = createSpeechCleanupProcessor(selection);
+				if (selection.backend == Settings::DeepFilterNetBackend)
+					return std::make_unique< ReceiveSpeechCleanupProcessor >(std::move(processor), maximumBurstFrames);
+				return processor;
+			}, g_remoteSpeechCleanupEarliestInitialization);
 	}
 
 	// iAudioBufferSize: size (in unit of float) of the buffer used to store decoded pcm data.
@@ -235,6 +234,10 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 		iBufferSize *= 2;
 		iFrameSize *= 2;
 	}
+	// The fill condition includes interaural lookahead, and resizeBuffer's
+	// decode reservation includes it again. Reserve both here so staging a
+	// packet across small device callbacks does not grow pfBuffer on that path.
+	iBufferSize += 2 * INTERAURAL_DELAY;
 
 	pfBuffer = new float[iBufferSize];
 
@@ -276,6 +279,10 @@ AudioOutputSpeech::AudioOutputSpeech(ClientUser *user, unsigned int freq, Mumble
 }
 
 AudioOutputSpeech::~AudioOutputSpeech() {
+	// Cancellation only signals background work; worker teardown is transferred
+	// away from this destructor, which can hold AudioOutput's shared map lock.
+	if (m_remoteSpeechCleanupPreparation) m_remoteSpeechCleanupPreparation->cancel();
+	retireSpeechCleanupProcessor(std::move(m_remoteSpeechCleanup));
 	if (opusState) {
 		opus_decoder_destroy(opusState);
 	}
@@ -310,22 +317,32 @@ bool AudioOutputSpeech::isEffectivelyDualMono(const float *samples, unsigned int
 
 void AudioOutputSpeech::adoptPreparedRemoteSpeechCleanup() {
 	if (!m_remoteSpeechCleanupRequested || m_remoteSpeechCleanupPreparationConsumed
-		|| !m_remoteSpeechCleanupPreparation.isValid() || !m_remoteSpeechCleanupPreparation.isFinished()) {
+		|| !m_remoteSpeechCleanupPreparation || !m_remoteSpeechCleanupPreparation->isFinished()) {
 		return;
 	}
 
 	m_remoteSpeechCleanupPreparationConsumed = true;
-	m_remoteSpeechCleanup = m_remoteSpeechCleanupPreparation.takeResult();
+	m_remoteSpeechCleanup = m_remoteSpeechCleanupPreparation->takeResult();
 	m_remoteSpeechCleanupActive = m_remoteSpeechCleanup && m_remoteSpeechCleanup->isReady();
 }
 
 bool AudioOutputSpeech::applyRemoteSpeechCleanup(float *samples, unsigned int sampleCount) {
+	// The receive clock keeps advancing while locally muted. Feed silence into
+	// the causal worker/dry delay as well; pausing that state would replay old
+	// pre-mute speech when this user is unmuted mid-utterance.
+	if (samples && p && p->bLocalMute) std::fill_n(samples, sampleCount, 0.0f);
 	adoptPreparedRemoteSpeechCleanup();
 	if (!samples || !m_remoteSpeechCleanupRequested || !m_remoteSpeechCleanupActive
-		|| !m_remoteSpeechCleanup || !bStereo || sampleCount == 0
-		|| !isEffectivelyDualMono(samples, sampleCount)) {
+		|| !m_remoteSpeechCleanup || !bStereo || sampleCount == 0) {
 		return false;
 	}
+	if (m_remoteSpeechCleanupFrameStaging) {
+		const bool applied = static_cast< ReceiveSpeechCleanupProcessor * >(m_remoteSpeechCleanup.get())
+			->processStereoFrame(samples, sampleCount, m_remoteSpeechCleanupMixFactor);
+		m_remoteSpeechCleanupWasApplied |= applied;
+		return applied;
+	}
+	if (!isEffectivelyDualMono(samples, sampleCount)) return false;
 
 	const unsigned int samplesPerChannel = sampleCount / 2;
 	if (samplesPerChannel > REMOTE_SPEECH_CLEANUP_MAX_MONO_SAMPLES) {
@@ -376,6 +393,8 @@ const Mumble::SpeechCleanup::Selection &AudioOutputSpeech::remoteSpeechCleanupSe
 }
 
 const SpeechCleanupProcessor *AudioOutputSpeech::remoteSpeechCleanupProcessorForE2E() const {
+	if (m_remoteSpeechCleanupFrameStaging && m_remoteSpeechCleanup)
+		return static_cast< ReceiveSpeechCleanupProcessor * >(m_remoteSpeechCleanup.get())->processor();
 	return m_remoteSpeechCleanup.get();
 }
 
@@ -550,6 +569,20 @@ bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
 				m_remoteSpeechCleanupDrainCompleted = true;
 				finishStreamAfterChunk              = true;
 			}
+		} else if (m_pendingDecodedSamples > 0) {
+			decodedSamples = static_cast< int >(std::min(iFrameSize, m_pendingDecodedSamples));
+			std::copy_n(m_pendingDecodedPacket.data() + m_pendingDecodedOffset, decodedSamples, pOut);
+			m_pendingDecodedOffset += static_cast< unsigned int >(decodedSamples);
+			m_pendingDecodedSamples -= static_cast< unsigned int >(decodedSamples);
+			tickJitterForChunk = true;
+			applyRemoteSpeechCleanup(pOut, static_cast< unsigned int >(decodedSamples));
+			if (m_pendingDecodedSamples == 0 && m_pendingDecodedTerminator) {
+				m_pendingDecodedTerminator = false;
+				if (!beginRemoteSpeechCleanupDrain()) {
+					m_remoteSpeechCleanupDrainCompleted = true;
+					finishStreamAfterChunk = true;
+				}
+			}
 		} else {
 			if (p == &LoopUser::lpLoopy) {
 				LoopUser::lpLoopy.fetchFrames();
@@ -634,8 +667,8 @@ bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
 						static_cast< opus_int32 >(qba.size()), pOut, static_cast< int >(iAudioBufferSize / channels),
 						0);
 				} else {
-					decodedSamples = opus_packet_get_samples_per_frame(
-						reinterpret_cast< const unsigned char * >(qba.constData()), SAMPLE_RATE);
+					decodedSamples = opus_packet_get_nb_samples(
+						reinterpret_cast< const unsigned char * >(qba.constData()), qba.size(), SAMPLE_RATE);
 				}
 
 				decodedSamples *= static_cast< int >(channels);
@@ -643,7 +676,15 @@ bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
 					decodedSamples = static_cast< int >(iFrameSize);
 					memset(pOut, 0, iFrameSize * sizeof(float));
 				}
-				if (decodedSamples > 0 && !(p && p->bLocalMute)) {
+				if (p && p->bLocalMute && decodedSamples > 0)
+					std::fill_n(pOut, decodedSamples, 0.0f);
+				if (m_remoteSpeechCleanupFrameStaging && decodedSamples > static_cast< int >(iFrameSize)) {
+					m_pendingDecodedSamples = static_cast< unsigned int >(decodedSamples) - iFrameSize;
+					m_pendingDecodedOffset = 0;
+					std::copy_n(pOut + iFrameSize, m_pendingDecodedSamples, m_pendingDecodedPacket.data());
+					decodedSamples = static_cast< int >(iFrameSize);
+				}
+				if (decodedSamples > 0) {
 					applyRemoteSpeechCleanup(pOut, static_cast< unsigned int >(decodedSamples));
 				}
 
@@ -672,7 +713,9 @@ bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
 				}
 				if (qlFrames.isEmpty() && bHasTerminator) {
 					bHasTerminator = false;
-					if (!beginRemoteSpeechCleanupDrain()) {
+					if (m_pendingDecodedSamples > 0) {
+						m_pendingDecodedTerminator = true;
+					} else if (!beginRemoteSpeechCleanupDrain()) {
 						m_remoteSpeechCleanupDrainCompleted = true;
 						finishStreamAfterChunk              = true;
 					}
@@ -687,40 +730,40 @@ bool AudioOutputSpeech::prepareSampleBuffer(unsigned int frameCount) {
 					memset(pOut, 0, iFrameSize * sizeof(float));
 				}
 				// Keep causal cleanup state moving across Opus packet-loss concealment frames.
-				if (decodedSamples > 0 && !(p && p->bLocalMute)) {
+				if (decodedSamples > 0) {
 					applyRemoteSpeechCleanup(pOut, static_cast< unsigned int >(decodedSamples));
 				}
 			}
 
-			if (finishStreamAfterChunk || !nextalive) {
-				const unsigned int decodedFrames = static_cast< unsigned int >(decodedSamples) / channels;
-				const unsigned int fadeFrames    = std::min(iFrameSizePerChannel, decodedFrames);
-				const unsigned int fadeStart     = decodedFrames - fadeFrames;
-				for (unsigned int i = 0; i < fadeFrames; ++i) {
-					// A final causal-drain chunk can be shorter than the regular
-					// 10 ms frame (for example DTLN's latency leaves a 336-sample
-					// remainder). Map that shorter span across the complete fade
-					// table so its final sample still reaches zero.
-					const unsigned int fadeIndex = fullSpanFadeIndex(i, fadeFrames, iFrameSizePerChannel);
-					for (unsigned int channel = 0; channel < channels; ++channel) {
-						pOut[(fadeStart + i) * channels + channel] *= fFadeOut[fadeIndex];
-					}
-				}
-			} else if (applyFadeInForChunk) {
-				for (unsigned int i = 0; i < iFrameSizePerChannel; ++i) {
-					for (unsigned int channel = 0; channel < channels; ++channel) {
-						pOut[i * channels + channel] *= fFadeIn[i];
-					}
+		}
+
+		if (finishStreamAfterChunk || !nextalive) {
+			const unsigned int decodedFrames = static_cast< unsigned int >(decodedSamples) / channels;
+			const unsigned int fadeFrames    = std::min(iFrameSizePerChannel, decodedFrames);
+			const unsigned int fadeStart     = decodedFrames - fadeFrames;
+			for (unsigned int i = 0; i < fadeFrames; ++i) {
+				// A final causal-drain chunk can be shorter than the regular
+				// 10 ms frame (for example DTLN's latency leaves a 336-sample
+				// remainder). Map that shorter span across the complete fade
+				// table so its final sample still reaches zero.
+				const unsigned int fadeIndex = fullSpanFadeIndex(i, fadeFrames, iFrameSizePerChannel);
+				for (unsigned int channel = 0; channel < channels; ++channel) {
+					pOut[(fadeStart + i) * channels + channel] *= fFadeOut[fadeIndex];
 				}
 			}
-
-			if (tickJitterForChunk) {
-				for (unsigned int i = static_cast< unsigned int >(decodedSamples) / iFrameSize; i > 0; --i) {
-					jitter_buffer_tick(jbJitter);
+		} else if (applyFadeInForChunk) {
+			for (unsigned int i = 0; i < iFrameSizePerChannel; ++i) {
+				for (unsigned int channel = 0; channel < channels; ++channel) {
+					pOut[i * channels + channel] *= fFadeIn[i];
 				}
 			}
 		}
 
+		if (tickJitterForChunk) {
+			for (unsigned int i = static_cast< unsigned int >(decodedSamples) / iFrameSize; i > 0; --i) {
+				jitter_buffer_tick(jbJitter);
+			}
+		}
 	nextframe:
 		if (p && p->bLocalMute) {
 			memset(pOut, 0, static_cast< std::size_t >(decodedSamples) * sizeof(float));

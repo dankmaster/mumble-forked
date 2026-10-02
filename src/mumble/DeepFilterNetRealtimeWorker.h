@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <thread>
 
 /// Moves allocation-heavy DeepFilterNet/tract inference away from the audio
@@ -28,6 +29,7 @@ public:
 	static constexpr unsigned int schedulingDelayFrames  = 2;
 	static constexpr unsigned int schedulingDelaySamples = frameSamples * schedulingDelayFrames;
 	static constexpr unsigned int slotCount              = 4;
+	static constexpr unsigned int maximumSchedulingDelayFrames = 64;
 	static constexpr std::size_t cacheLineBytes          = 64;
 	static constexpr std::chrono::milliseconds offlineFrameWaitTimeout{ 2000 };
 
@@ -51,7 +53,8 @@ public:
 	DeepFilterNetRealtimeWorker &operator=(DeepFilterNetRealtimeWorker &&)      = delete;
 
 	/// Starts the worker and resets its fixed SPSC slots. Off-callback only.
-	bool start(void *context, ProcessFunction processFunction);
+	bool start(void *context, ProcessFunction processFunction,
+		unsigned int delayFrames = schedulingDelayFrames);
 	/// Requests shutdown and joins the worker. Off-callback only.
 	void stop() noexcept;
 
@@ -81,6 +84,7 @@ public:
 	std::uint64_t processingP99Nanoseconds() const noexcept;
 	unsigned int pendingFrames() const noexcept;
 	unsigned int schedulingSlackFrames() const noexcept;
+	unsigned int configuredDelayFrames() const noexcept { return m_delayFrames; }
 
 private:
 	enum class SlotState : unsigned char { Empty, InputReady, OutputReady };
@@ -110,8 +114,14 @@ private:
 	void recordProcessingDuration(std::uint64_t durationNanoseconds) noexcept;
 	void resetSlots() noexcept;
 	void resetProcessingMetrics() noexcept;
+	Slot &slotForSequence(std::uint64_t sequence) noexcept;
 
 	std::array< Slot, slotCount > m_slots = {};
+	// Capture keeps the original four in-object slots. Only receive callbacks
+	// with a larger burst budget allocate extra slots, before the worker starts.
+	std::unique_ptr< Slot[] > m_extraSlots;
+	unsigned int m_activeSlotCount = slotCount;
+	unsigned int m_delayFrames = schedulingDelayFrames;
 	std::thread m_worker;
 	void *m_context                 = nullptr;
 	ProcessFunction m_process       = nullptr;

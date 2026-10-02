@@ -20,8 +20,17 @@ DeepFilterNetRealtimeWorker::~DeepFilterNetRealtimeWorker() {
 	stop();
 }
 
-bool DeepFilterNetRealtimeWorker::start(void *context, ProcessFunction processFunction) {
+bool DeepFilterNetRealtimeWorker::start(void *context, ProcessFunction processFunction, unsigned int delayFrames) {
 	stop();
+	if (delayFrames < schedulingDelayFrames || delayFrames > maximumSchedulingDelayFrames) return false;
+	m_delayFrames = delayFrames;
+	m_activeSlotCount = std::max(slotCount, delayFrames + 2);
+	try {
+		m_extraSlots = m_activeSlotCount > slotCount ? std::make_unique< Slot[] >(m_activeSlotCount - slotCount) : nullptr;
+	} catch (...) {
+		m_failureStatus.store(statusWorkerStartFailed, std::memory_order_release);
+		return false;
+	}
 	resetSlots();
 	m_context         = context;
 	m_process         = processFunction;
@@ -77,9 +86,9 @@ bool DeepFilterNetRealtimeWorker::processFrame(const float *input, float *output
 	}
 
 	const std::uint64_t sequence = m_submittedFrames;
-	if (sequence >= schedulingDelayFrames) {
-		const std::uint64_t outputSequence = sequence - schedulingDelayFrames;
-		Slot &outputSlot                   = m_slots[outputSequence % slotCount];
+	if (sequence >= m_delayFrames) {
+		const std::uint64_t outputSequence = sequence - m_delayFrames;
+		Slot &outputSlot                   = slotForSequence(outputSequence);
 		const auto state                   = static_cast< SlotState >(outputSlot.state.load(std::memory_order_acquire));
 		if (state != SlotState::OutputReady || outputSlot.sequence != outputSequence) {
 			latchFailure(statusOutputNotReady);
@@ -89,7 +98,7 @@ bool DeepFilterNetRealtimeWorker::processFrame(const float *input, float *output
 		outputSlot.state.store(static_cast< unsigned char >(SlotState::Empty), std::memory_order_release);
 	}
 
-	Slot &inputSlot = m_slots[sequence % slotCount];
+	Slot &inputSlot = slotForSequence(sequence);
 	if (static_cast< SlotState >(inputSlot.state.load(std::memory_order_acquire)) != SlotState::Empty) {
 		latchFailure(statusQueueFull);
 		std::fill_n(output, frameSamples, 0.0f);
@@ -108,11 +117,11 @@ bool DeepFilterNetRealtimeWorker::prepareOfflineFrame(std::chrono::milliseconds 
 	if (!healthy()) {
 		return false;
 	}
-	if (m_submittedFrames < schedulingDelayFrames) {
+	if (m_submittedFrames < m_delayFrames) {
 		return true;
 	}
 
-	const std::uint64_t requiredCompletedFrames = m_submittedFrames - schedulingDelayFrames + 1;
+	const std::uint64_t requiredCompletedFrames = m_submittedFrames - m_delayFrames + 1;
 	return waitForCompletedFrames(requiredCompletedFrames, timeout);
 }
 
@@ -201,7 +210,7 @@ unsigned int DeepFilterNetRealtimeWorker::pendingFrames() const noexcept {
 
 unsigned int DeepFilterNetRealtimeWorker::schedulingSlackFrames() const noexcept {
 	const unsigned int pending = pendingFrames();
-	return pending < schedulingDelayFrames ? schedulingDelayFrames - pending : 0;
+	return pending < m_delayFrames ? m_delayFrames - pending : 0;
 }
 
 void DeepFilterNetRealtimeWorker::workerLoop() noexcept {
@@ -218,7 +227,7 @@ void DeepFilterNetRealtimeWorker::workerLoop() noexcept {
 			continue;
 		}
 
-		Slot &slot       = m_slots[nextSequence % slotCount];
+		Slot &slot       = slotForSequence(nextSequence);
 		const auto state = static_cast< SlotState >(slot.state.load(std::memory_order_acquire));
 		if (state != SlotState::InputReady) {
 			const unsigned int observedGeneration = m_workGeneration.load(std::memory_order_acquire);
@@ -320,12 +329,18 @@ void DeepFilterNetRealtimeWorker::recordProcessingDuration(std::uint64_t duratio
 }
 
 void DeepFilterNetRealtimeWorker::resetSlots() noexcept {
-	for (Slot &slot : m_slots) {
+	for (unsigned int index = 0; index < m_activeSlotCount; ++index) {
+		Slot &slot = slotForSequence(index);
 		slot.input.fill(0.0f);
 		slot.output.fill(0.0f);
 		slot.sequence = 0;
 		slot.state.store(static_cast< unsigned char >(SlotState::Empty), std::memory_order_relaxed);
 	}
+}
+
+DeepFilterNetRealtimeWorker::Slot &DeepFilterNetRealtimeWorker::slotForSequence(std::uint64_t sequence) noexcept {
+	const unsigned int index = static_cast< unsigned int >(sequence % m_activeSlotCount);
+	return index < slotCount ? m_slots[index] : m_extraSlots[index - slotCount];
 }
 
 void DeepFilterNetRealtimeWorker::resetProcessingMetrics() noexcept {

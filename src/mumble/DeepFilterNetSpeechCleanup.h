@@ -19,6 +19,7 @@ public:
 	bool isReady() const override;
 	void reset() override;
 	bool prepareRealtime() override;
+	bool prepareRealtimeForReceive(unsigned int maximumBurstFrames) override;
 	bool prepareOfflineFrame() noexcept override;
 	bool finishOfflineProcessing() noexcept override;
 	unsigned int latencySamples() const override;
