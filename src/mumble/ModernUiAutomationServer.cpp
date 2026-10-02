@@ -7068,6 +7068,15 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("qmlScreenSharePresentationFixture")) {
+		QString fixtureError;
+		const QVariantMap fixture = visualFixtureController()->screenSharePresentationFixture(request, &fixtureError);
+		if (fixture.isEmpty()) return errorResponse(fixtureError);
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("fixture"), fixture);
+		return response;
+	}
+
 	if (command == QLatin1String("screenShareViewerState")) {
 		const QString streamId = request.value(QStringLiteral("streamId")).toString().trimmed();
 		QVariantMap response = okResponse();
@@ -8078,7 +8087,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			conversation = MainWindow::ModernDirectMessageConversation();
 			conversation.peerSession = session;
 			if (peer) {
-				conversation.peerUserID = window->persistentUserIDForClientUser(peer).value_or(0);
+				window->bindDirectMessagePeer(conversation, session, window->persistentUserIDForClientUser(peer));
 				conversation.label      = peer->qsName;
 				conversation.subtitle   = peer->cChannel ? QObject::tr("In %1").arg(peer->cChannel->qsName)
 														 : QObject::tr("No active channel");

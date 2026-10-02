@@ -60,6 +60,11 @@ class ScreenShareViewBackend;
 
 class ScreenShareManager : public QObject {
 private:
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	friend class QmlVisualFixtureController;
+	QSet< QString > m_visualFixtureStreams;
+	QHash< QString, quint64 > m_visualFixtureHelperOperationAttempts;
+#endif
 	enum class HelperOperationKind { StartPublish, StartView, StopPublish, StopView };
 	struct HelperOperationResult {
 		HelperOperationKind kind;

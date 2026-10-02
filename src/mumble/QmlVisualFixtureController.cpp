@@ -5,6 +5,7 @@
 
 #include "ComposerController.h"
 #include "GlobalShortcutTypes.h"
+#include "Global.h"
 #include "HostAddress.h"
 #include "Log.h"
 #include "MainWindow.h"
@@ -34,7 +35,9 @@
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtCore/QUuid>
 #include <QtGui/QLinearGradient>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QPainter>
 #include <QtGui/QPolygon>
 #include <QtNetwork/QHostAddress>
@@ -53,6 +56,18 @@ namespace {
 			if (QQuickItem *match = quickItemByObjectName(child, objectName)) return match;
 		}
 		return nullptr;
+	}
+
+	QVariantMap visualChatMessageIdentity(QmlShellHost *host) {
+		QStringList ids;
+		if (host) {
+			ids.reserve(host->chatModel()->rowCount());
+			for (int row = 0; row < host->chatModel()->rowCount(); ++row)
+				ids.push_back(host->chatModel()->get(row).value(QStringLiteral("id")).toString());
+		}
+		return { { QStringLiteral("messageCount"), ids.size() },
+			{ QStringLiteral("orderedMessageIdHash"), QString::fromLatin1(QCryptographicHash::hash(
+				ids.join(QChar(0x1f)).toUtf8(), QCryptographicHash::Sha256).toHex()) } };
 	}
 
 #if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -3009,8 +3024,298 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			 { QStringLiteral("generation"), m_generation } };
 }
 
+QVariantMap QmlVisualFixtureController::screenSharePresentationFixture(const QVariantMap &request, QString *error) {
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	const QString action = request.value(QStringLiteral("action"), QStringLiteral("state")).toString().trimmed().toLower();
+	if (action == QLatin1String("clear")) {
+		const QVariantMap before = screenSharePresentationFixtureState();
+		clearScreenSharePresentationFixture();
+		QVariantMap result = screenSharePresentationFixtureState();
+		result.insert(QStringLiteral("cleared"), true);
+		result.insert(QStringLiteral("beforeClear"), before);
+		return result;
+	}
+	MainWindow *mainWindow = m_host ? qobject_cast< MainWindow * >(m_host->parent()) : nullptr;
+	if (!mainWindow || !m_host->window() || !m_host->visualFixtureOverrideActive() || m_generation == 0
+		|| Global::get().serverHandlerSnapshot()) {
+		if (error) *error = QStringLiteral("Screen-share presentation probes require an existing isolated visual fixture and no server connection.");
+		return {};
+	}
+	ScreenShareManager *manager = mainWindow->m_screenShareManager.get();
+	if (!manager) {
+		if (error) *error = QStringLiteral("The screen-share manager is unavailable.");
+		return {};
+	}
+	if (action == QLatin1String("seed")) {
+		if (!m_screenSharePresentationStreamID.isEmpty()) {
+			if (error) *error = QStringLiteral("Clear the previous screen-share presentation probe before seeding another.");
+			return {};
+		}
+		if (m_visualScreenShareView || m_host->activeScopeController()->scopeToken().isEmpty()) {
+			if (error) *error = QStringLiteral("Use a main-window chat fixture without an existing detached viewer.");
+			return {};
+		}
+		QVariant timeline;
+		QMetaObject::invokeMethod(m_host->window(), "timelinePresentationState", Q_RETURN_ARG(QVariant, timeline));
+		m_screenSharePresentationTimelineBefore = timeline.toMap();
+		const QVariantMap messageIdentity = visualChatMessageIdentity(m_host);
+		for (auto it = messageIdentity.cbegin(); it != messageIdentity.cend(); ++it)
+			m_screenSharePresentationTimelineBefore.insert(it.key(), it.value());
+		if (m_screenSharePresentationTimelineBefore.value(QStringLiteral("firstVisibleId")).toString().isEmpty()
+			|| m_screenSharePresentationTimelineBefore.value(QStringLiteral("presentationPending")).toBool()
+			|| m_screenSharePresentationTimelineBefore.value(QStringLiteral("scopeResetPending")).toBool()
+			|| m_host->chatModel()->appendPending() || m_host->chatModel()->prependPending()) {
+			if (error) *error = QStringLiteral("The chat fixture must expose a stable visible message before adding the share.");
+			return {};
+		}
+		ScreenShareSession session;
+		session.streamID = QStringLiteral("visual-presentation-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+		session.ownerSession = 0;
+		session.scopeID = m_host->activeScopeController()->scopeToken().section(QLatin1Char(':'), 1).toUInt();
+		session.captureAudio = true;
+		session.width = 1280;
+		session.height = 720;
+		session.fps = 30;
+		session.state = MumbleProto::ScreenShareLifecycleStateActive;
+		m_screenSharePresentationManager = manager;
+		m_screenSharePresentationStreamID = session.streamID;
+		m_screenSharePresentationLastStreamID = session.streamID;
+		m_screenSharePresentationLastHelperOperationAttempts = 0;
+		m_screenSharePresentationScopeToken = m_host->activeScopeController()->scopeToken();
+		m_screenSharePresentationPreviousState = m_host->activeScopeController()->screenShare();
+		manager->m_visualFixtureStreams.insert(session.streamID);
+		manager->m_visualFixtureHelperOperationAttempts.insert(session.streamID, 0);
+		manager->m_sessions.insert(session.streamID, session);
+		// Exercise production ownership and all dock/detach/audio preference signal
+		// connections. PID zero prevents Windows audio calls; no helper is launched.
+		manager->ensureViewBackend(session, 0);
+		auto *backend = qobject_cast< ScreenShareViewBackend * >(manager->viewBackend(session.streamID));
+		if (!backend) {
+			clearScreenSharePresentationFixture();
+			if (error) *error = QStringLiteral("The manager could not create the fixture backend.");
+			return {};
+		}
+		m_screenSharePresentationBackend = backend;
+		backend->setIdentity(QStringLiteral("Fixture sharer"), QStringLiteral("Fixture channel"));
+		backend->setVisualFixtureFrame(visualScreenShareFrame());
+		backend->setOperationState(QStringLiteral("ready"), {}, false);
+		backend->setAudioVolume(43);
+		backend->setAudioMuted(true);
+		m_screenSharePresentationFrameKey = backend->currentFrame().cacheKey();
+		const auto counters = std::make_shared< QVariantMap >(QVariantMap {
+			{ QStringLiteral("backendDestroyed"), 0 }, { QStringLiteral("processIdChanges"), 0 },
+			{ QStringLiteral("frameChanges"), 0 }, { QStringLiteral("transportChanges"), 0 } });
+		m_screenSharePresentationCounters = counters;
+		const auto increment = [counters](const QString &key) {
+			counters->insert(key, counters->value(key).toInt() + 1);
+		};
+		QObject::connect(backend, &QObject::destroyed, manager,
+			[increment]() { increment(QStringLiteral("backendDestroyed")); });
+		QObject::connect(backend, &ScreenShareViewBackend::processIdChanged, manager,
+			[increment]() { increment(QStringLiteral("processIdChanges")); });
+		QObject::connect(backend, &ScreenShareViewBackend::frameChanged, manager,
+			[increment]() { increment(QStringLiteral("frameChanges")); });
+		QObject::connect(backend, &ScreenShareViewBackend::nativeFrameActiveChanged, manager,
+			[increment]() { increment(QStringLiteral("transportChanges")); });
+		QVariantMap share {
+			{ QStringLiteral("visible"), true }, { QStringLiteral("available"), true },
+			{ QStringLiteral("mode"), QStringLiteral("viewing") },
+			{ QStringLiteral("streamId"), session.streamID },
+			{ QStringLiteral("scopeToken"), m_screenSharePresentationScopeToken },
+			{ QStringLiteral("ownerLabel"), QStringLiteral("Fixture sharer") },
+			{ QStringLiteral("backend"), QVariant::fromValue(static_cast< QObject * >(backend)) }
+		};
+		m_host->setVisualFixtureMutationActive(true);
+		m_host->activeScopeController()->setScreenShare(share);
+		m_host->setVisualFixtureMutationActive(false);
+	} else if (action != QLatin1String("state")) {
+		auto *backend = qobject_cast< ScreenShareViewBackend * >(m_screenSharePresentationBackend.data());
+		if (!backend || m_screenSharePresentationManager != manager
+			|| manager->viewBackend(m_screenSharePresentationStreamID) != backend
+			|| !manager->m_visualFixtureStreams.contains(m_screenSharePresentationStreamID)) {
+			if (error) *error = QStringLiteral("There is no surviving manager-owned presentation fixture.");
+			return {};
+		}
+		if (action == QLatin1String("stop")) {
+			backend->requestStop();
+			const QVariantMap stopped = screenSharePresentationFixtureState();
+			clearScreenSharePresentationFixture();
+			QVariantMap result = screenSharePresentationFixtureState();
+			result.insert(QStringLiteral("stopped"), true);
+			result.insert(QStringLiteral("beforeClear"), stopped);
+			return result;
+		}
+		if (action == QLatin1String("detach")) backend->requestDetach();
+		else if (action == QLatin1String("dock")) backend->requestDock();
+		else if (action == QLatin1String("close")) {
+			auto *view = qobject_cast< QQuickWindow * >(
+				manager->m_qmlViewWindows.value(m_screenSharePresentationStreamID).data());
+			if (!view) {
+				if (error) *error = QStringLiteral("Detach the fixture before testing window close.");
+				return {};
+			}
+			// Exercise ApplicationWindow.onClosing and its queued close request,
+			// including closeRequestPending, rather than bypassing the window.
+			view->close();
+		} else if (action == QLatin1String("fullscreen")) backend->requestFullscreen();
+		else if (action == QLatin1String("restore")) {
+			QObject *view = manager->m_qmlViewWindows.value(m_screenSharePresentationStreamID);
+			if (view) QMetaObject::invokeMethod(view, "setFullscreen", Q_ARG(QVariant, QVariant(false)));
+		} else if (action == QLatin1String("pause")) backend->setPaused(true);
+		else if (action == QLatin1String("resume")) backend->setPaused(false);
+		else if (action == QLatin1String("set-audio")) {
+			bool validVolume = false;
+			const int volume = request.value(QStringLiteral("volume")).toInt(&validVolume);
+			if (!validVolume || volume < 0 || volume > 100 || !request.contains(QStringLiteral("muted"))) {
+				if (error) *error = QStringLiteral("Fixture audio requires volume 0-100 and muted.");
+				return {};
+			}
+			backend->setAudioVolume(volume);
+			backend->setAudioMuted(request.value(QStringLiteral("muted")).toBool());
+		} else {
+			if (error) *error = QStringLiteral("Unknown screen-share presentation fixture action.");
+			return {};
+		}
+	}
+	// State is intentionally a snapshot, not a fixed delay or a claim of settled
+	// rendering. The harness polls geometry/anchor ownership and captures a frame.
+	return screenSharePresentationFixtureState();
+#else
+	Q_UNUSED(request);
+	if (error) *error = QStringLiteral("Visual fixtures are unavailable in this build.");
+	return {};
+#endif
+}
+
+QVariantMap QmlVisualFixtureController::screenSharePresentationFixtureState() const {
+	QVariantMap result { { QStringLiteral("synthetic"), true }, { QStringLiteral("receiverStarted"), false },
+		{ QStringLiteral("audioPlaybackExercised"), false }, { QStringLiteral("active"), false } };
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	ScreenShareManager *manager = m_screenSharePresentationManager.data();
+	auto *backend = qobject_cast< ScreenShareViewBackend * >(m_screenSharePresentationBackend.data());
+	result.insert(QStringLiteral("streamId"), m_screenSharePresentationStreamID);
+	result.insert(QStringLiteral("active"), backend != nullptr);
+	result.insert(QStringLiteral("backendMatchesSeed"), backend && manager
+		&& manager->viewBackend(m_screenSharePresentationStreamID) == backend);
+	const QString operationStreamID = m_screenSharePresentationLastStreamID;
+	const bool publishPending = manager && !operationStreamID.isEmpty()
+		&& manager->m_publishOperationTracker.streamIDs().contains(operationStreamID);
+	const bool viewPending = manager && !operationStreamID.isEmpty()
+		&& manager->m_viewOperationTracker.streamIDs().contains(operationStreamID);
+	result.insert(QStringLiteral("operationTrackingStreamId"), operationStreamID);
+	result.insert(QStringLiteral("pendingPublishOperation"), publishPending);
+	result.insert(QStringLiteral("pendingViewOperation"), viewPending);
+	result.insert(QStringLiteral("pendingHelperOperations"), int(publishPending) + int(viewPending));
+	result.insert(QStringLiteral("fixtureGuardActive"), manager && manager->m_visualFixtureStreams.contains(operationStreamID));
+	result.insert(QStringLiteral("helperOperationAttempts"), manager && !m_screenSharePresentationStreamID.isEmpty()
+		? manager->m_visualFixtureHelperOperationAttempts.value(m_screenSharePresentationStreamID)
+		: m_screenSharePresentationLastHelperOperationAttempts);
+	result.insert(QStringLiteral("counters"), m_screenSharePresentationCounters
+		? *m_screenSharePresentationCounters : QVariantMap());
+	result.insert(QStringLiteral("timelineBefore"), m_screenSharePresentationTimelineBefore);
+	if (backend) {
+		result.insert(QStringLiteral("detached"), backend->detached());
+		result.insert(QStringLiteral("processId"), backend->processId());
+		result.insert(QStringLiteral("backendIdentity"), QString::number(reinterpret_cast< quintptr >(backend), 16));
+		result.insert(QStringLiteral("frameKey"), QString::number(backend->currentFrame().cacheKey()));
+		result.insert(QStringLiteral("frameMatchesSeed"), backend->currentFrame().cacheKey() == m_screenSharePresentationFrameKey);
+		result.insert(QStringLiteral("audioMuted"), backend->audioMuted());
+		result.insert(QStringLiteral("audioVolume"), backend->audioVolume());
+		result.insert(QStringLiteral("paused"), backend->paused());
+		result.insert(QStringLiteral("operationStatus"), backend->operationStatus());
+		result.insert(QStringLiteral("preferenceWriteScheduled"), manager
+			&& manager->m_pendingExternalViewAudioPreferenceSaves.contains(m_screenSharePresentationStreamID));
+	}
+	if (m_host && m_host->window()) {
+		QVariant timeline;
+		QMetaObject::invokeMethod(m_host->window(), "timelinePresentationState", Q_RETURN_ARG(QVariant, timeline));
+		QVariantMap timelineState = timeline.toMap();
+		const QVariantMap messageIdentity = visualChatMessageIdentity(m_host);
+		for (auto it = messageIdentity.cbegin(); it != messageIdentity.cend(); ++it)
+			timelineState.insert(it.key(), it.value());
+		result.insert(QStringLiteral("timeline"), timelineState);
+		result.insert(QStringLiteral("scopeUnchanged"),
+			m_host->activeScopeController()->scopeToken() == m_screenSharePresentationScopeToken);
+		QQuickItem *docked = quickItemByObjectName(m_host->window()->contentItem(), QStringLiteral("dockedScreenShare"));
+		if (docked) result.insert(QStringLiteral("inline"), QVariantMap {
+			{ QStringLiteral("visible"), docked->isVisible() }, { QStringLiteral("height"), docked->height() },
+			{ QStringLiteral("committedHeight"), docked->property("committedHeight") },
+			{ QStringLiteral("desiredHeight"), docked->property("desiredHeight") } });
+	}
+	int attachedRenderers = 0;
+	QVariantList renderers;
+	for (QWindow *topLevel : QGuiApplication::topLevelWindows()) {
+		auto *window = qobject_cast< QQuickWindow * >(topLevel);
+		if (!window) continue;
+		QList< QQuickItem * > pending { window->contentItem() };
+		while (!pending.isEmpty()) {
+			QQuickItem *item = pending.takeLast();
+			if (!item) continue;
+			pending.append(item->childItems());
+			if (item->objectName() != QLatin1String("screenShareNativeVideoFrame")) continue;
+			QObject *renderBackend = item->property("backend").value< QObject * >();
+			if (backend && renderBackend == backend) ++attachedRenderers;
+			renderers.push_back(QVariantMap {
+				{ QStringLiteral("ownsFixtureBackend"), backend && renderBackend == backend },
+				{ QStringLiteral("hasBackend"), renderBackend != nullptr },
+				{ QStringLiteral("visible"), item->isVisible() }, { QStringLiteral("width"), item->width() },
+				{ QStringLiteral("height"), item->height() },
+				{ QStringLiteral("window"), m_host && window == m_host->window()
+					? QStringLiteral("main") : QStringLiteral("detached") },
+				{ QStringLiteral("windowVisible"), window->isVisible() },
+				{ QStringLiteral("windowFullscreen"), window->visibility() == QWindow::FullScreen },
+				{ QStringLiteral("windowExposed"), window->isExposed() }
+			});
+		}
+	}
+	result.insert(QStringLiteral("attachedRenderers"), attachedRenderers);
+	result.insert(QStringLiteral("renderers"), renderers);
+#endif
+	return result;
+}
+
+void QmlVisualFixtureController::clearScreenSharePresentationFixture() {
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	const QString streamID = m_screenSharePresentationStreamID;
+	ScreenShareManager *manager = m_screenSharePresentationManager.data();
+	if (streamID.isEmpty()) return;
+	if (m_host && m_host->activeScopeController()->screenShare().value(QStringLiteral("streamId")).toString() == streamID) {
+		m_host->setVisualFixtureMutationActive(true);
+		m_host->activeScopeController()->setScreenShare(
+			m_host->activeScopeController()->scopeToken() == m_screenSharePresentationScopeToken
+				? m_screenSharePresentationPreviousState : QVariantMap());
+		m_host->setVisualFixtureMutationActive(false);
+	}
+	if (manager && manager->m_visualFixtureStreams.contains(streamID)) {
+		QPointer< QObject > oldView = manager->m_qmlViewWindows.value(streamID);
+		manager->dockView(streamID);
+		if (oldView) QCoreApplication::sendPostedEvents(oldView.data(), QEvent::DeferredDelete);
+		ScreenShareViewBackend *backend = manager->m_viewBackends.take(streamID);
+		manager->m_sessions.remove(streamID);
+		manager->m_externalViewAudioMuted.remove(streamID);
+		manager->m_pausedExternalViewSessions.remove(streamID);
+		manager->m_externalViewAudioPreferenceKeys.remove(streamID);
+		manager->m_pendingExternalViewAudioPreferenceSaves.remove(streamID);
+		m_screenSharePresentationLastHelperOperationAttempts = manager->m_visualFixtureHelperOperationAttempts.value(streamID);
+		manager->m_visualFixtureStreams.remove(streamID);
+		manager->m_visualFixtureHelperOperationAttempts.remove(streamID);
+		// Preserve the product's deferred ordering: the inline Loader releases its
+		// old item before the backend is deleted on the next event-loop turn.
+		if (backend) backend->deleteLater();
+	}
+	m_screenSharePresentationBackend.clear();
+	// Keep the guarded manager and last UUID for post-cleanup diagnostics. State
+	// must inspect the real trackers, not report zero merely because we cleared
+	// the pointer needed to observe a leaked operation.
+	m_screenSharePresentationStreamID.clear();
+	m_screenSharePresentationScopeToken.clear();
+	m_screenSharePresentationPreviousState.clear();
+#endif
+}
+
 void QmlVisualFixtureController::resetSurfaceFixtures(const bool preserveDetachedMediaWindow,
 													 const bool preserveProductMenus) {
+	clearScreenSharePresentationFixture();
 	m_focusWindow.clear();
 	m_focusItem.clear();
 	m_focusWindowId.clear();

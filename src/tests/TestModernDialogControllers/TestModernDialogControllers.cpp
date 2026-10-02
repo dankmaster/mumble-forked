@@ -189,6 +189,21 @@ private slots:
 	void dialogControllerBuildsChangeAvatar();
 	void dialogControllerBuildsMigrationNotice();
 	void chatHistoryGrantDialogWaitsForMatchedAcknowledgement();
+	void directHistoryReplyRequiresScopePeerRequestAndConnection();
+	void directHistoryErrorsPreserveLoadedCacheAndReadState();
+	void directHistoryModeChangeRejectsAmbiguousLegacyReplies();
+	void directHistoryLiveMessageDoesNotCompletePendingRequest();
+	void directHistoryTimeoutExpiresOnlyTheMatchingRequest();
+	void directHistoryRetiredTimerCannotExpireItsSuccessor();
+	void directHistoryTimerResolvesMovedOrRemovedConversation();
+	void directHistoryTimerDiesWithItsContext();
+	void directHistoryReconnectAndPeerReuseRejectOldWork();
+	void directHistoryWarmupScopesAndUnsentRequestsRemainIndependent();
+	void directHistorySessionReuseWithinConnectionClearsPriorIdentity_data();
+	void directHistorySessionReuseWithinConnectionClearsPriorIdentity();
+	void directHistorySamePeerPreservesPendingRequestAndCache();
+	void directHistoryRegisteredZeroAndUnregisteredIdentityRemainDistinct();
+	void directHistoryNewUnregisteredSessionDoesNotInheritPrivateMessages();
 };
 
 void TestModernDialogControllers::screenShareBackendDockingRequestsPreservePlayback() {
@@ -4959,6 +4974,450 @@ void TestModernDialogControllers::chatHistoryGrantDialogWaitsForMatchedAcknowled
 	QVERIFY(messagesSource.contains(QStringLiteral("ChatHistoryGrantSync_Result_NoOp")));
 	QVERIFY(automationSource.contains(QStringLiteral("persistentUserId")));
 	QVERIFY(automationSource.contains(QStringLiteral("connectionGeneration")));
+}
+
+namespace {
+MumbleProto::ChatHistoryResponse directHistoryReply(unsigned int peerUserID, quint64 requestID = 0) {
+	MumbleProto::ChatHistoryResponse response;
+	response.set_scope(MumbleProto::Private);
+	response.set_scope_id(peerUserID);
+	if (requestID != 0) response.set_request_id(requestID);
+	return response;
+}
+}
+
+void TestModernDialogControllers::directHistoryReplyRequiresScopePeerRequestAndConnection() {
+	using Result = MainWindow::DirectHistoryReplyResult;
+	MainWindow::ModernDirectMessageConversation conversation;
+	int delivered = 0;
+	const auto append = [&](const MumbleProto::ChatMessage &) { ++delivered; };
+	QVERIFY(!MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 0, 8 }));
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 101, 8 }));
+	QVERIFY(!MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 102, 8 }));
+	QCOMPARE(conversation.historyRequestID, quint64(101));
+	auto reply = directHistoryReply(42, 101);
+	reply.add_messages()->set_message_id(1);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 7, append), Result::Ignored);
+	reply.set_request_id(102);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8, append), Result::Ignored);
+	reply.set_request_id(101);
+	reply.set_scope_id(43);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8, append), Result::Ignored);
+	reply.set_scope_id(42);
+	reply.set_scope(MumbleProto::Channel);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8, append), Result::Ignored);
+	reply.set_scope(MumbleProto::Private);
+	reply.clear_scope_id();
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8, append), Result::Ignored);
+	QVERIFY(conversation.historyLoading);
+	QVERIFY(!conversation.historyReplyCorrelation);
+	QCOMPARE(delivered, 0);
+	reply.set_scope_id(42);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8, append), Result::Accepted);
+	QCOMPARE(delivered, 1);
+	QVERIFY(conversation.historyLoaded);
+	QVERIFY(conversation.historyReplyCorrelation);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8, append), Result::Ignored);
+	QCOMPARE(delivered, 1);
+}
+
+void TestModernDialogControllers::directHistoryErrorsPreserveLoadedCacheAndReadState() {
+	using Result = MainWindow::DirectHistoryReplyResult;
+	for (const auto error : { MumbleProto::ChatHistoryResponse::PermissionDenied, MumbleProto::ChatHistoryResponse::Unavailable,
+		MumbleProto::ChatHistoryResponse::Unsupported, MumbleProto::ChatHistoryResponse::RateLimited }) {
+		MainWindow::ModernDirectMessageConversation conversation;
+		conversation.historyLoaded = true;
+		conversation.persistentHistory = true;
+		conversation.lastReadMessageID = 77;
+		conversation.lastMessageID = 80;
+		conversation.unreadCount = 3;
+		conversation.messages.push_back({});
+		conversation.messages.back().messageID = 80;
+		conversation.persistentMessageKeys.insert(QStringLiteral("7:80"));
+		QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 101, 8 }));
+		auto failed = directHistoryReply(42, 101);
+		failed.set_error(error);
+		failed.set_error_message("  "); // An empty server explanation still needs a visible fallback.
+		failed.set_last_read_message_id(0);
+		failed.add_messages()->set_message_id(9);
+		int delivered = 0;
+		const auto append = [&](const MumbleProto::ChatMessage &) { ++delivered; };
+		QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, failed, 8, append), Result::Failed);
+		QCOMPARE(delivered, 0);
+		QVERIFY(conversation.historyLoaded);
+		QVERIFY(!conversation.historyLoading);
+		QVERIFY(!conversation.historyError.trimmed().isEmpty());
+		QCOMPARE(conversation.lastReadMessageID, 77U);
+		QCOMPARE(conversation.lastMessageID, 80U);
+		QCOMPARE(conversation.unreadCount, 3U);
+		QCOMPARE(conversation.messages.size(), std::size_t(1));
+		QCOMPARE(conversation.messages.front().messageID, 80U);
+		QVERIFY(conversation.persistentMessageKeys.contains(QStringLiteral("7:80")));
+		QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 102, 8 }));
+		QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, failed, 8, append), Result::Ignored);
+		auto accepted = directHistoryReply(42, 102);
+		accepted.set_last_read_message_id(88);
+		accepted.add_messages()->set_message_id(81);
+		accepted.add_messages()->set_message_id(82);
+		QList< unsigned int > orderedIDs;
+		QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, accepted, 8,
+			[&](const MumbleProto::ChatMessage &message) {
+				QVERIFY(!conversation.historyLoading);
+				QVERIFY(conversation.historyLoaded);
+				QCOMPARE(conversation.lastReadMessageID, 88U);
+				orderedIDs.push_back(message.message_id());
+			}), Result::Accepted);
+		QCOMPARE(orderedIDs, (QList< unsigned int > { 81, 82 }));
+		QVERIFY(conversation.historyError.isEmpty());
+	}
+}
+
+void TestModernDialogControllers::directHistoryModeChangeRejectsAmbiguousLegacyReplies() {
+	using Result = MainWindow::DirectHistoryReplyResult;
+	MainWindow::ModernDirectMessageConversation legacy;
+	const auto append = [](const MumbleProto::ChatMessage &) {};
+	QVERIFY(MainWindow::beginDirectHistoryRequest(legacy, { 5, 42, 101, 8 }));
+	legacy.persistentHistory = false;
+	MainWindow::abandonDirectHistoryRequest(legacy, QStringLiteral("Private mode"));
+	QVERIFY(legacy.historyLegacyAmbiguous);
+	QVERIFY(!legacy.historyLoading);
+	QVERIFY(!MainWindow::beginDirectHistoryRequest(legacy, { 5, 42, 102, 8 }));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(legacy, directHistoryReply(42), 8, append), Result::Ignored);
+	QVERIFY(!legacy.historyLoaded);
+	QVERIFY(!legacy.persistentHistory);
+	QVERIFY(MainWindow::beginDirectHistoryRequest(legacy, { 5, 42, 103, 9 }));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(legacy, directHistoryReply(42), 9, append), Result::Accepted);
+
+	MainWindow::ModernDirectMessageConversation correlated;
+	QVERIFY(MainWindow::beginDirectHistoryRequest(correlated, { 5, 42, 201, 8 }));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(correlated, directHistoryReply(42, 201), 8, append), Result::Accepted);
+	QVERIFY(MainWindow::beginDirectHistoryRequest(correlated, { 5, 42, 202, 8 }));
+	MainWindow::abandonDirectHistoryRequest(correlated);
+	QVERIFY(!correlated.historyLegacyAmbiguous);
+	QVERIFY(MainWindow::beginDirectHistoryRequest(correlated, { 5, 42, 203, 8 }));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(correlated, directHistoryReply(42, 202), 8, append), Result::Ignored);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(correlated, directHistoryReply(42), 8, append), Result::Ignored);
+	QVERIFY(correlated.historyLoading);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(correlated, directHistoryReply(42, 203), 8, append), Result::Accepted);
+}
+
+void TestModernDialogControllers::directHistoryLiveMessageDoesNotCompletePendingRequest() {
+	using Result = MainWindow::DirectHistoryReplyResult;
+	MainWindow::ModernDirectMessageConversation conversation;
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 101, 8 }));
+	MainWindow::updateDirectHistoryPeer(conversation, 5, 42, QStringLiteral("Peer"), QStringLiteral("Room"));
+	QVERIFY(conversation.persistentHistory);
+	QVERIFY(conversation.historyLoading);
+	QVERIFY(!conversation.historyLoaded);
+	QCOMPARE(conversation.historyRequestID, quint64(101));
+	auto reply = directHistoryReply(42, 101);
+	reply.add_messages()->set_message_id(7);
+	int delivered = 0;
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8,
+		[&](const MumbleProto::ChatMessage &) { ++delivered; }), Result::Accepted);
+	QCOMPARE(delivered, 1);
+	QVERIFY(!conversation.historyLoading);
+
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 102, 8 }));
+	reply.set_request_id(102);
+	reply.set_error(MumbleProto::ChatHistoryResponse::Unavailable);
+	reply.set_error_message("History unavailable");
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, reply, 8,
+		[](const MumbleProto::ChatMessage &) {}), Result::Failed);
+	MainWindow::updateDirectHistoryPeer(conversation, 5, 42, QStringLiteral("Renamed peer"), QStringLiteral("Other room"));
+	QCOMPARE(conversation.historyError, QStringLiteral("History unavailable"));
+	QCOMPARE(conversation.label, QStringLiteral("Renamed peer"));
+	QVERIFY(conversation.historyLoaded);
+}
+
+void TestModernDialogControllers::directHistoryTimeoutExpiresOnlyTheMatchingRequest() {
+	QObject context;
+	MainWindow::ModernDirectMessageConversation conversation;
+	conversation.historyLoaded = true;
+	conversation.lastReadMessageID = 20;
+	conversation.messages.push_back({});
+	const MainWindow::DirectHistoryRequestIdentity request { 5, 42, 101, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, request));
+	int expired = 0;
+	MainWindow::armDirectHistoryTimeout(&context, request, [&]() { return &conversation; }, []() { return quint64(8); },
+		[&]() { ++expired; }, 20);
+	QTRY_COMPARE_WITH_TIMEOUT(expired, 1, 1000);
+	QVERIFY(!conversation.historyLoading);
+	QVERIFY(conversation.historyLoaded);
+	QVERIFY(conversation.historyLegacyAmbiguous);
+	QVERIFY(!conversation.historyError.isEmpty());
+	QCOMPARE(conversation.lastReadMessageID, 20U);
+	QCOMPARE(conversation.messages.size(), std::size_t(1));
+	QVERIFY(!MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 102, 8 }));
+	QVERIFY(!MainWindow::expireDirectHistoryRequest(conversation, request, 8));
+}
+
+void TestModernDialogControllers::directHistoryRetiredTimerCannotExpireItsSuccessor() {
+	using Result = MainWindow::DirectHistoryReplyResult;
+	QObject context;
+	MainWindow::ModernDirectMessageConversation conversation;
+	const MainWindow::DirectHistoryRequestIdentity oldRequest { 5, 42, 101, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, oldRequest));
+	int lookups = 0;
+	int expired = 0;
+	MainWindow::armDirectHistoryTimeout(&context, oldRequest, [&]() { ++lookups; return &conversation; },
+		[]() { return quint64(8); }, [&]() { ++expired; }, 20);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, directHistoryReply(42, 101), 8,
+		[](const MumbleProto::ChatMessage &) {}), Result::Accepted);
+	const MainWindow::DirectHistoryRequestIdentity newRequest { 5, 42, 102, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, newRequest));
+	QTRY_COMPARE_WITH_TIMEOUT(lookups, 1, 1000);
+	QCOMPARE(expired, 0);
+	QVERIFY(conversation.historyLoading);
+	QVERIFY(conversation.historyError.isEmpty());
+	MainWindow::armDirectHistoryTimeout(&context, newRequest, [&]() { return &conversation; },
+		[]() { return quint64(8); }, [&]() { ++expired; }, 20);
+	QTRY_COMPARE_WITH_TIMEOUT(expired, 1, 1000);
+	QVERIFY(!conversation.historyLegacyAmbiguous); // A tagged reply already established safe retry.
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 103, 8 }));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, directHistoryReply(42, 102), 8,
+		[](const MumbleProto::ChatMessage &) {}), Result::Ignored);
+	QVERIFY(conversation.historyLoading);
+}
+
+void TestModernDialogControllers::directHistoryTimerResolvesMovedOrRemovedConversation() {
+	QObject context;
+	QHash< unsigned int, MainWindow::ModernDirectMessageConversation > conversations;
+	const MainWindow::DirectHistoryRequestIdentity first { 5, 42, 101, 8 };
+	const MainWindow::DirectHistoryRequestIdentity removed { 6, 43, 101, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversations[5], first));
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversations[6], removed));
+	const auto detachedSnapshot = conversations;
+	int lookups = 0;
+	int expired = 0;
+	for (const auto &request : { first, removed }) {
+		MainWindow::armDirectHistoryTimeout(&context, request,
+			[&, session = request.session]() -> MainWindow::ModernDirectMessageConversation * {
+				++lookups;
+				const auto it = conversations.find(session);
+				return it == conversations.end() ? nullptr : &it.value();
+			}, []() { return quint64(8); }, [&]() { ++expired; }, 20);
+	}
+	conversations.remove(6);
+	for (unsigned int i = 100; i < 500; ++i) conversations.insert(i, {});
+	QTRY_COMPARE_WITH_TIMEOUT(lookups, 2, 1000);
+	QCOMPARE(expired, 1);
+	QVERIFY(!conversations[5].historyLoading);
+	QVERIFY(!conversations.contains(6));
+	QVERIFY(detachedSnapshot[5].historyLoading);
+	QVERIFY(detachedSnapshot[6].historyLoading);
+}
+
+void TestModernDialogControllers::directHistoryTimerDiesWithItsContext() {
+	auto context = std::make_unique< QObject >();
+	MainWindow::ModernDirectMessageConversation conversation;
+	const MainWindow::DirectHistoryRequestIdentity request { 5, 42, 101, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, request));
+	int lookups = 0;
+	int expired = 0;
+	MainWindow::armDirectHistoryTimeout(context.get(), request, [&]() { ++lookups; return &conversation; },
+		[]() { return quint64(8); }, [&]() { ++expired; }, 1);
+	context.reset();
+	QTest::qWait(40);
+	QCOMPARE(lookups, 0);
+	QCOMPARE(expired, 0);
+	QVERIFY(conversation.historyLoading);
+}
+
+void TestModernDialogControllers::directHistoryReconnectAndPeerReuseRejectOldWork() {
+	using Result = MainWindow::DirectHistoryReplyResult;
+	QObject context;
+	MainWindow::ModernDirectMessageConversation conversation;
+	const MainWindow::DirectHistoryRequestIdentity oldRequest { 5, 42, 101, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, oldRequest));
+	quint64 currentGeneration = 8;
+	int lookups = 0;
+	int expired = 0;
+	MainWindow::armDirectHistoryTimeout(&context, oldRequest, [&]() { ++lookups; return &conversation; },
+		[&]() { return currentGeneration; }, [&]() { ++expired; }, 20);
+	currentGeneration = 9;
+	QTRY_COMPARE_WITH_TIMEOUT(lookups, 1, 1000);
+	QCOMPARE(expired, 0);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, directHistoryReply(42, 101), currentGeneration,
+		[](const MumbleProto::ChatMessage &) {}), Result::Ignored);
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 43, 102, currentGeneration }));
+	QVERIFY(!conversation.historyReplyCorrelation);
+	QVERIFY(!MainWindow::expireDirectHistoryRequest(conversation, oldRequest, currentGeneration));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, directHistoryReply(42, 101), currentGeneration,
+		[](const MumbleProto::ChatMessage &) {}), Result::Ignored);
+	QVERIFY(conversation.historyLoading);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, directHistoryReply(43, 102), currentGeneration,
+		[](const MumbleProto::ChatMessage &) {}), Result::Accepted);
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 43, 103, currentGeneration }));
+	const MainWindow::DirectHistoryRequestIdentity reusedSession { 5, 42, 103, currentGeneration };
+	QVERIFY(!MainWindow::expireDirectHistoryRequest(conversation, reusedSession, currentGeneration));
+	QVERIFY(conversation.historyLoading);
+}
+
+void TestModernDialogControllers::directHistoryWarmupScopesAndUnsentRequestsRemainIndependent() {
+	using Result = MainWindow::DirectHistoryReplyResult;
+	MainWindow::ModernDirectMessageConversation first, second;
+	const MainWindow::DirectHistoryRequestIdentity firstRequest { 5, 42, 101, 8 };
+	const MainWindow::DirectHistoryRequestIdentity secondRequest { 6, 43, 101, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(first, firstRequest));
+	QVERIFY(MainWindow::beginDirectHistoryRequest(second, secondRequest));
+	QVERIFY(!MainWindow::failUnsentDirectHistoryRequest(first, secondRequest));
+	QVERIFY(first.historyLoading);
+	QVERIFY(MainWindow::failUnsentDirectHistoryRequest(first, firstRequest));
+	QVERIFY(!first.historyLegacyAmbiguous);
+	QVERIFY(!first.historyError.isEmpty());
+	QVERIFY(second.historyLoading);
+	QVERIFY(MainWindow::beginDirectHistoryRequest(first, { 5, 42, 102, 8 }));
+	const auto append = [](const MumbleProto::ChatMessage &) {};
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(first, directHistoryReply(43, 101), 8, append), Result::Ignored);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(second, directHistoryReply(43, 101), 8, append), Result::Accepted);
+	QVERIFY(first.historyLoading);
+	QVERIFY(!second.historyLoading);
+	QVERIFY(!MainWindow::failUnsentDirectHistoryRequest(first, firstRequest));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(first, directHistoryReply(42, 102), 8, append), Result::Accepted);
+}
+
+void TestModernDialogControllers::directHistorySessionReuseWithinConnectionClearsPriorIdentity_data() {
+	QTest::addColumn< int >("entryPath");
+	QTest::newRow("open-read-send-binding") << 0;
+	QTest::newRow("live-message-or-read-state") << 1;
+	QTest::newRow("new-request-before-coalescing") << 2;
+}
+
+void TestModernDialogControllers::directHistorySessionReuseWithinConnectionClearsPriorIdentity() {
+	QFETCH(int, entryPath);
+	using Result = MainWindow::DirectHistoryReplyResult;
+	QObject context;
+	MainWindow::ModernDirectMessageConversation conversation;
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 101, 8 }));
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, directHistoryReply(42, 101), 8,
+		[](const MumbleProto::ChatMessage &) {}), Result::Accepted);
+	const MainWindow::DirectHistoryRequestIdentity retired { 5, 42, 102, 8 };
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, retired));
+	conversation.open = true;
+	conversation.label = QStringLiteral("Previous person");
+	conversation.subtitle = QStringLiteral("Previous room");
+	conversation.historyError = QStringLiteral("Previous error");
+	conversation.lastActivityAtMs = 123456;
+	conversation.unreadCount = 4;
+	conversation.lastReadMessageID = 80;
+	conversation.lastMessageID = 84;
+	conversation.messages.push_back({});
+	conversation.messages.back().messageID = 84;
+	conversation.messages.back().plainText = QStringLiteral("Previous private message");
+	conversation.persistentMessageKeys.insert(QStringLiteral("7:84"));
+	int oldTimerLookups = 0;
+	int expired = 0;
+	MainWindow::armDirectHistoryTimeout(&context, retired,
+		[&]() { ++oldTimerLookups; return &conversation; }, []() { return quint64(8); }, [&]() { ++expired; }, 20);
+
+	// A new registered person takes session 5 on the SAME transport, before the old timeout.
+	const MainWindow::DirectHistoryRequestIdentity current { 5, 43, 103, 8 };
+	if (entryPath == 0) {
+		QVERIFY(MainWindow::bindDirectMessagePeer(conversation, 5, 43));
+	} else if (entryPath == 1) {
+		MainWindow::updateDirectHistoryPeer(conversation, 5, 43, QStringLiteral("New person"), QStringLiteral("New room"));
+	} else {
+		QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, current));
+	}
+	QCOMPARE(conversation.peerUserID, 43U);
+	QVERIFY(conversation.open);
+	QVERIFY(conversation.messages.empty());
+	QVERIFY(conversation.persistentMessageKeys.isEmpty());
+	QCOMPARE(conversation.lastReadMessageID, 0U);
+	QCOMPARE(conversation.lastMessageID, 0U);
+	QCOMPARE(conversation.unreadCount, 0U);
+	QCOMPARE(conversation.lastActivityAtMs, qint64(0));
+	QVERIFY(!conversation.historyLoaded);
+	QVERIFY(!conversation.historyReplyCorrelation);
+	QVERIFY(!conversation.historyLegacyAmbiguous);
+	QVERIFY(conversation.historyError.isEmpty());
+	QVERIFY(conversation.label != QStringLiteral("Previous person"));
+	QVERIFY(conversation.subtitle != QStringLiteral("Previous room"));
+	if (entryPath != 2) {
+		QVERIFY(!conversation.historyLoading);
+		QCOMPARE(conversation.historyRequestID, quint64(0));
+		QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, current));
+	}
+	QVERIFY(conversation.historyLoading);
+	int oldMessagesDelivered = 0;
+	const auto oldAppend = [&](const MumbleProto::ChatMessage &) { ++oldMessagesDelivered; };
+	auto oldReply = directHistoryReply(42, 102);
+	oldReply.add_messages()->set_message_id(84);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, oldReply, 8, oldAppend), Result::Ignored);
+	oldReply.clear_request_id();
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, oldReply, 8, oldAppend), Result::Ignored);
+	QCOMPARE(oldMessagesDelivered, 0);
+	QTRY_COMPARE_WITH_TIMEOUT(oldTimerLookups, 1, 1000);
+	QCOMPARE(expired, 0);
+	QVERIFY(conversation.historyLoading);
+	QVERIFY(conversation.historyError.isEmpty());
+
+	auto newReply = directHistoryReply(43, 103);
+	newReply.add_messages()->set_message_id(900);
+	QCOMPARE(MainWindow::applyDirectHistoryResponse(conversation, newReply, 8,
+		[&](const MumbleProto::ChatMessage &message) {
+			conversation.messages.push_back({});
+			conversation.messages.back().messageID = message.message_id();
+		}), Result::Accepted);
+	QCOMPARE(conversation.messages.size(), std::size_t(1));
+	QCOMPARE(conversation.messages.front().messageID, 900U);
+	QVERIFY(conversation.historyLoaded);
+	QVERIFY(!conversation.historyLoading);
+}
+
+void TestModernDialogControllers::directHistorySamePeerPreservesPendingRequestAndCache() {
+	MainWindow::ModernDirectMessageConversation conversation;
+	QVERIFY(MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 101, 8 }));
+	conversation.historyLoaded = true;
+	conversation.historyReplyCorrelation = true;
+	conversation.messages.push_back({});
+	conversation.messages.back().messageID = 84;
+	conversation.persistentMessageKeys.insert(QStringLiteral("7:84"));
+	conversation.lastReadMessageID = 80;
+	conversation.unreadCount = 4;
+	QVERIFY(!MainWindow::bindDirectMessagePeer(conversation, 5, 42, true));
+	MainWindow::updateDirectHistoryPeer(conversation, 5, 42, QStringLiteral("New display name"), QStringLiteral("New room"));
+	QVERIFY(conversation.historyLoading);
+	QVERIFY(conversation.historyLoaded);
+	QVERIFY(conversation.historyReplyCorrelation);
+	QCOMPARE(conversation.historyRequestID, quint64(101));
+	QCOMPARE(conversation.messages.size(), std::size_t(1));
+	QCOMPARE(conversation.messages.front().messageID, 84U);
+	QVERIFY(conversation.persistentMessageKeys.contains(QStringLiteral("7:84")));
+	QCOMPARE(conversation.lastReadMessageID, 80U);
+	QCOMPARE(conversation.unreadCount, 4U);
+	QVERIFY(!MainWindow::beginDirectHistoryRequest(conversation, { 5, 42, 102, 8 }));
+}
+
+void TestModernDialogControllers::directHistoryRegisteredZeroAndUnregisteredIdentityRemainDistinct() {
+	MainWindow::ModernDirectMessageConversation conversation;
+	QVERIFY(!MainWindow::bindDirectMessagePeer(conversation, 5, 0U));
+	QVERIFY(conversation.peerIdentityInitialized);
+	QVERIFY(conversation.peerIdentity.has_value());
+	QCOMPARE(conversation.peerIdentity.value(), 0U);
+	conversation.messages.push_back({});
+	conversation.messages.back().messageID = 84;
+	QVERIFY(!MainWindow::bindDirectMessagePeer(conversation, 5, 0U));
+	QCOMPARE(conversation.messages.size(), std::size_t(1));
+	QVERIFY(MainWindow::bindDirectMessagePeer(conversation, 5, std::nullopt));
+	QVERIFY(conversation.messages.empty());
+	QVERIFY(!conversation.peerIdentity.has_value());
+	QVERIFY(MainWindow::bindDirectMessagePeer(conversation, 5, 0U));
+	QVERIFY(conversation.peerIdentity.has_value());
+}
+
+void TestModernDialogControllers::directHistoryNewUnregisteredSessionDoesNotInheritPrivateMessages() {
+	MainWindow::ModernDirectMessageConversation conversation;
+	QVERIFY(!MainWindow::bindDirectMessagePeer(conversation, 5, std::nullopt, true));
+	conversation.messages.push_back({});
+	conversation.messages.back().plainText = QStringLiteral("Previous unregistered person's private message");
+	QVERIFY(!MainWindow::bindDirectMessagePeer(conversation, 5, std::nullopt));
+	QCOMPARE(conversation.messages.size(), std::size_t(1));
+	QVERIFY(MainWindow::bindDirectMessagePeer(conversation, 5, std::nullopt, true));
+	QVERIFY(conversation.messages.empty());
+	QVERIFY(!conversation.historyLoading);
+	QVERIFY(!conversation.peerIdentity.has_value());
 }
 
 QTEST_MAIN(TestModernDialogControllers)

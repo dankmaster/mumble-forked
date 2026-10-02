@@ -899,6 +899,18 @@ quint64 ScreenShareManager::nextHelperOperationGeneration(const HelperOperationK
 
 void ScreenShareManager::scheduleHelperOperation(const HelperOperationKind kind, const ScreenShareSession &session,
                                                      const quint64 generation) {
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	// A presentation fixture never starts/stops external media. Count unexpected
+	// lifecycle work so the probe fails rather than silently simulating success.
+	if (m_visualFixtureStreams.contains(session.streamID)) {
+		++m_visualFixtureHelperOperationAttempts[session.streamID];
+		// begin() ran before this dispatch boundary. Retire the blocked operation
+		// so a later resetState() cannot rediscover it after fixture cleanup.
+		const bool publish = kind == HelperOperationKind::StartPublish || kind == HelperOperationKind::StopPublish;
+		(publish ? m_publishOperationTracker : m_viewOperationTracker).finishIfCurrent(session.streamID, generation);
+		return;
+	}
+#endif
 	using Command = Mumble::ScreenShare::IPC::Command;
 	Command command = Command::StopView;
 	switch (kind) {
@@ -1422,6 +1434,9 @@ void ScreenShareManager::setExternalViewAudioVolume(const QString &streamID, con
 }
 
 QString ScreenShareManager::externalViewAudioPreferenceKey(const ScreenShareSession &session) const {
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	if (m_visualFixtureStreams.contains(session.streamID)) return {};
+#endif
 	const ClientUser *owner = ClientUser::get(session.ownerSession);
 	if (!owner) return {};
 
@@ -1527,6 +1542,9 @@ void ScreenShareManager::handleScreenShareState(const MumbleProto::ScreenShareSt
 }
 
 void ScreenShareManager::reconcileSession(const ScreenShareSession &session) {
+#if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	if (m_visualFixtureStreams.contains(session.streamID)) return;
+#endif
 	if (canPublishSession(session)) {
 		startLocalPublishSession(session);
 	} else {
