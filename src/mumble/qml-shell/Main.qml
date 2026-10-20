@@ -4474,7 +4474,9 @@ ApplicationWindow {
 					property bool scopePresentationFrameCommitPending: false
 					readonly property bool scopePresentationContentVisible:
 						scopePresentationStartedAt <= 0
-							|| scopePresentationStableFrameCommittedAt > 0
+							|| !scopePresentationPending
+							|| (scopePresentationStableFrameCommittedAt > 0
+								&& scopePresentationGeometryMatches())
 					property bool scopePresentationFastPath: false
 					property int scopePresentationFastPathAttemptCount: 0
 					property string scopePresentationFirstFastPathBlocker: ""
@@ -4946,6 +4948,30 @@ ApplicationWindow {
 						}
 					}
 
+					function scopePresentationGeometryMatches() {
+						// Read every scalar before comparing. This binding also runs between
+						// the certified hidden frame and scene-graph synchronization, when a
+						// late viewport mutation must hide the rows before they can be painted.
+						const currentY = contentY
+						const currentHeight = contentHeight
+						const viewportHeight = height
+						const margin = topMargin
+						const contentOffset = contentItem ? contentItem.y : 0
+						const headerOffset = headerItem ? headerItem.y : 0
+						const firstVisible = firstVisibleMessageDelegate()
+						const firstId = firstVisible ? String(firstVisible.stableId || "") : ""
+						const firstOffset = firstVisible
+							? Number(firstVisible.mapToItem(timeline, 0, 0).y) : 0
+						return scopePresentationStableFrameCount > 0
+							&& isFinite(contentOffset) && isFinite(headerOffset)
+							&& firstId === scopePresentationStableFrameFirstVisibleId
+							&& Math.abs(firstOffset - scopePresentationStableFrameFirstVisibleOffset) <= 0.5
+							&& Math.abs(currentY - scopePresentationStableFrameContentY) <= 0.5
+							&& Math.abs(currentHeight - scopePresentationStableFrameContentHeight) <= 0.5
+							&& Math.abs(viewportHeight - scopePresentationStableFrameViewportHeight) <= 0.5
+							&& Math.abs(margin - scopePresentationStableFrameTopMargin) <= 0.5
+					}
+
 					function observeScopePresentationFrame() {
 						recordScopePresentationFrameMilestones()
 						if (scopePresentationStableReadyAt <= 0
@@ -4969,6 +4995,10 @@ ApplicationWindow {
 						// with the loading pane removed. Only now may input, UIA, and
 						// presentationBusy ownership be released.
 						if (scopePresentationStableFrameCommittedAt > 0) {
+							if (!scopePresentationContentVisible || !scopePresentationGeometryMatches()) {
+								recoverScopePresentationFrameRegression()
+								return
+							}
 							completeScopePresentationVisibleFrameCommit()
 							return
 						}
@@ -5394,7 +5424,9 @@ ApplicationWindow {
 									|| item.accessibilityPooled === true)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
-							if (point.y + item.height <= 0.5)
+							// Explicit y reads make the reveal binding observe layout changes;
+							// mapToItem's native transform reads are not QML dependencies.
+							if (!isFinite(item.y) || point.y + item.height <= 0.5)
 								continue
 							if (!candidate || point.y < candidateViewportY) {
 								candidate = item
@@ -5409,7 +5441,7 @@ ApplicationWindow {
 							if (!item || !item.visible)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
-							if (point.y + item.height <= 0.5)
+							if (!isFinite(item.y) || point.y + item.height <= 0.5)
 								continue
 							if (!candidate || point.y < candidateViewportY) {
 								candidate = item
@@ -10116,7 +10148,8 @@ ApplicationWindow {
 											&& (!asyncMessageDelegate.item
 											|| !asyncMessageDelegate.item.currentMessagePresentationReady
 											|| (asyncMessageDelegate.item.richResourcesRequired
-												&& !asyncMessageDelegate.item.richResourcesActive)
+												&& !asyncMessageDelegate.item.richResourcesActive
+												&& !asyncMessageDelegate.item.staticPreviewPresentationReady)
 											|| asyncMessageDelegate.item
 												.terminalPreviewFallbackUnavailable
 											|| (asyncMessageDelegate.item.richLoaderSuspended
@@ -10879,6 +10912,33 @@ ApplicationWindow {
 						}
 						readonly property bool previewLoaderSurfaceNonBlank:
 							previewLoaderSurfaceState !== "blank"
+						readonly property bool staticPreviewPresentationReady: {
+							const row = messageRowLoader.item
+							const loader = row ? row.previewLoader : null
+							const card = loader && loader.status === Loader.Ready ? loader.item : null
+							// Keep only a completed current-identity still in the existing
+							// ListView cache. This never admits a new tree or retains a player.
+							return !accessibilityPooled && !hasAttachmentContent && !hasInlineImageContent
+								&& hydrationOwnerGeneration === timeline.scopePresentationGeneration
+								&& hydrationOwnerScopeToken === String(activeScope.scopeToken || "")
+								&& asyncMessageDelegate.presentationHeightCommittedHeight > 0
+								&& previewMaterializationAdmitted && !previewNeedsHydration
+								&& !previewTerminalUnavailable && !!card
+								&& card.materializationSettled && card.staticPreviewCacheActive
+								&& card.paintedSurface && !card.inlinePlaybackActive
+								&& !card.currentMediaManagedAnimated
+						}
+						onStaticPreviewPresentationReadyChanged: {
+							// A same-message artwork/identity update can occur without a
+							// viewport-membership change. Retire its old offscreen admission
+							// immediately rather than decoding a new card under that lease.
+							if (!staticPreviewPresentationReady && !richContentViewportEligible
+									&& previewMaterializationAdmitted) {
+								previewMaterializationAdmitted = false
+								timeline.cancelRichLoaderResume(stableId)
+								suspendRichResourcesForScroll()
+							}
+						}
 						readonly property string performancePreviewSurfaceState:
 							!hasPreviewContent ? "not-required"
 							: previewLoaderIncubationSuppressed ? "loading"
@@ -11273,12 +11333,13 @@ ApplicationWindow {
 							updateRichResourceActivity()
 							requestPreviewHydrationIfNeeded()
 							if (!richContentViewportEligible) {
+								const retainStaticPresentation = staticPreviewPresentationReady
 								timeline.cancelRichLoaderResume(stableId)
-								// Cancelling the global single-flight token must also
-								// retire the provider tree it admitted. Otherwise an
-								// offscreen asynchronous Loader can keep incubating
-								// while the next visible preview owns the token.
-								previewMaterializationAdmitted = false
+								// Cancel unfinished incubation with its token. A completed
+								// static card stays warm for immediate reverse scrolling;
+								// pooling/reuse and preview identity changes still retire it.
+								if (!retainStaticPresentation)
+									previewMaterializationAdmitted = false
 								resetPreviewLoaderIncubationWatchdog(true)
 								// Scroll-start preserves already-painted visible media. Once
 								// the row actually leaves the viewport it is safe to release
