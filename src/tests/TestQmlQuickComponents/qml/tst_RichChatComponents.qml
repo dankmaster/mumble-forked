@@ -3260,6 +3260,41 @@ TestCase {
 		tryVerify(function() { return String(thumbnailImage.source).length > 0 })
 	}
 
+	function test_gallery_activation_preserves_thumbnail_rail_geometry_data() {
+		return [{ tag: "two-images", count: 2 }, { tag: "sixteen-images", count: 16 }]
+	}
+
+	function test_gallery_activation_preserves_thumbnail_rail_geometry(data) {
+		const loader = createTemporaryObject(isolatedPreviewLoaderComponent, testCase)
+		verify(loader !== null)
+		const media = []
+		for (let index = 0; index < data.count; ++index) {
+			media.push({ id: "media:" + index, kind: "image",
+				url: "image://mumble/gallery-geometry-" + index,
+				thumbnailUrl: "image://mumble/gallery-geometry-" + index })
+		}
+		loader.setSource("qrc:/qml-shell/EmbedMediaGallery.qml", {
+			mediaItems: media, renderActive: true, retainStaticVisual: true
+		})
+		tryCompare(loader, "status", Loader.Ready)
+		const gallery = loader.item
+		const rail = findChild(gallery, "embedDocumentMediaThumbnailList")
+		verify(rail !== null)
+		wait(60)
+		const activeHeight = gallery.implicitHeight
+		verify(activeHeight > 64)
+		compare(rail.height, 64)
+		gallery.renderActive = false
+		wait(60)
+		compare(gallery.implicitHeight, activeHeight,
+			"Suspending image work must not collapse the gallery geometry")
+		compare(rail.height, 64)
+		gallery.renderActive = true
+		wait(60)
+		compare(gallery.implicitHeight, activeHeight)
+		compare(rail.height, 64)
+	}
+
 	function test_typed_instagram_gallery_retains_only_the_selected_static_still_offscreen() {
 		const card = previewLoader.item
 		const sourceUrl = "https://www.instagram.com/p/scroll-regression/"

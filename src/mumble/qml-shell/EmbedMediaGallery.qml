@@ -632,8 +632,9 @@ ColumnLayout {
 		objectName: "embedDocumentMediaThumbnailList"
 		Layout.fillWidth: true
 		Layout.preferredHeight: visible ? 64 : 0
-		visible: (root.renderActive || root.warmStaticActive)
-			&& root.mediaItems.length > 1
+		// Activation owns image work, not the gallery's layout. Collapsing the
+		// rail while suspended changes the card height as it enters the viewport.
+		visible: root.mediaItems.length > 1
 		enabled: root.renderActive
 		orientation: ListView.Horizontal
 		spacing: Theme.space2
