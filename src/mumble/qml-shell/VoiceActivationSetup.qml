@@ -28,10 +28,12 @@ Rectangle {
 	property int suggestedStopThreshold: 20
 	property int suggestedStartThreshold: 45
 	property string recommendationReason: ""
+	property string captureError: ""
 
 	readonly property bool captureRunning: setupState === 1 || setupState === 3
 	readonly property bool resultReady: setupState === 4 || setupState === 5
-	readonly property bool inputAvailable: meter && meter.available !== false
+	readonly property bool inputAvailable: meter && meter.available === true
+	readonly property bool selectedMethodUsable: voiceSamples >= 5 && marginFor(selectedMethod) >= 6
 	readonly property int suggestedVoiceHold: Math.max(40,
 		Math.min(80, Number(field.voiceHold || 20)))
 	readonly property real progress: totalTicks > 0
@@ -46,6 +48,22 @@ Rectangle {
 			boundedMetric(meter.hybrid)]
 	}
 
+	function hasUsableInput() {
+		if (!inputAvailable)
+			return false
+		const values = [meter.amplitude, meter.signalToNoise, meter.hybrid]
+		return values.every(function(value) {
+			return typeof value === "number" && isFinite(value) && value >= 0 && value <= 100
+		})
+	}
+
+	function failCapture(message) {
+		sampleTimer.stop()
+		setupState = 0
+		resetSamples()
+		captureError = message
+	}
+
 	function resetSamples() {
 		ambientPeaks = [0, 0, 0]
 		ambientSamples = [[], [], []]
@@ -53,9 +71,14 @@ Rectangle {
 		voicePeaks = [0, 0, 0]
 		voiceSamples = 0
 		recommendationReason = ""
+		captureError = ""
 	}
 
 	function startQuietCapture() {
+		if (!hasUsableInput()) {
+			failCapture(qsTr("Microphone input is unavailable. Check the device and measure again."))
+			return
+		}
 		resetSamples()
 		setupState = 1
 		totalTicks = 30
@@ -64,6 +87,10 @@ Rectangle {
 	}
 
 	function startVoiceCapture() {
+		if (!hasUsableInput()) {
+			failCapture(qsTr("Microphone input is unavailable. Check the device and measure again."))
+			return
+		}
 		setupState = 3
 		totalTicks = 50
 		ticksRemaining = totalTicks
@@ -77,6 +104,12 @@ Rectangle {
 	}
 
 	function sampleCurrentFrame() {
+		if (!captureRunning)
+			return false
+		if (!hasUsableInput()) {
+			failCapture(qsTr("Microphone input was lost. Check the device and measure again."))
+			return false
+		}
 		const values = metrics()
 		if (setupState === 1) {
 			const samples = [ambientSamples[0].slice(), ambientSamples[1].slice(),
@@ -93,6 +126,7 @@ Rectangle {
 			}
 			voiceSamples += 1
 		}
+		return true
 	}
 
 	function voiceAverage(method) {
@@ -164,13 +198,21 @@ Rectangle {
 
 	function finishVoiceCapture() {
 		sampleTimer.stop()
+		if (!hasUsableInput() || ambientSamples[0].length < 5 || voiceSamples < 5) {
+			failCapture(qsTr("Not enough microphone input was captured. Measure again."))
+			return
+		}
 		chooseMethod()
+		if (!selectedMethodUsable) {
+			failCapture(qsTr("The voice sample did not differ enough from the room sample. Check the microphone and try again at your normal speaking volume."))
+			return
+		}
 		setupState = 4
 	}
 
 	function applySuggestion() {
 		const actionId = String(field.calibrationActionId || "")
-		if (actionId.length === 0)
+		if (actionId.length === 0 || setupState !== 4 || !hasUsableInput() || !selectedMethodUsable)
 			return
 		controller.invokeAction(actionId, {
 			"silenceThreshold": suggestedStopThreshold,
@@ -210,7 +252,8 @@ Rectangle {
 		interval: 100
 		repeat: true
 		onTriggered: {
-			root.sampleCurrentFrame()
+			if (!root.sampleCurrentFrame())
+				return
 			root.ticksRemaining -= 1
 			if (root.ticksRemaining > 0)
 				return
@@ -250,7 +293,7 @@ Rectangle {
 				Label {
 					Layout.fillWidth: true
 					textFormat: Text.PlainText
-					text: qsTr("Compare room sound with your normal voice; no audio is recorded or sent.")
+					text: qsTr("Compare room sound with your normal voice. This guide records no audio; your normal transmission mode remains active.")
 					color: Theme.textMuted
 					font.pixelSize: 10
 					wrapMode: Text.Wrap
@@ -351,6 +394,15 @@ Rectangle {
 			}
 		}
 
+		Label {
+			Layout.fillWidth: true
+			visible: root.captureError.length > 0
+			textFormat: Text.PlainText
+			text: root.captureError
+			color: Theme.warning
+			wrapMode: Text.Wrap
+		}
+
 		Flow {
 			Layout.fillWidth: true
 			spacing: Theme.space2
@@ -365,6 +417,7 @@ Rectangle {
 			}
 			ModernButton {
 				visible: root.setupState === 2
+				enabled: root.inputAvailable
 				text: qsTr("Start voice sample")
 				tone: "accent"
 				onClicked: root.startVoiceCapture()
@@ -372,6 +425,7 @@ Rectangle {
 			ModernButton {
 				objectName: "voiceActivationUseSuggestion"
 				visible: root.setupState === 4
+				enabled: root.inputAvailable && root.selectedMethodUsable
 				text: qsTr("Use this setup")
 				tone: "accent"
 				onClicked: root.applySuggestion()

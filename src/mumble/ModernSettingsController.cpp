@@ -3839,7 +3839,7 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.inputGateMode = static_cast< Settings::InputGateMode >(
 			qBound(0, value.toInt(), static_cast< int >(Settings::InputGateStrict)));
 	} else if (id == QLatin1String("audio.voiceHold")) {
-		m_draft.iVoiceHold = qBound(0, value.toInt(), 250);
+		m_draft.iVoiceHold = qBound(5, value.toInt(), 80);
 	} else if (id == QLatin1String("audio.doublePush")) {
 		m_draft.uiDoublePush = static_cast< quint64 >(qBound(0, value.toInt(), 5000));
 	} else if (id == QLatin1String("audio.pttHold")) {
@@ -5427,7 +5427,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 					QStringLiteral("segmented")) }),
 			audioInputSection(
 				QStringLiteral("microphoneCheck"), QObject::tr("Check your microphone"),
-				QObject::tr("Speak at your normal distance. The meter and guided setup use the same signal as transmission."),
+				QObject::tr("The meter monitors the running microphone. Use Apply or Done to activate changed input settings."),
 				QVariantList { voiceMeterField(m_draft, m_inputEnhancementCalibrationWorker->snapshot(),
 												inputEnhancementCalibrationUiError) }),
 			audioInputSection(
@@ -5451,7 +5451,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												static_cast< int >(m_draft.inputGateMode), inputGateModeOptions()),
 									QObject::tr("Off is recommended after guided setup; stricter gates may clip soft words.")),
 						hintedField(numberField(QStringLiteral("audio.voiceHold"), QObject::tr("Release delay"),
-												m_draft.iVoiceHold, 0, 250, 1, QObject::tr(" frames")),
+												m_draft.iVoiceHold, 5, 80, 1, QObject::tr(" frames")),
 									QObject::tr("Keep the microphone open after speech ends; each frame is 10 ms.")) }),
 				false)));
 		} else if (pushToTalkTransmit) {

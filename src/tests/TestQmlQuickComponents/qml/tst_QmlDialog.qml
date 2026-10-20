@@ -1930,7 +1930,15 @@ TestCase {
 		verify(setup !== null && setup.visible && guidedSetup !== null);
 		mouseClick(setup);
 		compare(guidedSetup.setupState, 1);
-		guidedSetup.cancelSetup();
+		guidedSetup.meter = { "available": true, "amplitude": 10, "signalToNoise": 8, "hybrid": 7 };
+		for (let sample = 0; sample < 5; ++sample)
+			verify(guidedSetup.sampleCurrentFrame());
+		guidedSetup.startVoiceCapture();
+		guidedSetup.meter = { "available": true, "amplitude": 70, "signalToNoise": 80, "hybrid": 65 };
+		for (let sample = 0; sample < 5; ++sample)
+			verify(guidedSetup.sampleCurrentFrame());
+		guidedSetup.finishVoiceCapture();
+		compare(guidedSetup.setupState, 4);
 		guidedSetup.selectedMethod = 1;
 		guidedSetup.suggestedStopThreshold = 18;
 		guidedSetup.suggestedStartThreshold = 62;
@@ -1996,6 +2004,50 @@ TestCase {
 		compare(setup.suggestedStopThreshold, 22);
 		compare(setup.suggestedStartThreshold, 45);
 		compare(setup.suggestedVoiceHold, 40);
+	}
+
+	function test_guided_voice_setup_rejects_unavailable_input() {
+		dialogState.setSections([{ "title": "Voice detection", "fields": [{
+			"id": "audio.inputMeter", "type": "voiceMeter",
+			"value": { "available": true, "amplitude": 20, "signalToNoise": 10, "hybrid": 9 },
+			"staticMeter": true, "calibrationActionId": "finishAudioSetupWizard"
+		}]}]);
+		const setup = findChild(loader.item.contentItem, "voiceActivationSetup");
+		verify(setup !== null);
+		setup.startQuietCapture();
+		setup.meter = { "available": false, "amplitude": 0, "signalToNoise": 0, "hybrid": 0 };
+		setup.sampleCurrentFrame();
+		verify(!setup.captureRunning);
+		verify(!setup.resultReady);
+		const action = dialogState.lastAction;
+		setup.applySuggestion();
+		compare(dialogState.lastAction, action);
+		setup.cancelSetup();
+	}
+
+	function test_guided_voice_setup_rejects_silence_but_accepts_separated_speech() {
+		dialogState.setSections([{ "title": "Voice detection", "fields": [{
+			"id": "audio.inputMeter", "type": "voiceMeter",
+			"value": { "available": true, "amplitude": 0, "signalToNoise": 0, "hybrid": 0 },
+			"staticMeter": true, "calibrationActionId": "finishAudioSetupWizard"
+		}]}]);
+		const setup = findChild(loader.item.contentItem, "voiceActivationSetup");
+		verify(setup !== null);
+		setup.startQuietCapture();
+		for (let i = 0; i < 30; ++i) setup.sampleCurrentFrame();
+		setup.startVoiceCapture();
+		for (let i = 0; i < 50; ++i) setup.sampleCurrentFrame();
+		setup.finishVoiceCapture();
+		verify(!setup.resultReady);
+		setup.startQuietCapture();
+		for (let i = 0; i < 30; ++i) setup.sampleCurrentFrame();
+		setup.startVoiceCapture();
+		setup.meter = { "available": true, "amplitude": 50, "signalToNoise": 70, "hybrid": 50 };
+		for (let i = 0; i < 50; ++i) setup.sampleCurrentFrame();
+		setup.finishVoiceCapture();
+		verify(setup.resultReady);
+		setup.applySuggestion();
+		compare(dialogState.lastAction, "finishAudioSetupWizard");
 	}
 
 	function test_input_enhancement_blind_comparison_routes_only_opaque_tokens() {

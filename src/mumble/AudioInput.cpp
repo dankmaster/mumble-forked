@@ -255,10 +255,26 @@ bool AudioInput::inputGateAllowsSpeechFor(Settings::InputGateMode mode, Settings
 	return false;
 }
 
-bool AudioInput::inputGateAllowsSpeech(bool candidateSpeech, float amplitudeLevel, float speechProbability) {
-	return inputGateAllowsSpeechFor(Global::get().s.inputGateMode, Global::get().s.vsVAD, candidateSpeech,
-									amplitudeLevel, speechProbability, m_inputGateOpen, m_inputGateAttackFrames,
-									m_inputGateReleaseFrames);
+bool AudioInput::VoiceActivityState::update(const Settings &settings, float amplitudeLevel, float speechProbability) {
+	const float level = voiceActivityLevelFor(settings.vsVAD, amplitudeLevel, speechProbability);
+	candidate = voiceActivityTriggers(level, settings.fVADmin, settings.fVADmax, speech);
+	gateAllowed = inputGateAllowsSpeechFor(settings.inputGateMode, settings.vsVAD, candidate,
+										 amplitudeLevel, speechProbability, gateOpen, attackFrames, releaseFrames);
+	// Gate grace and the configured release delay overlap. Only newly accepted
+	// acoustic evidence resets the delay; a gate's synthetic release frames do
+	// not. Keep our own counter because the gate clears its counter on closure.
+	const bool acceptedNow = gateAllowed
+		&& (settings.inputGateMode == Settings::InputGateOff || releaseFrames == 0);
+	const int holdLimit = std::max(0, settings.iVoiceHold);
+	if (acceptedNow) {
+		holdFrames = 0;
+	} else if (holdFrames < holdLimit) {
+		++holdFrames;
+	}
+	// Holding can extend an utterance, but must never create one at startup,
+	// during Strict's attack, or just because PTT/draining sent a frame.
+	speech = gateAllowed || (speech && holdFrames < holdLimit);
+	return speech;
 }
 
 void Resynchronizer::addMic(short *mic) {
@@ -548,10 +564,6 @@ AudioInput::AudioInput()
 
 	iFrameCounter            = 0;
 	iSilentFrames            = 0;
-	iHoldFrames              = 0;
-	m_inputGateOpen          = false;
-	m_inputGateAttackFrames  = 0;
-	m_inputGateReleaseFrames = 0;
 	iBufferedFrames          = 0;
 
 	bUserIsMuted = false;
@@ -584,9 +596,11 @@ AudioInput::AudioInput()
 
 	bRunning = true;
 
-	connect(this, SIGNAL(doDeaf()), Global::get().mw->qaAudioDeaf, SLOT(trigger()), Qt::QueuedConnection);
-	connect(this, SIGNAL(doMute()), Global::get().mw->qaAudioMute, SLOT(trigger()), Qt::QueuedConnection);
-	connect(this, &AudioInput::doMuteCue, Global::get().mw, &MainWindow::showMuteCuePopup);
+	if (Global::get().mw) {
+		connect(this, SIGNAL(doDeaf()), Global::get().mw->qaAudioDeaf, SLOT(trigger()), Qt::QueuedConnection);
+		connect(this, SIGNAL(doMute()), Global::get().mw->qaAudioMute, SLOT(trigger()), Qt::QueuedConnection);
+		connect(this, &AudioInput::doMuteCue, Global::get().mw, &MainWindow::showMuteCuePopup);
+	}
 }
 
 AudioInput::~AudioInput() {
@@ -1349,9 +1363,7 @@ void AudioInput::resetAudioProcessor() {
 
 	m_preprocessor.init(iSampleRate, iFrameSize);
 	resync.reset();
-	m_inputGateOpen          = false;
-	m_inputGateAttackFrames  = 0;
-	m_inputGateReleaseFrames = 0;
+	m_voiceActivityState = {};
 	m_speechCleanupTransmitDrain.cancel();
 	selectNoiseCancel();
 
@@ -2577,22 +2589,9 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 	bool gateAllowed  = false;
 
 	if (!speechCleanupDrainFrame.draining) {
-		vadCandidate =
-			voiceActivityTriggers(level, Global::get().s.fVADmin, Global::get().s.fVADmax, bPreviousVoice);
-		gateAllowed = inputGateAllowsSpeech(vadCandidate, amplitudeLevel, fSpeechProb);
-		bIsSpeech   = gateAllowed;
-		if (!bIsSpeech && Global::get().s.inputGateMode != Settings::InputGateOff) {
-			iHoldFrames = Global::get().s.iVoiceHold;
-		}
-
-		if (!bIsSpeech) {
-			iHoldFrames++;
-			if (iHoldFrames < Global::get().s.iVoiceHold)
-				// Hold mic open until iVoiceHold threshold is reached
-				bIsSpeech = true;
-		} else {
-			iHoldFrames = 0;
-		}
+		bIsSpeech = m_voiceActivityState.update(Global::get().s, amplitudeLevel, fSpeechProb);
+		vadCandidate = m_voiceActivityState.candidate;
+		gateAllowed = m_voiceActivityState.gateAllowed;
 	}
 	const bool acousticSpeech = bIsSpeech;
 
@@ -2654,10 +2653,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		if (m_speechCleanupTransmitDrain.active()) {
 			speechCleanupDrainStarted = true;
 			bIsSpeech                 = true;
-			m_inputGateOpen           = false;
-			m_inputGateAttackFrames   = 0;
-			m_inputGateReleaseFrames  = 0;
-			iHoldFrames               = Global::get().s.iVoiceHold;
+			m_voiceActivityState      = {};
 		}
 	}
 
@@ -2679,13 +2675,13 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		metrics.transmitMode        = static_cast< int >(Global::get().s.atTransmit);
 		metrics.vadCandidate        = vadCandidate;
 		metrics.gateAllowed         = gateAllowed;
-		metrics.gateOpen            = m_inputGateOpen;
+		metrics.gateOpen            = m_voiceActivityState.gateOpen;
 		metrics.acousticSpeech      = acousticSpeech;
 		metrics.transmitting        = bIsSpeech;
 		metrics.transmissionBlocked = transmissionBlocked;
-		metrics.holdFrames          = iHoldFrames;
-		metrics.gateAttackFrames    = m_inputGateAttackFrames;
-		metrics.gateReleaseFrames   = m_inputGateReleaseFrames;
+		metrics.holdFrames          = m_voiceActivityState.holdFrames;
+		metrics.gateAttackFrames    = m_voiceActivityState.attackFrames;
+		metrics.gateReleaseFrames   = m_voiceActivityState.releaseFrames;
 		diagnosticCapture.captureInputFrame(diagnosticRawInput.data(), iFrameSize, iSampleRate, metrics,
 											diagnosticTimestampUs);
 	}
@@ -2705,6 +2701,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		m_inputEnhancementAutoProfileSwitching = false;
 	}
 	if (calibrationTransmissionBlocked) {
+		m_voiceActivityState = {};
 		// Calibration is local-only. Drop any partial packet/utterance state and
 		// return before encodeOpusFrame()/flushCheck(), including the usual voice
 		// terminator path. vector::clear retains the preallocated PCM capacity.

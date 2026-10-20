@@ -187,6 +187,20 @@ class AudioInput : public QThread {
 private:
 	Q_OBJECT
 	Q_DISABLE_COPY(AudioInput)
+public:
+	/// Acoustic activation only; PTT, mute and processor-tail transmission do not own this state.
+	struct VoiceActivityState {
+		bool speech = false;
+		bool candidate = false;
+		bool gateAllowed = false;
+		bool gateOpen = false;
+		int attackFrames = 0;
+		int releaseFrames = 0;
+		int holdFrames = 0;
+
+		bool update(const Settings &settings, float amplitudeLevel, float speechProbability);
+	};
+
 protected:
 	typedef enum { SampleShort, SampleFloat } SampleFormat;
 	typedef void (*inMixerFunc)(float *RESTRICT, const void *RESTRICT, unsigned int, unsigned int, quint64);
@@ -352,7 +366,6 @@ protected:
 	void encodeAudioFrame(AudioChunk chunk);
 	void addMic(const void *data, unsigned int nsamp);
 	void addEcho(const void *data, unsigned int nsamp);
-	bool inputGateAllowsSpeech(bool candidateSpeech, float amplitudeLevel, float speechProbability);
 
 	volatile bool bRunning;
 	volatile bool bPreviousVoice;
@@ -360,10 +373,7 @@ protected:
 
 	int iFrameCounter;
 	int iSilentFrames;
-	int iHoldFrames;
-	bool m_inputGateOpen;
-	int m_inputGateAttackFrames;
-	int m_inputGateReleaseFrames;
+	VoiceActivityState m_voiceActivityState;
 #ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
 	bool m_forceSpeechCleanupE2ERelease = false;
 	unsigned int m_speechCleanupE2ECurrentDrainSamples = 0;

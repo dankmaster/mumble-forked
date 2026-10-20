@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <QScopedValueRollback>
 #include <QTemporaryDir>
 
 #include "AudioInput.h"
@@ -121,6 +123,22 @@ namespace {
 	private:
 		Global *m_previous;
 	};
+
+	// Exercise preprocessing, VAD, PTT and encoding with supplied PCM only.
+	// No capture backend, thread, MainWindow or ServerHandler is created.
+	class DeterministicAudioInput final : public AudioInput {
+	public:
+		DeterministicAudioInput() {
+			iMicChannels = 1;
+			previousPTT = false;
+			tIdle.restart();
+		}
+		void run() override {}
+		void feed(std::array< short, 480 > samples) {
+			encodeAudioFrame(AudioChunk(samples.data()));
+		}
+		bool acousticSpeech() const { return m_voiceActivityState.speech; }
+	};
 }
 
 class TestModernDialogControllers : public QObject {
@@ -154,6 +172,14 @@ private slots:
 	void settingsControllerPreservedLegacyOverrideBypassesProductPreflight();
 	void settingsControllerStoresAdvancedLegacyOverrideOnCurrentMicrophone();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
+	void audioInputVoiceActivityNeverStartsFromSilence_data();
+	void audioInputVoiceActivityNeverStartsFromSilence();
+	void audioInputVoiceActivityHonorsReleaseDelay_data();
+	void audioInputVoiceActivityHonorsReleaseDelay();
+	void audioInputPttDoesNotArmAcousticHysteresis_data();
+	void audioInputPttDoesNotArmAcousticHysteresis();
+	void settingsControllerVoiceHoldSurvivesNormalization_data();
+	void settingsControllerVoiceHoldSurvivesNormalization();
 	void audioInputVoiceActivitySnapshotIsBounded();
 	void audioInputRollbackBindingRequiresOpenedRunningCapture();
 	void audioDebugCaptureWritesMetricsWithoutRemoteAudio();
@@ -2417,6 +2443,159 @@ void TestModernDialogControllers::audioInputVoiceActivityLevelUsesExpectedSignal
 												  gateOpen, attack, release));
 	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateStrict, Settings::Hybrid, true, 0.30f, 0.60f,
 												 gateOpen, attack, release));
+}
+
+void TestModernDialogControllers::audioInputVoiceActivityNeverStartsFromSilence_data() {
+	QTest::addColumn<int>("gate");
+	QTest::newRow("off") << int(Settings::InputGateOff);
+	QTest::newRow("balanced") << int(Settings::InputGateBalanced);
+	QTest::newRow("strict") << int(Settings::InputGateStrict);
+}
+
+void TestModernDialogControllers::audioInputVoiceActivityNeverStartsFromSilence() {
+	QFETCH(int, gate);
+	Settings settings;
+	settings.inputGateMode = static_cast<Settings::InputGateMode>(gate);
+	settings.vsVAD = Settings::Hybrid;
+	settings.fVADmin = 0.2f;
+	settings.fVADmax = 0.6f;
+	settings.iVoiceHold = 40;
+	AudioInput::VoiceActivityState state;
+	for (int frame = 0; frame < 100; ++frame)
+		QVERIFY(!state.update(settings, 0.0f, 0.0f));
+	for (int frame = 0; frame < 100; ++frame)
+		QVERIFY(!state.update(settings, 0.5f, 0.5f));
+	if (settings.inputGateMode == Settings::InputGateStrict)
+		QVERIFY(!state.update(settings, 0.8f, 0.8f));
+	QVERIFY(state.update(settings, 0.8f, 0.8f));
+	state = {};
+	QVERIFY(!state.update(settings, 0.0f, 0.0f));
+}
+
+void TestModernDialogControllers::audioInputVoiceActivityHonorsReleaseDelay_data() {
+	QTest::addColumn<int>("gate");
+	QTest::addColumn<int>("hold");
+	QTest::addColumn<int>("releaseFrame");
+	QTest::newRow("off-400ms") << int(Settings::InputGateOff) << 40 << 40;
+	QTest::newRow("balanced-400ms") << int(Settings::InputGateBalanced) << 40 << 40;
+	QTest::newRow("strict-400ms") << int(Settings::InputGateStrict) << 40 << 40;
+	QTest::newRow("off-50ms") << int(Settings::InputGateOff) << 5 << 5;
+	QTest::newRow("balanced-minimum-grace") << int(Settings::InputGateBalanced) << 5 << 13;
+	QTest::newRow("strict-minimum-grace") << int(Settings::InputGateStrict) << 5 << 9;
+}
+
+void TestModernDialogControllers::audioInputVoiceActivityHonorsReleaseDelay() {
+	QFETCH(int, gate);
+	QFETCH(int, hold);
+	QFETCH(int, releaseFrame);
+	Settings settings;
+	settings.inputGateMode = static_cast<Settings::InputGateMode>(gate);
+	settings.vsVAD = Settings::Hybrid;
+	settings.fVADmin = 0.2f;
+	settings.fVADmax = 0.6f;
+	settings.iVoiceHold = hold;
+	AudioInput::VoiceActivityState state;
+	state.update(settings, 0.8f, 0.8f);
+	QVERIFY(state.update(settings, 0.8f, 0.8f));
+	for (int frame = 1; frame < releaseFrame; ++frame)
+		QVERIFY2(state.update(settings, 0.0f, 0.0f), qPrintable(QString::number(frame)));
+	QVERIFY(!state.update(settings, 0.0f, 0.0f));
+	QVERIFY(!state.update(settings, 0.5f, 0.5f));
+
+	// A brief mid-sentence pause must not require a new above-start onset.
+	state.update(settings, 0.8f, 0.8f);
+	QVERIFY(state.update(settings, 0.8f, 0.8f));
+	for (int frame = 1; frame < std::min(hold, 20); ++frame)
+		QVERIFY(state.update(settings, 0.0f, 0.0f));
+	QVERIFY(state.update(settings, 0.5f, 0.5f));
+	QVERIFY(state.update(settings, 0.5f, 0.5f));
+}
+
+void TestModernDialogControllers::audioInputPttDoesNotArmAcousticHysteresis_data() {
+	QTest::addColumn< int >("peak");
+	QTest::newRow("silence") << 0;
+	QTest::newRow("between-thresholds") << 1024;
+}
+
+void TestModernDialogControllers::audioInputPttDoesNotArmAcousticHysteresis() {
+	QFETCH(int, peak);
+	QTemporaryDir root;
+	QVERIFY(root.isValid());
+	Global global(root.filePath(QStringLiteral("mumble-test.ini")));
+	ScopedGlobalOverride globalOverride(global);
+	QScopedValueRollback< QString > inputBackend(AudioInputRegistrar::current,
+												QStringLiteral("DeterministicPcmOnly"));
+	global.s.qsAudioInput = AudioInputRegistrar::current;
+	global.s.atTransmit = Settings::VAD;
+	global.s.vsVAD = Settings::Amplitude;
+	global.s.inputGateMode = Settings::InputGateOff;
+	global.s.fVADmin = 0.50f;
+	global.s.fVADmax = 0.90f;
+	global.s.iVoiceHold = 40;
+	global.s.iMinLoudness = 30000;
+	global.s.echoOption = EchoCancelOptionID::DISABLED;
+	global.s.lmLoopMode = Settings::None;
+	global.s.bMute = false;
+	global.s.bDeaf = false;
+	global.s.audioCueEnabledPTT = false;
+	global.s.audioCueEnabledVAD = false;
+	global.s.inputEnhancement.defaultPreference.profile = Mumble::InputEnhancement::Profile::Original;
+	DeterministicAudioInput input;
+	std::array< short, 480 > samples {};
+	for (std::size_t index = 0; index < samples.size(); ++index)
+		samples[index] = static_cast< short >(peak * std::sin(2.0 * 3.141592653589793 * index / 48.0));
+
+	for (int frame = 0; frame < 100; ++frame) {
+		input.feed(samples);
+		QVERIFY(!input.isTransmitting());
+		QVERIFY(!input.acousticSpeech());
+	}
+	if (peak > 0) {
+		const float measured = input.voiceActivitySnapshot().amplitudeLevel();
+		QVERIFY2(measured > global.s.fVADmin && measured < global.s.fVADmax,
+				 qPrintable(QString::number(measured)));
+	}
+	global.iPushToTalk = 1;
+	for (int frame = 0; frame < 10; ++frame) {
+		input.feed(samples);
+		QVERIFY(input.isTransmitting());
+		QVERIFY(!input.acousticSpeech());
+	}
+	global.iPushToTalk = 0;
+	for (int frame = 0; frame < 50; ++frame) {
+		input.feed(samples);
+		QVERIFY(!input.isTransmitting());
+		QVERIFY(!input.acousticSpeech());
+	}
+}
+
+void TestModernDialogControllers::settingsControllerVoiceHoldSurvivesNormalization_data() {
+	QTest::addColumn<int>("requested");
+	QTest::addColumn<int>("expected");
+	QTest::newRow("minimum") << 5 << 5;
+	QTest::newRow("maximum") << 80 << 80;
+	QTest::newRow("below-minimum") << 0 << 5;
+	QTest::newRow("above-maximum") << 250 << 80;
+}
+
+void TestModernDialogControllers::settingsControllerVoiceHoldSurvivesNormalization() {
+	ScopedGlobalOverride noGlobal(nullptr);
+	QFETCH(int, requested);
+	QFETCH(int, expected);
+	Settings settings;
+	settings.atTransmit = Settings::VAD;
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("audioInput"));
+	controller.updateField(QStringLiteral("audio.voiceHold"), requested);
+	QCOMPARE(controller.draft().iVoiceHold, expected);
+	const auto result = controller.invokeAction(QStringLiteral("apply"), {});
+	QVERIFY(result.settingsToApply.has_value());
+	Settings applied = *result.settingsToApply;
+	applied.normalizeVoiceActivationSettings();
+	QCOMPARE(applied.iVoiceHold, expected);
+	const QVariantMap field = dialogField(controller.state(), QStringLiteral("audio.voiceHold"));
+	QCOMPARE(field.value(QStringLiteral("min")).toInt(), 5);
+	QCOMPARE(field.value(QStringLiteral("max")).toInt(), 80);
 }
 
 void TestModernDialogControllers::settingsControllerRollsBackVoiceReplayPreview() {

@@ -2905,7 +2905,7 @@ Dialog {
 				Label {
 					Layout.fillWidth: true
 					textFormat: Text.PlainText
-					text: qsTr("The meter follows the handles immediately. The setting is applied once you release a handle.")
+					text: qsTr("The meter previews the thresholds. Use Apply or Done to change voice activation.")
 					color: Theme.textMuted
 					font.pixelSize: 10
 					wrapMode: Text.Wrap
