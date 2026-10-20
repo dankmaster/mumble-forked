@@ -61,7 +61,8 @@ ApplicationWindow {
 		: String(backend.status || qsTr("The viewer is starting."))
 	readonly property string headerStateLabel: operationFailed ? qsTr("Viewer unavailable")
 		: operationBusy ? (hasShownLiveFrame ? qsTr("Reconnecting") : qsTr("Connecting"))
-		: backend.paused ? qsTr("Paused locally") : qsTr("Live")
+		: backend.paused ? qsTr("Paused locally")
+		: playbackSurfaceReady ? qsTr("Live") : qsTr("Waiting for first frame")
 
 	palette.window: Theme.shellBackground
 	palette.active.base: Theme.surfaceRaised

@@ -86,6 +86,22 @@ TestCase {
 		viewer.destroy()
 	}
 
+	function test_ready_receiver_is_not_live_until_a_frame_is_available() {
+		const viewer = createViewer(1120, 720)
+		compare(viewer.operationStatus, "ready")
+		compare(viewer.playbackSurfaceReady, false)
+		compare(viewer.displayState, "empty")
+		compare(viewer.headerStateLabel, "Waiting for first frame")
+		shareBackend.nativeFrameActive = true
+		compare(viewer.headerStateLabel, "Waiting for first frame")
+		shareBackend.hasCurrentFrame = true
+		tryCompare(viewer, "displayState", "active")
+		compare(viewer.headerStateLabel, "Live")
+		shareBackend.operationStatus = "error"
+		compare(viewer.headerStateLabel, "Viewer unavailable")
+		viewer.destroy()
+	}
+
 	function createViewer(viewWidth, viewHeight) {
 		const component = Qt.createComponent("qrc:/qml-shell/ScreenShareViewWindow.qml")
 		compare(component.status, Component.Ready, component.errorString())

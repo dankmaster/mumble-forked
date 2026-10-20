@@ -13,6 +13,7 @@ Window {
 	property string presentedDialogId: ""
 	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 	property bool visibilitySyncPending: false
+	property int restoreVisibility: Window.Windowed
 	readonly property string surfaceId: "product-dialog.window"
 	readonly property var captureRect: Qt.rect(0, 0, width, height)
 	readonly property bool productOpen: controller && controller.open
@@ -94,6 +95,14 @@ Window {
 	function activateDialog() {
 		if (!visible)
 			return
+		if (visibility === Window.Minimized) {
+			if (restoreVisibility === Window.Maximized)
+				showMaximized()
+			else if (restoreVisibility === Window.FullScreen)
+				showFullScreen()
+			else
+				showNormal()
+		}
 		raise()
 		requestActivate()
 		Qt.callLater(function() {
@@ -155,6 +164,11 @@ Window {
 	}
 
 	Component.onCompleted: scheduleVisibilitySync()
+	onVisibilityChanged: {
+		if (visibility === Window.Windowed || visibility === Window.Maximized
+				|| visibility === Window.FullScreen)
+			restoreVisibility = visibility
+	}
 	onScreenChanged: Qt.callLater(function() {
 		if (productWindow.visible && !productWindow.geometryStore)
 			productWindow.ensureUsableGeometry(false, false)

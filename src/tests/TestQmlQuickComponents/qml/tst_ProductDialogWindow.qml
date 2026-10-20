@@ -123,6 +123,41 @@ TestCase {
 		compare(productWindow.presentedDialogId, "dialog-b")
 	}
 
+	function test_activate_restores_a_minimized_dialog() {
+		openProduct("restore-dialog", 620, 420)
+		productWindow.showMinimized()
+		tryCompare(productWindow, "visibility", Window.Minimized)
+		productWindow.activateDialog()
+		tryCompare(productWindow, "visibility", Window.Windowed)
+		compare(productWindow.presentedDialogId, "restore-dialog")
+	}
+
+	function test_new_dialog_restores_minimized_host_but_background_update_does_not() {
+		openProduct("dialog-a", 620, 420)
+		productWindow.showMinimized()
+		tryCompare(productWindow, "visibility", Window.Minimized)
+		dialogState.setSpecialState("generic", {
+			"id": "dialog-a", "pages": [], "width": 620, "height": 420
+		})
+		wait(0)
+		compare(productWindow.visibility, Window.Minimized)
+		dialogState.setSpecialState("generic", {
+			"id": "dialog-b", "pages": [], "width": 760, "height": 620
+		})
+		tryCompare(productWindow, "presentedDialogId", "dialog-b")
+		tryCompare(productWindow, "visibility", Window.Windowed)
+	}
+
+	function test_activate_restores_maximized_dialog_state() {
+		openProduct("restore-maximized-dialog", 620, 420)
+		productWindow.showMaximized()
+		tryCompare(productWindow, "visibility", Window.Maximized)
+		productWindow.showMinimized()
+		tryCompare(productWindow, "visibility", Window.Minimized)
+		productWindow.activateDialog()
+		tryCompare(productWindow, "visibility", Window.Maximized)
+	}
+
 	function test_each_logical_dialog_uses_its_own_persisted_geometry_key() {
 		geometryStoreDouble.restoreResult = true
 		openProduct("server-browser", 820, 640)
