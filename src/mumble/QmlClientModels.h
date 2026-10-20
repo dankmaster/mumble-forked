@@ -385,6 +385,7 @@ signals:
 protected:
 	int indexOf(const QString &stableId) const;
 	int prependRows(const QVariantList &rows);
+	int appendRows(const QVariantList &rows);
 	// Model-owned asynchronous work may complete while an external fixture
 	// override is active. The caller must already have validated the row identity
 	// and generation; frontend/controller writes must continue through upsertRow().
@@ -585,6 +586,7 @@ private:
 	void cancelQueuedAppend(bool notify = true);
 	void scheduleQueuedAppendDrain();
 	void drainQueuedAppend();
+	bool appendDeferredSnapshotBatch(const QVariantList &messages);
 	void cancelQueuedPrepend(bool notify = true);
 	void scheduleQueuedPrependDrain();
 	void drainQueuedPrepend();

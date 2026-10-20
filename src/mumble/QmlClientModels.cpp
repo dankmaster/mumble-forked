@@ -2528,6 +2528,33 @@ int StableListModel::prependRows(const QVariantList &rows) {
 	return prependCount;
 }
 
+int StableListModel::appendRows(const QVariantList &rows) {
+	if (!acceptsFrontendStateMutation(this) || rows.isEmpty()) return 0;
+	QVariantList ownedRows;
+	QStringList ids;
+	QSet< QString > incomingIds;
+	for (const QVariant &entry : rows) {
+		QVariantMap row = entry.toMap();
+		const QString id = row.value(QStringLiteral("id")).toString();
+		if (id.isEmpty() || incomingIds.contains(id) || m_rowIndexById.contains(id)) return 0;
+		row.detach();
+		ownedRows.push_back(row);
+		ids.push_back(id);
+		incomingIds.insert(id);
+	}
+	const int first = m_rows.size();
+	const int count = ownedRows.size();
+	beginInsertRows(QModelIndex(), first, first + count - 1);
+	m_rows.append(ownedRows);
+	m_rowIds.append(ids);
+	for (int offset = 0; offset < count; ++offset) {
+		m_rowIndexById.insert(ids.at(offset), first + offset);
+	}
+	endInsertRows();
+	emit countChanged();
+	return count;
+}
+
 void StableListModel::upsertRow(const QVariantMap &row) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	upsertRowFromInternalResult(row);
@@ -3686,6 +3713,7 @@ bool ChatTimelineModel::removeMessage(const QString &messageId) {
 
 int ChatTimelineModel::appendMessages(
 	const QVariantList &messages, const bool inlineDeferredPresentation) {
+	const qulonglong generation = m_appendGeneration;
 	int applied = 0;
 	bool searchStateMayHaveChanged = false;
 	QList< RichBodyParseRequest > requests;
@@ -3713,7 +3741,9 @@ int ChatTimelineModel::appendMessages(
 			}
 		}
 		upsertRow(row);
+		if (generation != m_appendGeneration) return applied;
 		updateUserHistoryRow(id, row);
+		if (generation != m_appendGeneration) return applied;
 		searchStateMayHaveChanged = true;
 	}
 	if (inlineDeferredPresentation) {
@@ -3991,12 +4021,11 @@ void ChatTimelineModel::drainQueuedAppend() {
 		return;
 	}
 
-	// The cold-scope path inserts childless fixed-height summaries. A strict
-	// one-row cadence made a plain 24-row history spend roughly 384 ms in this
-	// queue before QML could even prove its first stable frame. Keep source work
-	// bounded, but admit a small cohort of those lightweight summaries per frame;
-	// visible rich rows remain serialized by the QML materialization/resume queues.
-	constexpr qsizetype DeferredRowsPerFrame = 4;
+	// Publish childless summaries as one contiguous range, bounded per turn.
+	// Four rows per 16 ms made a 500-row cached scope spend two seconds in this
+	// queue alone. Actual message trees and rich content remain independently
+	// admitted by QML's viewport materialization queues.
+	constexpr qsizetype DeferredRowsPerFrame = 32;
 	const qsizetype rowsThisFrame = m_appendInlineDeferredPresentation
 		? std::min(DeferredRowsPerFrame, m_pendingAppendMessages.size()) : 1;
 	QVariantList batch;
@@ -4016,10 +4045,19 @@ void ChatTimelineModel::drainQueuedAppend() {
 				.arg(rowsThisFrame));
 		batch.push_back(message);
 	}
-	if (appendMessages(batch, m_appendInlineDeferredPresentation) != batch.size()) {
+	const qulonglong generation = m_appendGeneration;
+	if (m_appendInlineDeferredPresentation) {
+		if (!appendDeferredSnapshotBatch(batch) && generation == m_appendGeneration) {
+			cancelQueuedAppend();
+			return;
+		}
+	} else if (appendMessages(batch, false) != batch.size() && generation == m_appendGeneration) {
 		cancelQueuedAppend();
 		return;
 	}
+	// A rowsInserted/count/history subscriber can replace the scope synchronously.
+	// The retiring drain must not complete or cancel the replacement's queue.
+	if (generation != m_appendGeneration) return;
 	if (m_pendingAppendMessages.isEmpty()) {
 		m_appendPending = false;
 		m_appendInlineDeferredPresentation = false;
@@ -4027,6 +4065,46 @@ void ChatTimelineModel::drainQueuedAppend() {
 		return;
 	}
 	scheduleQueuedAppendDrain();
+}
+
+bool ChatTimelineModel::appendDeferredSnapshotBatch(const QVariantList &messages) {
+	if (!acceptsFrontendStateMutation(this)) return false;
+	const qulonglong generation = m_appendGeneration;
+	QVariantList rows;
+	QList< RichBodyParseRequest > requests;
+	QVariantMap previous = rowCount() > 0 ? get(rowCount() - 1) : QVariantMap {};
+	for (const QVariant &entry : messages) {
+		const QVariantMap message = entry.toMap();
+		const QVariant messageId = message.value(QStringLiteral("messageId"));
+		QString id = messageId.toULongLong() > 0 ? messageId.toString().trimmed() : QString();
+		if (id.isEmpty()) id = message.value(QStringLiteral("messageKey")).toString().trimmed();
+		if (id.isEmpty()) id = message.value(QStringLiteral("id")).toString().trimmed();
+		// A live update accepted since enqueue owns this identity. Do not even
+		// parse the stale snapshot: messageRow also changes rich-body consumers.
+		if (id.isEmpty() || indexOf(id) >= 0) continue;
+		QVariantMap row = messageRow(message, &requests);
+		decoratePresentationRow(row, previous);
+		row.insert(QStringLiteral("deferredPresentation"), true);
+		row.insert(QStringLiteral("deferredPresentationInline"), true);
+		previous = row;
+		rows.push_back(row);
+	}
+	for (const RichBodyParseRequest &request : requests) {
+		m_deferredRichBodyMessageIds.insert(request.messageId);
+	}
+	if (appendRows(rows) != rows.size()) return false;
+	if (generation != m_appendGeneration) return true;
+	const bool hadUserHistory = hasUserHistory();
+	for (const QVariant &entry : rows) {
+		const QString id = entry.toMap().value(QStringLiteral("id")).toString();
+		const int currentIndex = indexOf(id);
+		if (currentIndex >= 0 && isUserHistoryRow(get(currentIndex))) m_userHistoryMessageIds.insert(id);
+		else m_userHistoryMessageIds.remove(id);
+	}
+	if (hadUserHistory != hasUserHistory()) emit hasUserHistoryChanged();
+	if (generation != m_appendGeneration) return true;
+	if (searchActive() && !rows.isEmpty()) refreshSearchState(true);
+	return true;
 }
 
 void ChatTimelineModel::cancelQueuedPrepend(bool notify) {

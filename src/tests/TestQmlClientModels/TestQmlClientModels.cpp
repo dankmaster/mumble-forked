@@ -4,6 +4,7 @@
 #include "ChatPerfTrace.h"
 #include "EmbedDocument.h"
 #include "ModernShellPreviewPublicationPolicy.h"
+#include "PersistentChatPreviewUrl.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
@@ -32,6 +33,12 @@ private slots:
 	void chatTimelineQueuedAppendBatchesDeferredRowsPerFrame();
 	void chatTimelineDeferredSnapshotPreservesLargeHistories_data();
 	void chatTimelineDeferredSnapshotPreservesLargeHistories();
+	void chatTimelineQueuedSnapshotPreservesLiveCollision();
+	void chatTimelineQueuedSnapshotStopsAfterReentrantReplacement();
+	void chatTimelineQueuedSnapshotInsertsContiguousRanges();
+	void optionalPreviewUrlDoesNotRequestThePageAsArtwork();
+	void chatTimelineQueuedSnapshotHonorsMutationOwnership();
+	void chatTimelineQueuedSnapshotHonorsSubscriberRemoval();
 	void chatTimelineQueuedPrependUsesSingleDeferredBatch();
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
@@ -1028,6 +1035,129 @@ void TestQmlClientModels::chatTimelineDeferredSnapshotPreservesLargeHistories() 
 		  messageCount, static_cast<long long>(admissionMs), int(insertSpy.count()));
 }
 
+void TestQmlClientModels::optionalPreviewUrlDoesNotRequestThePageAsArtwork() {
+	using mumble::chat::resolveOptionalPreviewUrl;
+	const QUrl base(QStringLiteral("https://provider.example/watch/item"));
+	for (const QString &missing : { QString(), QStringLiteral(""), QStringLiteral(" \t\r\n") }) {
+		QVERIFY(resolveOptionalPreviewUrl(base, missing).isEmpty());
+	}
+	QCOMPARE(resolveOptionalPreviewUrl(base, QStringLiteral("/artwork.png")),
+			 QUrl(QStringLiteral("https://provider.example/artwork.png")));
+	QCOMPARE(resolveOptionalPreviewUrl(base, QStringLiteral("//cdn.example/artwork.png")),
+			 QUrl(QStringLiteral("https://cdn.example/artwork.png")));
+	const QUrl absolute(QStringLiteral("https://cdn.example/artwork.gif"));
+	QCOMPARE(resolveOptionalPreviewUrl(base, absolute.toString()), absolute);
+	QCOMPARE(resolveOptionalPreviewUrl(QUrl(), absolute.toString()), absolute);
+	QVERIFY(!resolveOptionalPreviewUrl(base, QStringLiteral("https://[invalid")).isValid());
+}
+
+void TestQmlClientModels::chatTimelineQueuedSnapshotHonorsMutationOwnership() {
+	ChatTimelineModel model;
+	model.setProperty(QmlVisualFixtureMutation::OverrideProperty, true);
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, true);
+	QCOMPARE(model.enqueueAppendMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("old") },
+		{ QStringLiteral("bodyHtml"), QStringLiteral("<b>Old snapshot</b>") }
+	} }, true), 1);
+	model.setProperty(QmlVisualFixtureMutation::WriteProperty, false);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.appendPending(), 5000);
+	QCOMPARE(model.rowCount(), 0);
+	QVERIFY(!model.hasUserHistory());
+	QVERIFY(!model.requestBodyHydration(QStringLiteral("old")));
+}
+
+void TestQmlClientModels::chatTimelineQueuedSnapshotHonorsSubscriberRemoval() {
+	ChatTimelineModel model;
+	connect(&model, &QAbstractItemModel::rowsInserted, this, [&](const QModelIndex &, int, int) {
+		model.removeMessage(QStringLiteral("removed"));
+	});
+	QCOMPARE(model.enqueueAppendMessages({ QVariantMap {
+		{ QStringLiteral("messageKey"), QStringLiteral("removed") },
+		{ QStringLiteral("plainText"), QStringLiteral("Removed in insertion callback") }
+	} }, true), 1);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.appendPending(), 5000);
+	QCOMPARE(model.rowCount(), 0);
+	QVERIFY(!model.hasUserHistory());
+}
+
+void TestQmlClientModels::chatTimelineQueuedSnapshotPreservesLiveCollision() {
+	ChatTimelineModel model;
+	const QVariantMap stale {
+		{ QStringLiteral("messageKey"), QStringLiteral("collision") },
+		{ QStringLiteral("plainText"), QStringLiteral("Old snapshot") }
+	};
+	const QVariantMap tail {
+		{ QStringLiteral("messageKey"), QStringLiteral("tail") },
+		{ QStringLiteral("plainText"), QStringLiteral("Following history") }
+	};
+	QCOMPARE(model.enqueueAppendMessages({ stale, tail }, true), 2);
+	QVariantMap live = stale;
+	live.insert(QStringLiteral("plainText"), QStringLiteral("New live edit"));
+	model.applyMessage(live);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.appendPending(), 5000);
+	QCOMPARE(model.rowCount(), 2);
+	QCOMPARE(model.get(model.rowForStableId(QStringLiteral("collision")))
+				 .value(QStringLiteral("subtitle")).toString(), QStringLiteral("New live edit"));
+	QVERIFY(model.rowForStableId(QStringLiteral("tail")) >= 0);
+}
+
+void TestQmlClientModels::chatTimelineQueuedSnapshotStopsAfterReentrantReplacement() {
+	ChatTimelineModel model;
+	QVariantList stale;
+	for (int i = 0; i < 40; ++i) {
+		stale.push_back(QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("old:%1").arg(i) },
+			{ QStringLiteral("plainText"), QStringLiteral("Retiring scope") }
+		});
+	}
+	bool replaced = false;
+	connect(&model, &QAbstractItemModel::rowsInserted, this, [&](const QModelIndex &, int, int) {
+		if (replaced) return;
+		replaced = true;
+		model.clear();
+		model.enqueueAppendMessages({ QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("new:0") },
+			{ QStringLiteral("plainText"), QStringLiteral("New scope") }
+		} }, true);
+	});
+	QCOMPARE(model.enqueueAppendMessages(stale, true), 40);
+	QTRY_VERIFY_WITH_TIMEOUT(replaced && !model.appendPending(), 5000);
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("new:0"));
+	QVERIFY(model.hasUserHistory());
+}
+
+void TestQmlClientModels::chatTimelineQueuedSnapshotInsertsContiguousRanges() {
+	ChatTimelineModel model;
+	QVariantList messages;
+	for (int i = 0; i < 20; ++i) {
+		messages.push_back(QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("batch:%1").arg(i) },
+			{ QStringLiteral("actorKey"), i < 10 ? QStringLiteral("a") : QStringLiteral("b") },
+			{ QStringLiteral("createdAtMs"), 1780000000000LL + i * 1000 },
+			{ QStringLiteral("plainText"), QStringLiteral("History") }
+		});
+	}
+	QSignalSpy inserts(&model, &QAbstractItemModel::rowsInserted);
+	QCOMPARE(model.enqueueAppendMessages(messages, true), 20);
+	QTRY_VERIFY_WITH_TIMEOUT(!model.appendPending(), 5000);
+	QCOMPARE(model.rowCount(), 20);
+	QVERIFY(inserts.count() < 20);
+	int nextRow = 0;
+	for (const auto &insertion : inserts) {
+		QCOMPARE(insertion.at(1).toInt(), nextRow);
+		QVERIFY(insertion.at(2).toInt() > nextRow);
+		nextRow = insertion.at(2).toInt() + 1;
+	}
+	QCOMPARE(nextRow, 20);
+	for (int i = 0; i < 20; ++i) {
+		const auto row = model.get(i);
+		QCOMPARE(row.value(QStringLiteral("modelStartsGroup")).toBool(), i == 0 || i == 10);
+		QCOMPARE(row.value(QStringLiteral("dateBoundary")).toBool(), i == 0);
+		QVERIFY(row.value(QStringLiteral("deferredPresentationInline")).toBool());
+	}
+}
+
 void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() {
 	ChatTimelineModel model;
 	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
@@ -1062,7 +1192,7 @@ void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() 
 	QCOMPARE(resetSpy.count(), 0);
 
 	QVariantList coldMessages = messages;
-	for (int row = 3; row < 6; ++row) {
+	for (int row = 3; row < 34; ++row) {
 		coldMessages.push_back(QVariantMap {
 			{ QStringLiteral("messageKey"), QStringLiteral("tail:%1").arg(row) },
 			{ QStringLiteral("plainText"), QStringLiteral("Tail %1").arg(row) }
@@ -1072,18 +1202,18 @@ void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() 
 	QEventLoop firstDeferredBatch;
 	connect(&coldModel, &QAbstractItemModel::rowsInserted, &firstDeferredBatch,
 		[&coldModel, &firstDeferredBatch](const QModelIndex &, int, int) {
-			if (coldModel.rowCount() == 4) firstDeferredBatch.quit();
+			if (coldModel.rowCount() == 32) firstDeferredBatch.quit();
 		});
-	QCOMPARE(coldModel.enqueueAppendMessages(coldMessages, true), 6);
+	QCOMPARE(coldModel.enqueueAppendMessages(coldMessages, true), 34);
 	QTimer::singleShot(5000, &firstDeferredBatch, &QEventLoop::quit);
 	firstDeferredBatch.exec();
-	// The first presentation turn admits one bounded four-row cohort. The
+	// The first presentation turn admits one bounded 32-row cohort. The
 	// remaining two rows stay queued for the next 16 ms turn.
-	QCOMPARE(coldModel.rowCount(), 4);
+	QCOMPARE(coldModel.rowCount(), 32);
 	QVERIFY(coldModel.appendPending());
 	QTRY_VERIFY_WITH_TIMEOUT(!coldModel.appendPending(), 5000);
-	QCOMPARE(coldModel.rowCount(), 6);
-	QCOMPARE(coldModel.presentationModel()->rowCount(), 6);
+	QCOMPARE(coldModel.rowCount(), 34);
+	QCOMPARE(coldModel.presentationModel()->rowCount(), 34);
 	QCOMPARE(coldModel.deferredPresentationModel()->rowCount(), 0);
 	for (int row = 0; row < coldModel.rowCount(); ++row) {
 		QVERIFY(coldModel.get(row).value(QStringLiteral("deferredPresentation")).toBool());
@@ -1117,7 +1247,7 @@ void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() 
 			}
 		});
 	QVariantList cancellableMessages;
-	for (int row = 0; row < 8; ++row) {
+	for (int row = 0; row < 40; ++row) {
 		cancellableMessages.push_back(QVariantMap {
 			{ QStringLiteral("messageKey"), QStringLiteral("cancel:%1").arg(row) },
 			{ QStringLiteral("plainText"), QStringLiteral("Cancel %1").arg(row) }
@@ -1127,12 +1257,12 @@ void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() 
 	connect(&cancelledColdModel, &QAbstractItemModel::rowsInserted,
 		&cancellationAfterFirstBatch,
 		[&cancelledColdModel, &cancellationAfterFirstBatch](const QModelIndex &, int, int) {
-			if (cancelledColdModel.rowCount() == 4) cancellationAfterFirstBatch.quit();
+			if (cancelledColdModel.rowCount() == 32) cancellationAfterFirstBatch.quit();
 		});
-	QCOMPARE(cancelledColdModel.enqueueAppendMessages(cancellableMessages, true), 8);
+	QCOMPARE(cancelledColdModel.enqueueAppendMessages(cancellableMessages, true), 40);
 	QTimer::singleShot(5000, &cancellationAfterFirstBatch, &QEventLoop::quit);
 	cancellationAfterFirstBatch.exec();
-	QCOMPARE(cancelledColdModel.rowCount(), 4);
+	QCOMPARE(cancelledColdModel.rowCount(), 32);
 	QVERIFY(cancelledColdModel.appendPending());
 	cancelledColdModel.replaceMessages({});
 	QCOMPARE(cancelledColdModel.rowCount(), 0);
@@ -1157,7 +1287,7 @@ void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() 
 					QStringLiteral("prepend-idle:%1").arg(cancelledPrependModel.rowCount()));
 			}
 		});
-	QCOMPARE(cancelledPrependModel.enqueuePrependMessages(cancellableMessages), 8);
+	QCOMPARE(cancelledPrependModel.enqueuePrependMessages(cancellableMessages), 40);
 	QVERIFY(cancelledPrependModel.prependPending());
 	cancelledPrependModel.replaceMessages({});
 	QCOMPARE(cancelledPrependModel.rowCount(), 0);

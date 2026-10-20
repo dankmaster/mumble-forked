@@ -2298,6 +2298,7 @@ ApplicationWindow {
 						timeline.scopePresentationLastOuterLoaderLoadedAt),
 				"plainRowAdmissionCount":
 					timeline.scopePresentationPlainRowAdmissionCount,
+				"plainLoaderEvents": timeline.scopePresentationPlainLoaderEvents,
 				"firstPlainRowAdmissionDurationMs":
 					timeline.scopePresentationPhaseDuration(
 						timeline.scopePresentationFirstPlainRowAdmissionAt),
@@ -4509,6 +4510,7 @@ ApplicationWindow {
 					property double scopePresentationFirstOuterLoaderLoadedAt: 0
 					property double scopePresentationLastOuterLoaderLoadedAt: 0
 					property int scopePresentationPlainRowAdmissionCount: 0
+					property var scopePresentationPlainLoaderEvents: []
 					property double scopePresentationFirstPlainRowAdmissionAt: 0
 					property double scopePresentationLastPlainRowAdmissionAt: 0
 					property int scopePresentationRowLoaderLoadedCount: 0
@@ -4740,6 +4742,7 @@ ApplicationWindow {
 						scopePresentationFirstOuterLoaderLoadedAt = 0
 						scopePresentationLastOuterLoaderLoadedAt = 0
 						scopePresentationPlainRowAdmissionCount = 0
+						scopePresentationPlainLoaderEvents = []
 						scopePresentationFirstPlainRowAdmissionAt = 0
 						scopePresentationLastPlainRowAdmissionAt = 0
 						scopePresentationRowLoaderLoadedCount = 0
@@ -7571,6 +7574,16 @@ ApplicationWindow {
 							scopePresentationFirstOuterLoaderLoadedAt = timestamp
 						scopePresentationLastOuterLoaderLoadedAt = timestamp
 						++scopePresentationOuterLoaderLoadedCount
+					}
+
+					function notePlainLoaderEvent(stableId, generation, phase) {
+						if (!scopePresentationPending || generation !== scopePresentationGeneration
+								|| scopePresentationPlainLoaderEvents.length >= 128)
+							return
+						scopePresentationPlainLoaderEvents.push({
+							"id": String(stableId), "generation": generation, "phase": phase,
+							"ms": scopePresentationPhaseDuration(Date.now())
+						})
 					}
 
 					function noteScopePresentationPlainRowAdmission() {
@@ -10809,6 +10822,12 @@ ApplicationWindow {
 						// window stays a lightweight geometry shell until scrolling stops,
 						// avoiding full message-tree allocation and GC on the input frame.
 						property bool messageRowMaterialized: false
+						property int diagnosticLoadGeneration: -1
+						property string diagnosticLoadId: ""
+						function notePlainLoaderEvent(phase) {
+							if (diagnosticLoadId === String(stableId))
+								timeline.notePlainLoaderEvent(stableId, diagnosticLoadGeneration, phase)
+						}
 						// A cached preview refresh can briefly replace a ready provider
 						// tree with its loading surface. Once this stable-id has shown a
 						// complete message, retain that presentation contract and keep the
@@ -11426,8 +11445,15 @@ ApplicationWindow {
 								// ordered resume queue promote one visible message tree per
 								// frame instead of allowing every visible Loader binding to
 								// activate together on the first idle polish pass.
-								if (!logEntry && richContentViewportEligible)
+								if (!logEntry && richContentViewportEligible) {
+									if (!messageRowMaterialized && plainScopeResumeEligible
+											&& timeline.scopePresentationPending) {
+										diagnosticLoadGeneration = timeline.scopePresentationGeneration
+										diagnosticLoadId = String(stableId)
+										notePlainLoaderEvent("admitted")
+									}
 									messageRowMaterialized = true
+								}
 								if (admitPreviewMaterialization === true
 										&& hasPreviewContent) {
 									previewAdmissionAccepted = !previewNeedsHydration
@@ -12030,6 +12056,7 @@ ApplicationWindow {
 							visible: active
 							onLoaded: {
 								messageDelegate.messageRowMaterialized = true
+								messageDelegate.notePlainLoaderEvent("loaded")
 								timeline.noteScopePresentationRowLoaderLoaded()
 								messageDelegate.completeRichLoaderResumeWhenReady()
 								if (timeline.topAnchorActive) {
@@ -12039,6 +12066,10 @@ ApplicationWindow {
 								}
 							}
 							onStatusChanged: {
+								if (status === Loader.Loading || status === Loader.Error
+										|| status === Loader.Null)
+									messageDelegate.notePlainLoaderEvent(status === Loader.Loading
+										? "loading" : status === Loader.Error ? "error" : "inactive")
 								if (status === Loader.Error
 										&& !timeline.abandonNearViewportPrefetch(
 											messageDelegate.stableId, true))

@@ -52,6 +52,7 @@
 #include "PersistentChatGateway.h"
 #include "PersistentChatRenderTypes.h"
 #include "PersistentChatMediaCache.h"
+#include "PersistentChatPreviewUrl.h"
 #include "PersistentChatRender.h"
 #include "PluginInstallService.h"
 #include "PluginOperation.h"
@@ -36063,9 +36064,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 					|| target->providerKey == QLatin1String("tenor");
 				const QString oEmbedMediaUrlString =
 					animatedImageProvider ? object.value(QStringLiteral("url")).toString().trimmed() : QString();
-				const QUrl oEmbedMediaUrl = previewIt->canonicalUrl.isEmpty()
-												? QUrl(oEmbedMediaUrlString)
-												: QUrl(previewIt->canonicalUrl).resolved(QUrl(oEmbedMediaUrlString));
+				const QUrl oEmbedMediaUrl = mumble::chat::resolveOptionalPreviewUrl(
+					QUrl(previewIt->canonicalUrl), oEmbedMediaUrlString);
 				if (animatedImageProvider && oEmbedMediaUrl.isValid()
 					&& applyPersistentChatRemotePlayableMedia(
 						*previewIt, oEmbedMediaUrl, QStringLiteral("image/gif"),
@@ -36129,9 +36129,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 					&& previewIt->mediaDataUrl.isEmpty()) {
 					thumbnailUrlString = oEmbedMediaUrlString;
 				}
-				const QUrl thumbnailUrl = previewIt->canonicalUrl.isEmpty()
-											  ? QUrl(thumbnailUrlString)
-											  : QUrl(previewIt->canonicalUrl).resolved(QUrl(thumbnailUrlString));
+				const QUrl thumbnailUrl = mumble::chat::resolveOptionalPreviewUrl(
+					QUrl(previewIt->canonicalUrl), thumbnailUrlString);
 				if (thumbnailUrl.isValid() && isSafePreviewTarget(thumbnailUrl)) {
 					thumbnailRequested = true;
 					const QString expectedThumbnailSource = previewIt->canonicalUrl;
