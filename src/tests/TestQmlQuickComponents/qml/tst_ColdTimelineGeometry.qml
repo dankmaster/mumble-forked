@@ -5,6 +5,7 @@ TestCase {
 	id: testCase
 	name: "ColdTimelineGeometry"
 	when: windowShown
+	visible: true
 
 	function productFunction(name) {
 		const source = String(mainQmlSource)
@@ -132,6 +133,71 @@ TestCase {
 		compare(probe.handoffVisible, false)
 		probe.deadlinePresentationFallback = true
 		compare(probe.handoffVisible, true)
+		probe.destroy()
+	}
+
+	function test_cold_link_text_fits_short_reserved_rows() {
+		const source = String(mainQmlSource)
+		const name = source.indexOf('objectName: "coldMessageLinkHandoff"')
+		const start = source.lastIndexOf("Rectangle {", name)
+		verify(start >= 0 && name > start)
+		const open = source.indexOf("{", start)
+		let depth = 1
+		let end = open + 1
+		while (end < source.length && depth > 0) {
+			if (source[end] === "{") ++depth
+			if (source[end] === "}") --depth
+			++end
+		}
+		const probe = Qt.createQmlObject(`import QtQuick
+			import QtQuick.Controls
+			import Mumble.Theme 1.0
+			Item {
+				width: 800; height: 108
+				property var asyncRichHandoff: ({visible: true})
+				property var asyncMessageDelegate: ({cachedStaticHandoffCardX: 40,
+					accessibilityPooled: false, presentationHeightCommittedHeight: 0,
+					preview: {url: "https://example.invalid/track"},
+					cachedStaticHandoffReady: false, cachedStaticHandoffSource: "",
+					cachedStaticHandoffProvider: "SoundCloud",
+					cachedStaticHandoffTitle: "A real track title"})
+				${source.slice(start, end)}
+			}`, testCase, "coldLinkLayoutProbe")
+		const card = findChild(probe, "coldMessageLinkHandoff")
+		verify(card !== null)
+		verify(card.visible)
+		for (const rowHeight of [108, 129, 141, 142, 165, 166, 180]) {
+			for (const withStill of [false, true]) {
+				probe.asyncMessageDelegate = Object.assign({}, probe.asyncMessageDelegate, {
+					cachedStaticHandoffReady: withStill,
+					cachedStaticHandoffSource: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+					cachedStaticHandoffTitle: "First title line\nSecond title line\nThird title line"
+				})
+				probe.height = rowHeight
+				wait(0)
+				// Every visible label must fit the actual card, even while an
+				// attached scrollbar prevents committing the provider's full height.
+				let labelCount = 0
+				for (const child of card.children) {
+					if (child.source !== undefined) {
+						compare(child.visible, withStill)
+						verify(child.y >= 0 && child.y + child.height <= card.height,
+							"thumbnail fits card")
+					}
+					for (const label of child.children) {
+						if (label.text === undefined || !label.visible) continue
+						++labelCount
+						const position = label.mapToItem(card, 0, 0)
+						verify(position.y >= 0, "label begins inside card")
+						verify(position.y + label.height <= card.height,
+							"label fits card at row height " + rowHeight)
+						if (label.text.startsWith("First title line"))
+							compare(label.lineCount, 1)
+					}
+				}
+				verify(labelCount > 0, "real title remains visible")
+			}
+		}
 		probe.destroy()
 	}
 }

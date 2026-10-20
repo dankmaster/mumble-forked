@@ -10236,6 +10236,7 @@ ApplicationWindow {
 									}
 
 									Rectangle {
+										id: coldMessageLinkHandoff
 										objectName: "coldMessageLinkHandoff"
 										x: asyncMessageDelegate.cachedStaticHandoffCardX
 										y: 58
@@ -10249,12 +10250,14 @@ ApplicationWindow {
 										border.color: Theme.embedBorder
 										clip: true
 										Accessible.ignored: true
+										readonly property bool compact: height < 76
+										readonly property real contentInset: compact ? Theme.space2 : Theme.space3
 										Image {
 											id: coldHandoffStill
-											x: Theme.space3
-											y: Theme.space3
-											width: 96
-											height: Math.max(1, parent.height - Theme.space3 * 2)
+											x: parent.contentInset
+											anchors.verticalCenter: parent.verticalCenter
+											width: parent.compact ? height : 96
+											height: Math.max(1, Math.min(64, parent.height - parent.contentInset * 2))
 											source: parent.visible && asyncRichHandoff.visible
 												&& asyncMessageDelegate.cachedStaticHandoffReady
 												? asyncMessageDelegate.cachedStaticHandoffSource : ""
@@ -10265,12 +10268,15 @@ ApplicationWindow {
 											fillMode: Image.PreserveAspectCrop
 										}
 										Column {
-											anchors.fill: parent
-											anchors.margins: Theme.space3
+											anchors.left: parent.left
+											anchors.right: parent.right
+											anchors.verticalCenter: parent.verticalCenter
+											anchors.margins: parent.contentInset
 											anchors.leftMargin: coldHandoffStill.visible
-												? coldHandoffStill.x + coldHandoffStill.width + Theme.space3 : Theme.space3
-											spacing: Theme.space2
+												? coldHandoffStill.x + coldHandoffStill.width + parent.contentInset : parent.contentInset
+											spacing: Theme.space1
 											Label {
+												visible: !coldMessageLinkHandoff.compact
 												width: parent.width
 												text: asyncMessageDelegate.cachedStaticHandoffProvider || qsTr("Link")
 												textFormat: Text.PlainText
@@ -10282,6 +10288,7 @@ ApplicationWindow {
 												width: parent.width
 												text: asyncMessageDelegate.cachedStaticHandoffTitle
 													|| String(asyncMessageDelegate.preview.url || "")
+												maximumLineCount: 1
 												textFormat: Text.PlainText
 												font.pixelSize: Theme.fontLabel
 												font.weight: Font.DemiBold
@@ -10291,6 +10298,7 @@ ApplicationWindow {
 											Label {
 												width: parent.width
 												text: String(asyncMessageDelegate.preview.url || "")
+												visible: coldMessageLinkHandoff.height >= 100
 												textFormat: Text.PlainText
 												font.pixelSize: Theme.fontCaption
 												color: Theme.textMuted
