@@ -11004,15 +11004,19 @@ ApplicationWindow {
 							const row = messageRowLoader.item
 							const loader = row ? row.previewLoader : null
 							const card = loader && loader.status === Loader.Ready ? loader.item : null
-							// Keep only a completed current-identity still in the existing
-							// ListView cache. This never admits a new tree or retains a player.
+							// Keep completed current-identity stills and native link cards
+							// in the existing ListView cache. A card without artwork has no
+							// image cache lease, but is still a complete static presentation.
+							// This never admits a new tree or retains a player.
 							return !accessibilityPooled && !hasAttachmentContent && !hasInlineImageContent
 								&& hydrationOwnerGeneration === timeline.scopePresentationGeneration
 								&& hydrationOwnerScopeToken === String(activeScope.scopeToken || "")
 								&& asyncMessageDelegate.presentationHeightCommittedHeight > 0
 								&& previewMaterializationAdmitted && !previewNeedsHydration
 								&& !previewTerminalUnavailable && !!card
-								&& card.materializationSettled && card.staticPreviewCacheActive
+								&& card.materializationSettled
+								&& (card.staticPreviewCacheActive
+									|| card.performanceEmbedSurfaceState === "not-required")
 								&& card.paintedSurface && !card.inlinePlaybackActive
 								&& !card.currentMediaManagedAnimated
 						}

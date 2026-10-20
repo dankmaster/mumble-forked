@@ -200,4 +200,55 @@ TestCase {
 		}
 		probe.destroy()
 	}
+
+	function test_completed_native_link_without_art_survives_viewport_exit() {
+		const component = Qt.createComponent("qrc:/qml-shell/RichPreviewCard.qml")
+		compare(component.status, Component.Ready, component.errorString())
+		const card = component.createObject(testCase, {width: 580, preview: {
+			state: "ready", title: "Example Domain", host: "example.com",
+			url: "https://example.com", description: "A native link card without artwork."
+		}})
+		verify(card !== null)
+		tryCompare(card, "materializationSettled", true)
+		compare(card.paintedSurface, true)
+		compare(card.staticPreviewCacheActive, false)
+		const source = String(mainQmlSource)
+		const start = source.indexOf("readonly property bool staticPreviewPresentationReady:")
+		const end = source.indexOf("onStaticPreviewPresentationReadyChanged:", start)
+		verify(start >= 0 && end > start)
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				property var messageRowLoader: ({})
+				property var timeline: ({scopePresentationGeneration: 3})
+				property var activeScope: ({scopeToken: "3:0"})
+				property var asyncMessageDelegate: ({presentationHeightCommittedHeight: 284})
+				property bool accessibilityPooled: false
+				property bool hasAttachmentContent: false
+				property bool hasInlineImageContent: false
+				property int hydrationOwnerGeneration: 3
+				property string hydrationOwnerScopeToken: "3:0"
+				property bool previewMaterializationAdmitted: true
+				property bool previewNeedsHydration: false
+				property bool previewTerminalUnavailable: false
+				${source.slice(start, end)}
+			}`, testCase, "nativeCardRetentionProbe")
+		probe.messageRowLoader = {item: {previewLoader: {status: Loader.Ready, item: card}}}
+		compare(probe.staticPreviewPresentationReady, true)
+		const height = card.implicitHeight
+		card.renderActive = false
+		wait(0)
+		compare(probe.staticPreviewPresentationReady, true)
+		compare(card.paintedSurface, true)
+		compare(card.implicitHeight, height)
+		probe.hydrationOwnerGeneration = 2
+		compare(probe.staticPreviewPresentationReady, false)
+		probe.hydrationOwnerGeneration = 3
+		probe.accessibilityPooled = true
+		compare(probe.staticPreviewPresentationReady, false)
+		probe.accessibilityPooled = false
+		probe.previewNeedsHydration = true
+		compare(probe.staticPreviewPresentationReady, false)
+		probe.destroy()
+		card.destroy()
+	}
 }
