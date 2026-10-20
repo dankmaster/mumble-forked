@@ -135,6 +135,7 @@ public:
 	void setMotdDismissedSignature(const QString &value);
 	void setMotdLastSeenSignature(const QString &value);
 	void applyState(const QVariantMap &state);
+	static QVariantMap roomUpdateState(const QVariantMap &state);
 
 signals:
 	void serverNameChanged();

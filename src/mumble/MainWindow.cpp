@@ -24296,15 +24296,15 @@ void MainWindow::runQmlShellStateSync() {
 }
 
 void MainWindow::enterQmlShellSteadyState() {
-	// serverConnected() schedules a coalesced full bootstrap before ServerSync is
-	// received. Complete that pending lifecycle bootstrap while full snapshots are
-	// still permitted; otherwise its zero-delay timer can fire immediately after
-	// this transition and be reported as steady-state work.
+	// The pre-authentication bootstrap can finish before ServerSync. Publish the
+	// authenticated session (including menus) in either case, while full snapshots
+	// are still permitted. Coalesce any pending bootstrap into this publication.
 	if (m_modernShellSyncTimer && m_modernShellSyncTimer->isActive()) {
 		appendModernShellConnectTrace(QStringLiteral("steady-state flush-pending-bootstrap"));
 		m_modernShellSyncTimer->stop();
-		runQmlShellStateSync();
 	}
+	appendModernShellConnectTrace(QStringLiteral("steady-state publish-synchronized-session"));
+	runQmlShellStateSync();
 	mumble::chatperf::fullBootstrapMonitor().enterSteadyState();
 }
 
@@ -27517,14 +27517,11 @@ void MainWindow::flushQmlRoomStateUpdates() {
 	QVariantMap roomState = buildQmlRoomState();
 	// Room, participant, unread and history changes are frequent. They must not
 	// replay the application menus, Stonks ticker or other session-global state:
-	// those signals rebuild sizeable QML trees and can block the render loop even
-	// though none of their values belong to the room update. Direct messages are
-	// still part of navigation state, so preserve that narrow sub-patch.
+	// those signals rebuild sizeable QML trees and can block the render loop.
+	// Preserve the lightweight connection, self, navigation and MOTD control
+	// fields; their setters notify only when values actually change.
 	const QVariantMap fullAppState = roomState.value(QStringLiteral("app")).toMap();
-	QVariantMap navigationAppState;
-	navigationAppState.insert(QStringLiteral("directMessages"),
-							  fullAppState.value(QStringLiteral("directMessages")).toMap());
-	roomState.insert(QStringLiteral("app"), navigationAppState);
+	roomState.insert(QStringLiteral("app"), ClientSessionController::roomUpdateState(fullAppState));
 	applyQmlRoomState(roomState);
 	mumble::chatperf::recordValue("qml.rooms.flush.direct", 1);
 	appendModernShellConnectTrace(QStringLiteral("flushQmlRoomStateUpdates applied rooms text=%1 voice=%2 "
@@ -27635,10 +27632,7 @@ void MainWindow::scheduleQmlRoomStateUpdate() {
 		const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
 		QVariantMap roomState = buildQmlRoomState();
 		const QVariantMap fullAppState = roomState.value(QStringLiteral("app")).toMap();
-		QVariantMap navigationAppState;
-		navigationAppState.insert(QStringLiteral("directMessages"),
-								  fullAppState.value(QStringLiteral("directMessages")).toMap());
-		roomState.insert(QStringLiteral("app"), navigationAppState);
+		roomState.insert(QStringLiteral("app"), ClientSessionController::roomUpdateState(fullAppState));
 		appendModernShellConnectTrace(
 			QStringLiteral("scheduleQmlRoomStateUpdate built text=%1 voice=%2 participants=%3 ms=%4")
 				.arg(roomState.value(QStringLiteral("textRooms")).toList().size())

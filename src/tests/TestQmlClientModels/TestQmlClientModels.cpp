@@ -87,6 +87,8 @@ private slots:
 	void workloadSourceStateRoundTripsExactly();
 	void steadyStateRejectsFullBootstrap();
 	void pendingBootstrapCompletesBeforeSteadyState();
+	void roomUpdatesPublishConnectionWithoutRebuildingGlobalSurfaces();
+	void roomUpdatesPublishMotdControls();
 	void automationProbesStayIncrementalInSteadyState();
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
@@ -5618,6 +5620,92 @@ void TestQmlClientModels::steadyStateRejectsFullBootstrap() {
 	monitor.leaveSteadyState();
 	QVERIFY(!monitor.recordBootstrap());
 	QCOMPARE(monitor.steadyStateViolations(), 1U);
+}
+
+void TestQmlClientModels::roomUpdatesPublishConnectionWithoutRebuildingGlobalSurfaces() {
+	ClientSessionController session;
+	session.applyState({
+		{ QStringLiteral("connectionState"), QStringLiteral("connecting") },
+		{ QStringLiteral("selfStatusLabel"), QStringLiteral("Offline") },
+		{ QStringLiteral("canCancelConnection"), true }
+	});
+	QSignalSpy connectionSpy(&session, &ClientSessionController::connectionStateChanged);
+	QSignalSpy statusSpy(&session, &ClientSessionController::selfStatusLabelChanged);
+	QSignalSpy menusSpy(&session, &ClientSessionController::appMenusChanged);
+	QSignalSpy selfMenuSpy(&session, &ClientSessionController::selfMenuChanged);
+	QSignalSpy stonksSpy(&session, &ClientSessionController::stonksChanged);
+	const QVariantMap patch = ClientSessionController::roomUpdateState({
+		{ QStringLiteral("connected"), true },
+		{ QStringLiteral("connectionState"), QStringLiteral("connected") },
+		{ QStringLiteral("connectionLabel"), QStringLiteral("Connected") },
+		{ QStringLiteral("connectionTone"), QStringLiteral("success") },
+		{ QStringLiteral("connectionTooltip"), QStringLiteral("Connected to test server") },
+		{ QStringLiteral("connectionRetryRemainingMs"), 0 },
+		{ QStringLiteral("canCancelConnection"), false },
+		{ QStringLiteral("selfStatusLabel"), QStringLiteral("Deafened") },
+		{ QStringLiteral("selfName"), QStringLiteral("Test user") },
+		{ QStringLiteral("selfMuted"), true },
+		{ QStringLiteral("selfDeafened"), true },
+		{ QStringLiteral("directMessages"), QVariantMap { { QStringLiteral("available"), true } } },
+		{ QStringLiteral("menus"), QVariantList { QVariantMap { { QStringLiteral("id"), QStringLiteral("server") } } } },
+		{ QStringLiteral("selfMenu"), QVariantMap { { QStringLiteral("statusLabel"), QStringLiteral("Deafened") } } },
+		{ QStringLiteral("stonks"), QVariantMap { { QStringLiteral("visible"), true } } }
+	});
+	session.applyState(patch);
+	QVERIFY(session.connected());
+	QCOMPARE(session.connectionState(), QStringLiteral("connected"));
+	QCOMPARE(session.selfStatusLabel(), QStringLiteral("Deafened"));
+	QCOMPARE(session.selfName(), QStringLiteral("Test user"));
+	QVERIFY(!session.canCancel());
+	QVERIFY(session.selfMuted());
+	QVERIFY(session.selfDeafened());
+	QVERIFY(patch.value(QStringLiteral("directMessages")).toMap().value(QStringLiteral("available")).toBool());
+	QVERIFY(!patch.contains(QStringLiteral("menus")));
+	QVERIFY(!patch.contains(QStringLiteral("selfMenu")));
+	QVERIFY(!patch.contains(QStringLiteral("stonks")));
+	session.applyState(patch);
+	QCOMPARE(connectionSpy.count(), 1);
+	QCOMPARE(statusSpy.count(), 1);
+	QCOMPARE(menusSpy.count(), 0);
+	QCOMPARE(selfMenuSpy.count(), 0);
+	QCOMPARE(stonksSpy.count(), 0);
+	const QVariantMap unrelatedPatch = ClientSessionController::roomUpdateState({
+		{ QStringLiteral("menus"), QVariantList {} }
+	});
+	QVERIFY(unrelatedPatch.isEmpty());
+	session.applyState(unrelatedPatch);
+	QCOMPARE(session.connectionState(), QStringLiteral("connected"));
+	QCOMPARE(session.selfStatusLabel(), QStringLiteral("Deafened"));
+	QCOMPARE(connectionSpy.count(), 1);
+	QCOMPARE(statusSpy.count(), 1);
+}
+
+void TestQmlClientModels::roomUpdatesPublishMotdControls() {
+	ClientSessionController session;
+	session.setMotdHtml(QStringLiteral("<p>Welcome</p>"));
+	const QString signature = session.motdSignature();
+	QVERIFY(!signature.isEmpty());
+	QSignalSpy contentSpy(&session, &ClientSessionController::motdBlocksChanged);
+	const auto update = [&](bool expanded, const QString &dismissed) {
+		session.applyState(ClientSessionController::roomUpdateState({
+			{ QStringLiteral("motdExpanded"), expanded },
+			{ QStringLiteral("motdDismissedSignature"), dismissed },
+			{ QStringLiteral("motdLastSeenSignature"), signature },
+			{ QStringLiteral("motdHtml"), QStringLiteral("<p>Must not rebuild content</p>") }
+		}));
+	};
+	update(true, {});
+	QVERIFY(session.motdExpanded());
+	QCOMPARE(session.motdLastSeenSignature(), signature);
+	update(false, {});
+	QVERIFY(!session.motdExpanded());
+	QVERIFY(!session.motdDismissed());
+	update(false, signature);
+	QVERIFY(session.motdDismissed());
+	update(false, {});
+	QVERIFY(!session.motdDismissed());
+	QCOMPARE(session.motdSignature(), signature);
+	QCOMPARE(contentSpy.count(), 0);
 }
 
 void TestQmlClientModels::pendingBootstrapCompletesBeforeSteadyState() {

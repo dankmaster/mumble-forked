@@ -1961,6 +1961,24 @@ void ClientSessionController::setMotdLastSeenSignature(const QString &value) {
 	recomputeMotdDerivedState();
 }
 
+QVariantMap ClientSessionController::roomUpdateState(const QVariantMap &state) {
+	// Room updates also carry cheap session state. Dropping it leaves connection
+	// status and persisted MOTD controls stale when no full bootstrap is pending.
+	// Keep menus, ticker data and rich MOTD content on their explicit publishers.
+	QVariantMap patch;
+	for (const auto *key : {
+			 "directMessages", "connected", "connectionLabel", "connectionState",
+			 "connectionTone", "connectionTooltip", "connectionRetryRemainingMs",
+			 "canConnect", "canCancelConnection", "selfStatusLabel", "selfName",
+			 "selfMuted", "selfDeafened", "collapsedNavigationSections",
+			 "motdExpanded", "motdDismissedSignature", "motdLastSeenSignature" }) {
+		const QString field = QString::fromLatin1(key);
+		const auto value = state.constFind(field);
+		if (value != state.cend()) patch.insert(field, value.value());
+	}
+	return patch;
+}
+
 void ClientSessionController::applyState(const QVariantMap &state) {
 	{
 		mumble::chatperf::ScopedDuration trace("qml.session.apply.identity");
