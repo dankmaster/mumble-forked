@@ -65,6 +65,7 @@
 #include <QtWidgets/QWidget>
 
 #include <cmath>
+#include <atomic>
 #include <limits>
 #include <memory>
 
@@ -6665,6 +6666,110 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 #endif
 		response.insert(QStringLiteral("mediaActive"), host->mediaSession()->active());
 		response.insert(QStringLiteral("media"), automationMediaLifecycleState(host));
+		return response;
+	}
+
+	if (command == QLatin1String("qmlScopeGeometryProbe")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		if (request.value(QStringLiteral("arm")).toBool()) {
+			if (m_scopeGeometryProbe.value(QStringLiteral("active")).toBool())
+				return errorResponse(tr("A scope geometry probe is already active."));
+			const QString scope = request.value(QStringLiteral("scopeToken")).toString();
+			QVariant initial;
+			QMetaObject::invokeMethod(host->window(), "timelinePresentationState", Q_RETURN_ARG(QVariant, initial));
+			if (scope.isEmpty() || scope == initial.toMap().value(QStringLiteral("scopeToken")).toString())
+				return errorResponse(tr("Select a different scope after arming the probe."));
+			const int generation = initial.toMap().value(QStringLiteral("generation")).toInt() + 1;
+			const auto sequence = ++m_scopeGeometryProbeSequence;
+			m_scopeGeometryProbe = { { QStringLiteral("active"), true },
+				{ QStringLiteral("scopeToken"), scope }, { QStringLiteral("generation"), generation } };
+			QPointer< QQuickWindow > window(host->window());
+			m_scopeGeometryAnimation = QObject::connect(window, &QQuickWindow::afterAnimating, this,
+				[this, window, scope, generation, sequence]() {
+					if (!window || sequence != m_scopeGeometryProbeSequence) return;
+					QVariant state;
+					QMetaObject::invokeMethod(window, "timelinePresentationState", Q_RETURN_ARG(QVariant, state));
+					const QVariantMap snapshot = state.toMap();
+					if (snapshot.value(QStringLiteral("generation")).toInt() != generation
+						|| snapshot.value(QStringLiteral("scopeToken")).toString() != scope
+						|| !snapshot.value(QStringLiteral("presentationPending")).toBool()
+						|| snapshot.value(QStringLiteral("stableFrameCommittedAt")).toLongLong() <= 0
+						|| snapshot.value(QStringLiteral("visibleFrameCommitted")).toBool()) return;
+					auto *timeline = qobject_cast< QQuickItem * >(automationFindQuickItemByObjectName(
+						window->contentItem(), QStringLiteral("chatTimeline")));
+					if (!timeline) return;
+					QQuickItem *row = nullptr;
+					const QString firstId = timeline->property("scopePresentationStableFrameFirstVisibleId").toString();
+					for (auto *item : automationQuickItemSubtree(timeline)) {
+						if (item->property("performanceTimelineDelegate").toBool()
+							&& item->property("stableId").toString() == firstId) { row = item; break; }
+					}
+					if (!row) return;
+					QObject::disconnect(m_scopeGeometryAnimation);
+					// Only native item geometry is read on the render thread. No QML
+					// functions or bindings may be evaluated during synchronization.
+					struct Receipt {
+						std::atomic_bool captured{ false };
+						std::atomic_bool published{ false };
+						QPointer< QQuickItem > timeline;
+						QPointer< QQuickItem > row;
+						qreal hiddenOffset = 0;
+						qreal synchronizedOffset = 0;
+						bool exposed = false;
+					};
+					auto receipt = std::make_shared< Receipt >();
+					receipt->timeline = timeline;
+					receipt->row = row;
+					receipt->hiddenOffset = timeline->property("scopePresentationStableFrameFirstVisibleOffset").toReal();
+					m_scopeGeometryProbe.insert(QStringLiteral("hiddenProof"), snapshot);
+					m_scopeGeometryProbe.insert(QStringLiteral("firstId"), firstId);
+					const qreal beforeY = timeline->property("contentY").toReal();
+					timeline->setProperty("contentY", beforeY - 12.0);
+					m_scopeGeometryProbe.insert(QStringLiteral("injectedDelta"),
+						timeline->property("contentY").toReal() - beforeY);
+					m_scopeGeometrySync = QObject::connect(window, &QQuickWindow::afterSynchronizing, this,
+						[receipt]() {
+							if (receipt->captured.load(std::memory_order_acquire)
+								|| !receipt->timeline || !receipt->row) return;
+							receipt->synchronizedOffset = receipt->row->mapToItem(receipt->timeline, QPointF()).y();
+							receipt->exposed = automationQuickItemHasVisibleAncestry(receipt->row);
+							receipt->captured.store(true, std::memory_order_release);
+						}, Qt::DirectConnection);
+					m_scopeGeometrySwap = QObject::connect(window, &QQuickWindow::frameSwapped, this,
+						[this, receipt, sequence]() {
+							// Claim the receipt at emission, so an older queued swap cannot
+							// consume geometry synchronized by a later frame.
+							if (!receipt->captured.load(std::memory_order_acquire)
+								|| receipt->published.exchange(true)) return;
+							QMetaObject::invokeMethod(this, [this, receipt, sequence]() {
+								if (sequence != m_scopeGeometryProbeSequence
+									|| !m_scopeGeometryProbe.value(QStringLiteral("active")).toBool()) return;
+								m_scopeGeometryProbe.insert(QStringLiteral("active"), false);
+								m_scopeGeometryProbe.insert(QStringLiteral("presented"), true);
+								m_scopeGeometryProbe.insert(QStringLiteral("exposed"), receipt->exposed);
+								m_scopeGeometryProbe.insert(QStringLiteral("hiddenOffset"), receipt->hiddenOffset);
+								m_scopeGeometryProbe.insert(QStringLiteral("synchronizedOffset"), receipt->synchronizedOffset);
+								m_scopeGeometryProbe.insert(QStringLiteral("exposedMismatch"), receipt->exposed
+									&& std::abs(receipt->synchronizedOffset - receipt->hiddenOffset) > 0.5);
+								QObject::disconnect(m_scopeGeometrySync);
+								QObject::disconnect(m_scopeGeometrySwap);
+							}, Qt::QueuedConnection);
+						}, Qt::DirectConnection);
+					window->update();
+				}, Qt::DirectConnection);
+			QTimer::singleShot(10000, this, [this, sequence]() {
+				if (sequence != m_scopeGeometryProbeSequence
+					|| !m_scopeGeometryProbe.value(QStringLiteral("active")).toBool()) return;
+				QObject::disconnect(m_scopeGeometryAnimation);
+				QObject::disconnect(m_scopeGeometrySync);
+				QObject::disconnect(m_scopeGeometrySwap);
+				m_scopeGeometryProbe.insert(QStringLiteral("active"), false);
+				m_scopeGeometryProbe.insert(QStringLiteral("timedOut"), true);
+			});
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("probe"), m_scopeGeometryProbe);
 		return response;
 	}
 

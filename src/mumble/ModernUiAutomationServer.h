@@ -61,6 +61,11 @@ private:
 	QVariant m_automationDialogDraftValue;
 	bool m_automationDialogDraftActive = false;
 	qulonglong m_performanceInputSequence = 0;
+	QVariantMap m_scopeGeometryProbe;
+	qulonglong m_scopeGeometryProbeSequence = 0;
+	QMetaObject::Connection m_scopeGeometryAnimation;
+	QMetaObject::Connection m_scopeGeometrySync;
+	QMetaObject::Connection m_scopeGeometrySwap;
 	struct ChatPerformanceWorkloadState {
 		bool active = false;
 		bool liveMode = false;
