@@ -278,6 +278,21 @@ QVariantMap screenShareEditorState(const ScreenShareEditorStateInput &input) {
 	}
 	if (!input.qualityNote.isEmpty()) result.insert(QStringLiteral("qualityNote"), input.qualityNote);
 	if (input.sourcesLoading.isValid()) result.insert(QStringLiteral("sourcesLoading"), input.sourcesLoading);
+	if (!input.runtimeProbePending && !input.runtimeError.trimmed().isEmpty()) {
+		// Discovery is not launched when the runtime cannot publish. Its pending
+		// placeholders must become terminal along with the runtime check.
+		result.insert(QStringLiteral("sourcesLoading"), false);
+		QVariantList sources;
+		for (const QVariant &entry : input.sources) {
+			QVariantMap section = entry.toMap();
+			if (section.value(QStringLiteral("loading")).toBool()) {
+				section.insert(QStringLiteral("loading"), false);
+				section.insert(QStringLiteral("emptyText"), productTr("Window discovery is unavailable."));
+			}
+			sources.push_back(section);
+		}
+		result.insert(QStringLiteral("sources"), sources);
+	}
 	return result;
 }
 

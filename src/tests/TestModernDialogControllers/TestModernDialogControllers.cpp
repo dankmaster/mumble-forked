@@ -339,6 +339,21 @@ void TestModernDialogControllers::productScreenShareEditorUsesProductionContract
 	QCOMPARE(failedRuntimeDialog.value(QStringLiteral("statusMessage")).toString(), QString());
 	QCOMPARE(failedRuntimeDialog.value(QStringLiteral("initialFocusId")).toString(),
 		QStringLiteral("dialogAction_screenShare.retryRuntime"));
+	input.sourcesLoading = true;
+	input.runtimeProbePending = false;
+	input.runtimeError = QStringLiteral("The bundled runtime is unavailable.");
+	input.sources.push_back(QVariantMap {
+		{ QStringLiteral("id"), QStringLiteral("windows") },
+		{ QStringLiteral("loading"), true },
+		{ QStringLiteral("items"), QVariantList() },
+		{ QStringLiteral("emptyText"), QStringLiteral("Finding shareable app windows...") }
+	});
+	const QVariantMap terminalState = Mumble::ModernProductDialogs::screenShareEditorState(input);
+	QVERIFY(!terminalState.value(QStringLiteral("sourcesLoading")).toBool());
+	const QVariantMap terminalSection = terminalState.value(QStringLiteral("sources")).toList().last().toMap();
+	QVERIFY(!terminalSection.value(QStringLiteral("loading")).toBool());
+	QCOMPARE(terminalSection.value(QStringLiteral("emptyText")).toString(),
+		QStringLiteral("Window discovery is unavailable."));
 }
 
 void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
