@@ -1590,7 +1590,7 @@ TestCase {
 			&& asyncRichHandoffSummaryStart > asyncRichHandoffStart)
 		const asyncRichHandoffOuterSource = asyncDelegateSource.slice(
 			asyncRichHandoffStart, asyncRichHandoffSummaryStart)
-		verify(/visible:\s*asyncMessageDelegate\.deadlinePresentationFallback\s*\|\|\s*\(asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*\(!activeScope\.activity\s*&&\s*asyncMessageDelegate\.presentationHeightCommittedHeight\s*<=\s*0\)\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\s*&&\s*!asyncMessageDelegate\.item\.staticPreviewPresentationReady\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
+		verify(/visible:\s*asyncMessageDelegate\.deadlinePresentationFallback\s*\|\|\s*\(asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*\(!activeScope\.activity\s*&&\s*asyncMessageDelegate\.presentationHeightCommittedHeight\s*<=\s*0\)\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\s*&&\s*!asyncMessageDelegate\.item\.boundedRichGeometryReady\s*&&\s*!asyncMessageDelegate\.item\.staticPreviewPresentationReady\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
 			asyncRichHandoffOuterSource))
 		verify(/radius:\s*0[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
 			asyncRichHandoffOuterSource))

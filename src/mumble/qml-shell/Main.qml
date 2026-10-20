@@ -10159,10 +10159,12 @@ ApplicationWindow {
 											|| !asyncMessageDelegate.item.currentMessagePresentationReady
 											|| (asyncMessageDelegate.item.richResourcesRequired
 												&& !asyncMessageDelegate.item.richResourcesActive
+												&& !asyncMessageDelegate.item.boundedRichGeometryReady
 												&& !asyncMessageDelegate.item.staticPreviewPresentationReady)
 											|| asyncMessageDelegate.item
 												.terminalPreviewFallbackUnavailable
 											|| (asyncMessageDelegate.item.richLoaderSuspended
+												&& !asyncMessageDelegate.item.boundedRichGeometryReady
 												&& (asyncMessageDelegate.item.richResourcesRequired
 													|| asyncMessageDelegate.item.previewNeedsHydration
 													|| asyncMessageDelegate.item.previewLoaderIncubationSuppressed))))

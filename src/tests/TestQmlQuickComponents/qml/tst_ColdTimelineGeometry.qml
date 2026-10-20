@@ -93,4 +93,45 @@ TestCase {
 		compare(probe.viewportProbeBaseHeight(), 180)
 		probe.destroy()
 	}
+
+	function test_measured_native_link_fallback_is_visible_before_optional_provider() {
+		const source = String(mainQmlSource)
+		const handoff = source.indexOf("id: asyncRichHandoff")
+		const start = source.indexOf("visible:", handoff)
+		const end = source.indexOf("// This item retains", start)
+		verify(handoff >= 0 && start > handoff && end > start)
+		const predicate = source.slice(start + "visible:".length, end)
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				id: probe
+				property var asyncMessageDelegate: probe
+				property var activeScope: ({activity: false})
+				property bool deadlinePresentationFallback: false
+				property bool active: true
+				property real presentationHeightCommittedHeight: 108
+				property var item: ({currentMessagePresentationReady: true,
+					boundedRichGeometryReady: true, richResourcesRequired: true,
+					richResourcesActive: false, staticPreviewPresentationReady: false,
+					richLoaderSuspended: true, previewNeedsHydration: true})
+				property bool handoffVisible: ${predicate}
+			}`, testCase, "nativeLinkHandoffProbe")
+		// The compact native row is already measured and paints the real link;
+		// its optional provider must not hide it or force the scope deadline.
+		compare(probe.handoffVisible, false)
+		probe.presentationHeightCommittedHeight = 0
+		compare(probe.handoffVisible, true)
+		probe.presentationHeightCommittedHeight = 108
+		probe.item = {currentMessagePresentationReady: false,
+			boundedRichGeometryReady: false, richResourcesRequired: true,
+			richResourcesActive: false, richLoaderSuspended: true}
+		compare(probe.handoffVisible, true)
+		probe.item = {currentMessagePresentationReady: true,
+			boundedRichGeometryReady: false, richResourcesRequired: true,
+			richResourcesActive: false, staticPreviewPresentationReady: true,
+			richLoaderSuspended: false}
+		compare(probe.handoffVisible, false)
+		probe.deadlinePresentationFallback = true
+		compare(probe.handoffVisible, true)
+		probe.destroy()
+	}
 }
