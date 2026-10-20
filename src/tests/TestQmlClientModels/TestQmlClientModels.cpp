@@ -6,6 +6,7 @@
 #include "ModernShellPreviewPublicationPolicy.h"
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -29,6 +30,8 @@ private slots:
 	void chatTimelineDirectPrependDoesNotTouchExistingRows();
 	void chatTimelineInlineDeferredRowsMaterializeWithoutProxyMoves();
 	void chatTimelineQueuedAppendBatchesDeferredRowsPerFrame();
+	void chatTimelineDeferredSnapshotPreservesLargeHistories_data();
+	void chatTimelineDeferredSnapshotPreservesLargeHistories();
 	void chatTimelineQueuedPrependUsesSingleDeferredBatch();
 	void roomAndParticipantStatesStayIncremental();
 	void connectionResetDropsRowsBeforeSameIdsAreReused();
@@ -974,6 +977,53 @@ void TestQmlClientModels::chatTimelineInlineDeferredRowsMaterializeWithoutProxyM
 	QCOMPARE(estimateModel.get(17).value(
 				 QStringLiteral("deferredPresentationHeight")).toInt(),
 			 874);
+}
+
+void TestQmlClientModels::chatTimelineDeferredSnapshotPreservesLargeHistories_data() {
+	QTest::addColumn<int>("messageCount");
+	QTest::newRow("10") << 10;
+	QTest::newRow("20") << 20;
+	QTest::newRow("100") << 100;
+	QTest::newRow("500") << 500;
+}
+
+void TestQmlClientModels::chatTimelineDeferredSnapshotPreservesLargeHistories() {
+	QFETCH(int, messageCount);
+	ChatTimelineModel model;
+	model.setPresentationBusy(true);
+	QVariantList messages;
+	for (int row = 0; row < messageCount; ++row) {
+		messages.push_back(QVariantMap {
+			{ QStringLiteral("messageKey"), QStringLiteral("history:%1").arg(row) },
+			{ QStringLiteral("plainText"), QStringLiteral("Plain history message") }
+		});
+	}
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QEventLoop admission;
+	connect(&model, &ChatTimelineModel::appendPendingChanged, &admission, [&]() {
+		if (!model.appendPending()) admission.quit();
+	});
+	QTimer timeout;
+	timeout.setSingleShot(true);
+	connect(&timeout, &QTimer::timeout, &admission, &QEventLoop::quit);
+	QElapsedTimer elapsed;
+	elapsed.start();
+	QCOMPARE(model.enqueueAppendMessages(messages, true), messageCount);
+	timeout.start(10000);
+	admission.exec();
+	const auto admissionMs = elapsed.elapsed();
+	QVERIFY(!model.appendPending());
+	QCOMPARE(model.rowCount(), messageCount);
+	QCOMPARE(model.presentationModel()->rowCount(), messageCount);
+	QCOMPARE(resetSpy.count(), 0);
+	for (int row = 0; row < messageCount; ++row) {
+		QCOMPARE(model.get(row).value(QStringLiteral("id")).toString(),
+				 QStringLiteral("history:%1").arg(row));
+		QVERIFY(model.get(row).value(QStringLiteral("deferredPresentation")).toBool());
+	}
+	qInfo("Deferred snapshot: rows=%d admission_ms=%lld insert_batches=%d",
+		  messageCount, static_cast<long long>(admissionMs), int(insertSpy.count()));
 }
 
 void TestQmlClientModels::chatTimelineQueuedAppendBatchesDeferredRowsPerFrame() {
