@@ -37,6 +37,10 @@
 
 namespace {
 constexpr int PROBE_TIMEOUT_MSEC = 5000;
+// The first element lookup also scans the bundled plugins into a new profile's
+// registry. Keep that one-time work inside the client's 45 s capability deadline
+// without misreporting a slow cold registry as a missing WebRTC plugin.
+constexpr int GST_REGISTRY_PROBE_TIMEOUT_MSEC = 15000;
 constexpr int START_TIMEOUT_MSEC = 3000;
 constexpr int START_SETTLE_MSEC  = 1000;
 
@@ -217,7 +221,8 @@ QString runProbeCommand(const QString &program, const QStringList &arguments) {
 	return QString::fromUtf8(process.readAll());
 }
 
-bool gstElementAvailable(const QString &gstInspectPath, const QString &elementName) {
+bool gstElementAvailable(const QString &gstInspectPath, const QString &elementName,
+						 const int timeoutMsec = PROBE_TIMEOUT_MSEC) {
 	if (gstInspectPath.isEmpty() || elementName.trimmed().isEmpty()) {
 		return false;
 	}
@@ -231,7 +236,7 @@ bool gstElementAvailable(const QString &gstInspectPath, const QString &elementNa
 	}
 
 	process.closeWriteChannel();
-	if (!process.waitForFinished(PROBE_TIMEOUT_MSEC)) {
+	if (!process.waitForFinished(timeoutMsec)) {
 		process.kill();
 		process.waitForFinished(500);
 		return false;
@@ -1906,7 +1911,8 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			versionOutput.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
 		support.gstreamerVersion = versionLines.isEmpty() ? QString() : versionLines.first().trimmed();
 
-		support.gstLiveKitWebRtcSinkAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("livekitwebrtcsink"));
+		support.gstLiveKitWebRtcSinkAvailable = gstElementAvailable(support.gstInspectPath,
+			QStringLiteral("livekitwebrtcsink"), GST_REGISTRY_PROBE_TIMEOUT_MSEC);
 		support.gstLiveKitWebRtcSrcAvailable  = gstElementAvailable(support.gstInspectPath, QStringLiteral("livekitwebrtcsrc"));
 		support.gstD3D11ScreenCaptureAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11screencapturesrc"));
