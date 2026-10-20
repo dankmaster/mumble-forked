@@ -4190,8 +4190,7 @@ ApplicationWindow {
 						if (rowIndex < 0)
 							return { "available": false, "outerHeight": 0, "probeHeight": 0 }
 						const row = chatModel.get(rowIndex) || ({})
-						const estimatedHeight = Math.max(deferredMessageRowHeight,
-							Number(row.deferredPresentationHeight || 0))
+						const estimatedHeight = coldMessageRowHeight(row.deferredPresentationHeight)
 						return {
 							"available": isFinite(estimatedHeight) && estimatedHeight > 0,
 							"outerHeight": estimatedHeight,
@@ -4414,6 +4413,14 @@ ApplicationWindow {
 					property int plainDeferredSourceAdmissionCount: 0
 					property int serializedDeferredSourceAdmissionCount: 0
 					readonly property real deferredMessageRowHeight: 58
+					function coldMessageRowHeight(estimate) {
+						// A provider estimate is not a painted card. Keep never-presented
+						// rows compact until the quiet, anchored height commit owns expansion.
+						if (activeScope.activity)
+							return Math.max(deferredMessageRowHeight, Number(estimate || 0))
+						return Math.max(deferredMessageRowHeight, Math.min(180,
+							Number(estimate || deferredMessageRowHeight)))
+					}
 					// The queued tail itself is the supersede window: no full row is
 					// admitted until the final append has completed. Yield one event turn
 					// here, but do not add a fixed delay to every cold room entry.
@@ -9200,8 +9207,7 @@ ApplicationWindow {
 								width: timeline.width
 								height: deadlinePresentationFallback
 									? timeline.deferredMessageRowHeight
-									: Math.max(timeline.deferredMessageRowHeight,
-										deferredPresentationHeight)
+									: timeline.coldMessageRowHeight(deferredPresentationHeight)
 								radius: 0
 								color: "transparent"
 								border.width: 0
@@ -9382,6 +9388,8 @@ ApplicationWindow {
 								property string presentationHeightPreviewIdentity: ""
 								property string presentationHeightSettledIdentity: ""
 								property real presentationHeightSettledHeight: 0
+								property real retainedPresentationHeight: 0
+								property int retainedPresentationGeneration: -1
 								property real presentationHeightObservedHeight: 0
 								property int presentationHeightQuietPolishObservations: 0
 								property bool presentationHeightReleasePending: false
@@ -9402,6 +9410,8 @@ ApplicationWindow {
 								}
 								function resetPresentationHeightIdentity() {
 									clearPresentationHeightReleaseState()
+									retainedPresentationHeight = 0
+									retainedPresentationGeneration = -1
 									presentationHeightStableId = String(stableId || "")
 									presentationHeightPreviewIdentity = ""
 								}
@@ -9506,6 +9516,8 @@ ApplicationWindow {
 					const committedProbeHeight = Math.max(
 						timeline.deferredMessageRowHeight, committedOuterHeight)
 					presentationHeightSettledHeight = committedOuterHeight
+					retainedPresentationHeight = committedOuterHeight
+					retainedPresentationGeneration = timeline.scopePresentationGeneration
 					presentationHeightReleased = true
 					presentationHeightReleasePending = false
 					timeline.noteScopePresentationHeightCommit()
@@ -9782,14 +9794,13 @@ ApplicationWindow {
 									cachedStaticHandoffCardHeight, Math.max(1,
 										height - cachedStaticHandoffY))
 								// Viewport membership controls provider activation. Before the
-								// release latch commits a real height, keep the model estimate
-								// as the probe floor. Afterward, the probe is the same cached
+								// release latch commits a real height, use the compact cold row.
+								// Afterward, the probe is the same cached
 								// committed height as the outer delegate, including while the
 								// nested Loader is temporarily absent.
 								property string viewportProbeStableId: ""
-								property real viewportProbeHeight: Math.max(
-									timeline.deferredMessageRowHeight,
-									deferredPresentationHeight)
+								property real viewportProbeHeight:
+									timeline.coldMessageRowHeight(deferredPresentationHeight)
 								readonly property var stationaryThumbWarmPin:
 									timeline.stationaryThumbWarmPin(stableId)
 								readonly property bool stationaryThumbWarmPinned:
@@ -9830,7 +9841,7 @@ ApplicationWindow {
 										&& value.failed !== true && !previewLoaderFailed
 								}
 						readonly property bool paintedSummary: !accessibilityPooled
-							&& (deadlinePresentationFallback
+							&& (handoffSummaryPainted || deadlinePresentationFallback
 								|| (active && (!item || item.paintedSummary === true)))
 						readonly property bool handoffSummaryPainted: !accessibilityPooled
 							&& asyncRichHandoff.visible && asyncRichHandoffSummary.visible
@@ -9855,8 +9866,11 @@ ApplicationWindow {
 								function viewportProbeBaseHeight() {
 									if (presentationHeightCommittedHeight > 0)
 										return presentationHeightCommittedHeight
-									return Math.max(timeline.deferredMessageRowHeight,
-										Number(deferredPresentationHeight || 0))
+									return retainedPresentationGeneration === timeline.scopePresentationGeneration
+										&& presentationHeightStableId === String(stableId || "")
+										&& retainedPresentationHeight > 0
+										? retainedPresentationHeight
+										: timeline.coldMessageRowHeight(deferredPresentationHeight)
 								}
 								function resetViewportProbeHeight() {
 									viewportProbeStableId = String(stableId || "")
@@ -9875,11 +9889,8 @@ ApplicationWindow {
 									}
 									if (accessibilityPooled || richGeometrySettling || !item)
 										return
-									const settledHeight = Math.max(
-										viewportProbeBaseHeight(),
-										Number(item.lightweightMessageRowHeight || 0),
-										Number(height || 0))
-									if (settledHeight > viewportProbeHeight)
+									const settledHeight = viewportProbeBaseHeight()
+									if (Math.abs(settledHeight - viewportProbeHeight) > 0.5)
 										viewportProbeHeight = settledHeight
 								}
 								function updateViewportMembership() {
@@ -10089,19 +10100,16 @@ ApplicationWindow {
 										scheduleViewportProbeHeightUpdate()
 									schedulePresentationHeightObservation()
 								}
-								// Incubation and provider-resource activation can briefly
-								// expose both placeholder and provider heights. Keep that
-								// reservation until the two-observation latch commits a
-								// measured height; after that, use only the cached height.
+								// Incubation cannot expand the coordinate map. Only the quiet
+								// two-observation commit replaces compact or retained geometry.
 								height: deadlinePresentationFallback
 									? timeline.deferredMessageRowHeight
 									: stationaryThumbWarmPinned
 									? stationaryThumbPinnedOuterHeight
 									: presentationHeightCommittedHeight > 0
 									? presentationHeightCommittedHeight
-									: Math.max(timeline.deferredMessageRowHeight,
-										deferredPresentationHeight,
-										item ? item.lightweightMessageRowHeight : 0)
+									: Math.max(viewportProbeBaseHeight(), activeScope.activity && item
+										? item.lightweightMessageRowHeight : 0)
 								onHeightChanged: {
 									if (item) {
 										scheduleViewportProbeHeightUpdate()
@@ -10146,6 +10154,8 @@ ApplicationWindow {
 									visible: asyncMessageDelegate.deadlinePresentationFallback
 										|| (asyncMessageDelegate.active
 											&& (!asyncMessageDelegate.item
+											|| (!activeScope.activity
+												&& asyncMessageDelegate.presentationHeightCommittedHeight <= 0)
 											|| !asyncMessageDelegate.item.currentMessagePresentationReady
 											|| (asyncMessageDelegate.item.richResourcesRequired
 												&& !asyncMessageDelegate.item.richResourcesActive
@@ -10166,7 +10176,7 @@ ApplicationWindow {
 									Accessible.role: Accessible.ListItem
 									Accessible.name: asyncMessageDelegate.presentationSummary
 									Accessible.ignored:
-										!asyncMessageDelegate.deadlinePresentationFallback
+										!visible
 										|| asyncMessageDelegate.accessibilityPooled
 										|| !asyncMessageDelegate.inVisibleViewport
 
@@ -10180,7 +10190,8 @@ ApplicationWindow {
 										visible: !asyncMessageDelegate.accessibilityPooled
 											&& (asyncMessageDelegate.deadlinePresentationFallback
 												|| !asyncMessageDelegate.item
-												|| !asyncMessageDelegate.item.boundedRichGeometryReady)
+												|| !asyncMessageDelegate.item.boundedRichGeometryReady
+												|| asyncMessageDelegate.presentationHeightCommittedHeight <= 0)
 										anchors.left: parent.left
 										anchors.right: parent.right
 										anchors.top: parent.top
@@ -10222,6 +10233,70 @@ ApplicationWindow {
 										}
 									}
 
+									Rectangle {
+										objectName: "coldMessageLinkHandoff"
+										x: asyncMessageDelegate.cachedStaticHandoffCardX
+										y: 58
+										width: Math.min(460, Math.max(1, parent.width - x - Theme.space4))
+										height: Math.min(108, Math.max(0, parent.height - y - Theme.space2))
+										visible: height > 0 && !asyncMessageDelegate.accessibilityPooled
+											&& asyncMessageDelegate.presentationHeightCommittedHeight <= 0
+											&& Object.keys(asyncMessageDelegate.preview || ({})).length > 0
+										radius: Theme.innerRadius
+										color: Theme.embedSurface
+										border.color: Theme.embedBorder
+										clip: true
+										Accessible.ignored: true
+										Image {
+											id: coldHandoffStill
+											x: Theme.space3
+											y: Theme.space3
+											width: 96
+											height: Math.max(1, parent.height - Theme.space3 * 2)
+											source: parent.visible && asyncRichHandoff.visible
+												&& asyncMessageDelegate.cachedStaticHandoffReady
+												? asyncMessageDelegate.cachedStaticHandoffSource : ""
+											visible: source.toString().length > 0
+											asynchronous: true
+											cache: true
+											sourceSize: Qt.size(1280, 960)
+											fillMode: Image.PreserveAspectCrop
+										}
+										Column {
+											anchors.fill: parent
+											anchors.margins: Theme.space3
+											anchors.leftMargin: coldHandoffStill.visible
+												? coldHandoffStill.x + coldHandoffStill.width + Theme.space3 : Theme.space3
+											spacing: Theme.space2
+											Label {
+												width: parent.width
+												text: asyncMessageDelegate.cachedStaticHandoffProvider || qsTr("Link")
+												textFormat: Text.PlainText
+												font.pixelSize: Theme.fontCaption
+												color: Theme.textMuted
+												elide: Text.ElideRight
+											}
+											Label {
+												width: parent.width
+												text: asyncMessageDelegate.cachedStaticHandoffTitle
+													|| String(asyncMessageDelegate.preview.url || "")
+												textFormat: Text.PlainText
+												font.pixelSize: Theme.fontLabel
+												font.weight: Font.DemiBold
+												color: Theme.textStrong
+												elide: Text.ElideRight
+											}
+											Label {
+												width: parent.width
+												text: String(asyncMessageDelegate.preview.url || "")
+												textFormat: Text.PlainText
+												font.pixelSize: Theme.fontCaption
+												color: Theme.textMuted
+												elide: Text.ElideRight
+											}
+										}
+									}
+
 									// Long wheel interpolation deliberately suspends the heavy card.
 									// Paint its already-retained still until the real presentation is
 									// ready so the optimization never leaks through as an empty row.
@@ -10234,6 +10309,7 @@ ApplicationWindow {
 										height: asyncMessageDelegate.cachedStaticHandoffVisibleHeight
 										visible: !asyncMessageDelegate.accessibilityPooled
 											&& asyncMessageDelegate.cachedStaticHandoffReady
+											&& asyncMessageDelegate.presentationHeightCommittedHeight > 0
 										radius: Theme.innerRadius
 										color: Theme.embedSurface
 										border.width: 1
@@ -10448,9 +10524,7 @@ ApplicationWindow {
 								function stationaryThumbWouldBeOuterHeight() {
 									if (presentationHeightCommittedHeight > 0)
 										return presentationHeightCommittedHeight
-									return Math.max(timeline.deferredMessageRowHeight,
-										Number(deferredPresentationHeight || 0),
-										item ? Number(item.lightweightMessageRowHeight || 0) : 0)
+									return viewportProbeBaseHeight()
 								}
 								function stationaryThumbWouldBeProbeHeight() {
 									return presentationHeightCommittedHeight > 0
@@ -10769,6 +10843,9 @@ ApplicationWindow {
 								sourceComponent: Component {
 									ChatMessageFrame {
 					id: messageDelegate
+					// The handoff and the authored row must never paint simultaneously.
+					opacity: logEntry || !asyncRichHandoff.visible ? 1 : 0
+					enabled: logEntry || !asyncRichHandoff.visible
 					stableId: asyncMessageDelegate.stableId
 					own: asyncMessageDelegate.own
 					readonly property bool performanceTimelineDelegate: true
@@ -10787,6 +10864,7 @@ ApplicationWindow {
 							<= timeline.contentY + timeline.height + 0.5
 				accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 					|| timeline.scopePresentationPending
+					|| (!logEntry && asyncRichHandoff.visible)
 				accessibilityBarrierEnabled: logEntry || messageRowReady
 				hoverEffectsEnabled: !root.visualFixtureOverrideActive
 					&& !timeline.richScrollInProgress && !previewOnlyPaintPending
@@ -11871,26 +11949,26 @@ ApplicationWindow {
 							bodySegments || [], preview || ({}))
 						readonly property bool previewOnlyPaintPending: previewPaintPending
 							&& previewSourceOnly && !hasAttachmentContent && !hasReplyContent
-						readonly property bool paintedSummary: !accessibilityPooled
+						readonly property bool paintedSummary: !accessibilityPooled && opacity > 0
 							&& (messageRowMaterialized || asyncMessageDelegate.active)
-						readonly property bool paintedLoading: hasPreviewContent
+						readonly property bool paintedLoading: opacity > 0 && hasPreviewContent
 							&& !previewTerminalUnavailable
 							&& (!previewPresentationLoader
 								|| previewPresentationLoader.status !== Loader.Ready
 								|| !previewPresentationLoader.item
 								|| previewPresentationLoader.item.paintedLoading === true)
-						readonly property bool paintedTerminal: hasPreviewContent
+						readonly property bool paintedTerminal: opacity > 0 && hasPreviewContent
 							&& (previewTerminalUnavailable
 								|| (!!previewPresentationLoader
 									&& previewPresentationLoader.status === Loader.Ready
 									&& !!previewPresentationLoader.item
 									&& previewPresentationLoader.item.paintedTerminal === true))
-						readonly property bool paintedSurface: !hasPreviewContent
+						readonly property bool paintedSurface: opacity > 0 && (!hasPreviewContent
 							? messageRowReady
 							: !!previewPresentationLoader
 								&& previewPresentationLoader.status === Loader.Ready
 								&& !!previewPresentationLoader.item
-								&& previewPresentationLoader.item.paintedSurface === true
+								&& previewPresentationLoader.item.paintedSurface === true)
 						readonly property string previewOpenUrl: {
 							const value = preview || ({})
 							const candidates = [value.url, value.sourceUrl, value.embedUrl,

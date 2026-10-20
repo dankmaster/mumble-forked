@@ -259,7 +259,7 @@ TestCase {
 		verify(/function\s+completeScopePresentationFinalization\(forcedByDeadline\)[\s\S]*positionTailImmediately\(\)[\s\S]*containTailMessageWhenPossible\(\)[\s\S]*armScopePresentationStableFrameCommit\(\)/.test(mainSource))
 		verify(/function\s+completeScopePresentationVisibleFrameCommit\(\)[\s\S]*scopePresentationPending\s*=\s*false[\s\S]*scopePresentationObservationTimer\.restart\(\)/.test(mainSource))
 		verify(/delegate:\s*DelegateChooser[\s\S]*id:\s*asyncMessageDelegate[\s\S]*required property bool deferredPresentation[\s\S]*opacity:\s*timeline\.scopePresentationContentVisible\s*\?\s*1\s*:\s*0[\s\S]*asynchronous:\s*true[\s\S]*active:\s*!deferredPresentation[\s\S]*sourceComponent:\s*Component\s*\{[\s\S]*ChatMessageFrame\s*\{/.test(mainSource))
-		verify(/role:\s*"deferredPresentation"[\s\S]{0,180}roleValue:\s*true[\s\S]*id:\s*deferredInlineMessageDelegate[\s\S]*required property int deferredPresentationHeight[\s\S]*performanceTimelineDelegate:\s*true[\s\S]*lightweightDeferredPresentation:\s*true[\s\S]*contentNeedsHydration:\s*true[\s\S]*presentationSummary:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]*height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*Math\.max\(timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)/.test(mainSource))
+		verify(/role:\s*"deferredPresentation"[\s\S]{0,180}roleValue:\s*true[\s\S]*id:\s*deferredInlineMessageDelegate[\s\S]*required property int deferredPresentationHeight[\s\S]*performanceTimelineDelegate:\s*true[\s\S]*lightweightDeferredPresentation:\s*true[\s\S]*contentNeedsHydration:\s*true[\s\S]*presentationSummary:\s*\[title,\s*subtitle,\s*timestamp\][\s\S]*height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*timeline\.coldMessageRowHeight\(deferredPresentationHeight\)/.test(mainSource))
 		verify(/id:\s*deferredInlineMessageDelegate[\s\S]*text:\s*deferredInlineMessageDelegate\.title[\s\S]*text:\s*deferredInlineMessageDelegate\.subtitle[\s\S]*text:\s*deferredInlineMessageDelegate\.timestamp/.test(mainSource))
 		const inlineDelegateStart =
 			mainSource.indexOf("id: deferredInlineMessageDelegate")
@@ -268,7 +268,7 @@ TestCase {
 		verify(inlineDelegateStart >= 0 && inlineDelegateEnd > inlineDelegateStart)
 		const inlineDelegateSource =
 			mainSource.slice(inlineDelegateStart, inlineDelegateEnd)
-		verify(/height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*Math\.max\(timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
+		verify(/height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*timeline\.coldMessageRowHeight\(deferredPresentationHeight\)[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
 			inlineDelegateSource))
 		verify(/RowLayout\s*\{[\s\S]*anchors\.left:\s*parent\.left[\s\S]*anchors\.right:\s*parent\.right[\s\S]*anchors\.top:\s*parent\.top[\s\S]*height:\s*Math\.min\(48,/.test(
 			inlineDelegateSource))
@@ -283,7 +283,7 @@ TestCase {
 		verify(asyncDelegateStart >= 0 && asyncDelegateEnd > asyncDelegateStart)
 		const asyncDelegateSource = mainSource.slice(asyncDelegateStart, asyncDelegateEnd)
 		verify(/required property int deferredPresentationHeight/.test(asyncDelegateSource))
-		verify(/height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(
+		verify(/height:\s*deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*viewportProbeBaseHeight\(\)[\s\S]*activeScope\.activity\s*&&\s*item[\s\S]*item\.lightweightMessageRowHeight\s*:\s*0/.test(
 			asyncDelegateSource))
 		verify(/readonly property bool richGeometrySettling:[\s\S]*richResourceActivationPending/.test(
 			asyncDelegateSource))
@@ -722,7 +722,7 @@ TestCase {
 		const heightEnd = asyncSource.indexOf("onHeightChanged:", heightStart)
 		verify(heightStart >= 0 && heightEnd > heightStart)
 		const heightSource = asyncSource.slice(heightStart, heightEnd)
-		verify(/deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*Math\.max\([\s\S]*deferredPresentationHeight[\s\S]*item\s*\?\s*item\.lightweightMessageRowHeight\s*:\s*0/.test(heightSource))
+		verify(/deadlinePresentationFallback[\s\S]*timeline\.deferredMessageRowHeight[\s\S]*stationaryThumbWarmPinned[\s\S]*stationaryThumbPinnedOuterHeight[\s\S]*presentationHeightCommittedHeight\s*>\s*0[\s\S]*Math\.max\(viewportProbeBaseHeight\(\),[\s\S]*activeScope\.activity\s*&&\s*item/.test(heightSource))
 		verify(!/item\.implicitHeight/.test(heightSource))
 		const clipStart = asyncSource.indexOf("clip: stationaryThumbWarmPinned")
 		const clipEnd = asyncSource.indexOf("opacity:", clipStart)
@@ -1490,7 +1490,7 @@ TestCase {
 			asyncDelegateSource))
 		verify(/Component\.onDestruction:\s*\{[\s\S]*releaseDeferredMaterialization\([\s\S]*deferredMaterializationCleanupId,[\s\S]*deferredMaterializationCleanupGeneration\)/.test(
 			asyncDelegateSource))
-		verify(/property string viewportProbeStableId:\s*""[\s\S]*property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)[\s\S]*property bool inVisibleViewport:\s*false[\s\S]*property bool inHydrationWindow:\s*false/.test(
+		verify(/property string viewportProbeStableId:\s*""[\s\S]*property real viewportProbeHeight:\s*timeline\.coldMessageRowHeight\(deferredPresentationHeight\)[\s\S]*property bool inVisibleViewport:\s*false[\s\S]*property bool inHydrationWindow:\s*false/.test(
 			asyncDelegateSource))
 		const viewportProbeSeedStart = asyncDelegateSource.indexOf(
 			"property real viewportProbeHeight:")
@@ -1500,7 +1500,7 @@ TestCase {
 			&& viewportProbeSeedEnd > viewportProbeSeedStart)
 		const viewportProbeSeedSource = asyncDelegateSource.slice(
 			viewportProbeSeedStart, viewportProbeSeedEnd)
-		verify(/property real viewportProbeHeight:\s*Math\.max\(\s*timeline\.deferredMessageRowHeight,\s*deferredPresentationHeight\)/.test(
+		verify(/property real viewportProbeHeight:\s*timeline\.coldMessageRowHeight\(deferredPresentationHeight\)/.test(
 			viewportProbeSeedSource))
 		verify(!/\bitem\b|\brichGeometrySettling\b|\bheight\b/.test(
 			viewportProbeSeedSource))
@@ -1513,7 +1513,7 @@ TestCase {
 			&& viewportProbeUpdateEnd > viewportProbeUpdateStart)
 		const viewportProbeUpdateSource =
 			asyncDelegateSource.slice(viewportProbeUpdateStart, viewportProbeUpdateEnd)
-		verify(/reevaluatePresentationHeightIdentity\(\)[\s\S]*resetViewportProbeHeight\(\)[\s\S]*presentationHeightCommittedHeight[\s\S]*accessibilityPooled\s*\|\|\s*richGeometrySettling\s*\|\|\s*!item[\s\S]*return[\s\S]*const settledHeight\s*=\s*Math\.max\([\s\S]*item\.lightweightMessageRowHeight[\s\S]*Number\(height\s*\|\|\s*0\)[\s\S]*settledHeight\s*>\s*viewportProbeHeight[\s\S]*viewportProbeHeight\s*=\s*settledHeight/.test(
+		verify(/reevaluatePresentationHeightIdentity\(\)[\s\S]*resetViewportProbeHeight\(\)[\s\S]*presentationHeightCommittedHeight[\s\S]*accessibilityPooled\s*\|\|\s*richGeometrySettling\s*\|\|\s*!item[\s\S]*return[\s\S]*const settledHeight\s*=\s*viewportProbeBaseHeight\(\)[\s\S]*Math\.abs\(settledHeight\s*-\s*viewportProbeHeight\)\s*>\s*0\.5[\s\S]*viewportProbeHeight\s*=\s*settledHeight/.test(
 			viewportProbeUpdateSource))
 		const viewportMembershipUpdateStart =
 			asyncDelegateSource.indexOf("function updateViewportMembership()")
@@ -1590,7 +1590,7 @@ TestCase {
 			&& asyncRichHandoffSummaryStart > asyncRichHandoffStart)
 		const asyncRichHandoffOuterSource = asyncDelegateSource.slice(
 			asyncRichHandoffStart, asyncRichHandoffSummaryStart)
-		verify(/visible:\s*asyncMessageDelegate\.deadlinePresentationFallback\s*\|\|\s*\(asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\s*&&\s*!asyncMessageDelegate\.item\.staticPreviewPresentationReady\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
+		verify(/visible:\s*asyncMessageDelegate\.deadlinePresentationFallback\s*\|\|\s*\(asyncMessageDelegate\.active\s*&&\s*\(!asyncMessageDelegate\.item\s*\|\|\s*\(!activeScope\.activity\s*&&\s*asyncMessageDelegate\.presentationHeightCommittedHeight\s*<=\s*0\)\s*\|\|\s*!asyncMessageDelegate\.item\.currentMessagePresentationReady\s*\|\|\s*\(asyncMessageDelegate\.item\.richResourcesRequired\s*&&\s*!asyncMessageDelegate\.item\.richResourcesActive\s*&&\s*!asyncMessageDelegate\.item\.staticPreviewPresentationReady\)\s*\|\|\s*asyncMessageDelegate\.item\s*\.terminalPreviewFallbackUnavailable/.test(
 			asyncRichHandoffOuterSource))
 		verify(/radius:\s*0[\s\S]*color:\s*"transparent"[\s\S]*border\.width:\s*0/.test(
 			asyncRichHandoffOuterSource))
@@ -1735,7 +1735,7 @@ TestCase {
 		verify(/previewOnlyAtomicHandoff:[\s\S]*messageBodyIsPreviewSourceOnly\(bodySegments\s*\|\|\s*\[\],[\s\S]*normalizedModelList\(attachments\)\.length\s*===\s*0/.test(
 			previewOnlyAtomicHandoffSource))
 		const asyncRichHandoffSummaryEnd = asyncDelegateSource.indexOf(
-			'objectName: "asyncCachedStaticPreviewHandoff"',
+			'objectName: "coldMessageLinkHandoff"',
 			asyncRichHandoffSummaryStart)
 		verify(asyncRichHandoffSummaryStart >= 0
 			&& asyncRichHandoffSummaryEnd > asyncRichHandoffSummaryStart)
