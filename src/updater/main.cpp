@@ -278,7 +278,10 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
             return argv[++i];
 		};
 
-		if (arg == L"--parent-pid") {
+		if (arg == L"--test-ui-preview") {
+			// Only the exact test-build entry point may consume this flag.
+			return false;
+		} else if (arg == L"--parent-pid") {
 			options.parentPid = static_cast< DWORD >(std::wcstoul(nextValue().c_str(), nullptr, 10));
 		} else if (arg == L"--installer") {
 			options.installerPath = nextValue();
@@ -3234,12 +3237,25 @@ public:
 		g_updaterWindow.store(m_hwnd);
 		ShowWindow(m_hwnd, SW_SHOWNORMAL);
 		UpdateWindow(m_hwnd);
+		SetFocus(m_detailsButton);
 		return true;
 	}
 
 	int run() {
 		MSG message{};
 		while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+			if (message.message == WM_KEYDOWN && message.wParam == VK_RETURN) {
+				const HWND focused = GetFocus();
+				if ((focused == m_detailsButton || focused == m_closeButton) && IsWindowEnabled(focused)) {
+					SendMessageW(m_hwnd, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(focused), BN_CLICKED),
+								 reinterpret_cast< LPARAM >(focused));
+					continue;
+				}
+			}
+			// Dialog navigation only owns keyboard input. Keep worker completion,
+			// progress and timer messages on this window's normal dispatch path.
+			if (message.message >= WM_KEYFIRST && message.message <= WM_KEYLAST
+					&& IsDialogMessageW(m_hwnd, &message)) continue;
 			TranslateMessage(&message);
 			DispatchMessageW(&message);
 		}
@@ -3323,6 +3339,12 @@ private:
 				setProgress(-1, true);
 				refreshLogs();
 				return 0;
+			case WM_SETFOCUS: {
+				const HWND previous = reinterpret_cast< HWND >(wParam);
+				SetFocus(IsChild(m_hwnd, previous) && IsWindowVisible(previous) && IsWindowEnabled(previous)
+					? previous : m_detailsButton);
+				return 0;
+			}
 			case WM_ERASEBKGND:
 				return 1;
 			case WM_PAINT:
@@ -3350,6 +3372,10 @@ private:
 				}
 				return 0;
 			case WM_COMMAND:
+				if (LOWORD(wParam) == IDCANCEL) {
+					SendMessageW(m_hwnd, WM_CLOSE, 0, 0);
+					return 0;
+				}
 				if (LOWORD(wParam) == ControlDetails) {
 					toggleDetails();
 					return 0;
@@ -3566,6 +3592,9 @@ private:
 	}
 
 	LRESULT handleControlColor(HDC hdc, HWND control) const {
+		// Read-only edit controls use WM_CTLCOLORSTATIC. Their scrolling text
+		// still needs an opaque background to erase the previous glyphs.
+		if (control == m_log) return handleEditColor(hdc);
 		SetBkMode(hdc, TRANSPARENT);
 		if (control == m_title) {
 			SetTextColor(hdc, m_theme.text);
@@ -3641,7 +3670,9 @@ private:
 		m_closeButton =
 			CreateWindowExW(0, L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_OWNERDRAW, 0,
 							0, 0, 0, m_hwnd, reinterpret_cast< HMENU >(ControlClose), nullptr, nullptr);
-		m_log = CreateWindowExW(0, L"EDIT", nullptr, WS_CHILD | ES_MULTILINE | ES_READONLY | ES_NOHIDESEL, 0, 0, 0, 0,
+		m_log = CreateWindowExW(0, L"EDIT", nullptr,
+								WS_CHILD | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_NOHIDESEL,
+								0, 0, 0, 0,
 								m_hwnd, reinterpret_cast< HMENU >(ControlLog), nullptr, nullptr);
 
 		for (HWND control : { m_title, m_status, m_detailsButton, m_closeButton, m_log }) {
@@ -3695,6 +3726,7 @@ private:
 
 	void toggleDetails() {
 		m_detailsVisible = !m_detailsVisible;
+		if (!m_detailsVisible && GetFocus() == m_log) SetFocus(m_detailsButton);
 		SetWindowTextW(m_detailsButton, m_detailsVisible ? L"Hide details" : L"Show details");
 		resizeForDetails();
 		refreshLogs(true);
@@ -3767,10 +3799,26 @@ private:
 			combined = L"No installer log output yet.";
 		}
 
-		if (force || combined != m_lastLogText) {
+		// Keep the selected text and visible lines stable while the user reads.
+		// Replacing the entire bounded tail cannot preserve offsets reliably:
+		// rollover and growth of the updater section shift the MSI section.
+		DWORD selectionStart = 0;
+		DWORD selectionEnd = 0;
+		SendMessageW(m_log, EM_GETSEL, reinterpret_cast< WPARAM >(&selectionStart),
+					 reinterpret_cast< LPARAM >(&selectionEnd));
+		SCROLLINFO scroll{};
+		scroll.cbSize = sizeof(scroll);
+		scroll.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+		const bool hasScroll = GetScrollInfo(m_log, SB_VERT, &scroll) != FALSE;
+		const bool atBottom = !hasScroll
+			|| scroll.nPos >= scroll.nMax - static_cast< int >(std::max(1U, scroll.nPage)) + 1;
+		const bool followOutput = m_lastLogText.empty()
+			|| (selectionStart == selectionEnd && GetCapture() != m_log && atBottom);
+		if (followOutput && (force || combined != m_lastLogText)) {
 			m_lastLogText = combined;
 			SetWindowTextW(m_log, m_lastLogText.c_str());
-			SendMessageW(m_log, EM_SETSEL, static_cast< WPARAM >(-1), static_cast< LPARAM >(-1));
+			const auto end = static_cast< LONG >(m_lastLogText.size());
+			SendMessageW(m_log, EM_SETSEL, static_cast< WPARAM >(end), static_cast< LPARAM >(end));
 			SendMessageW(m_log, EM_SCROLLCARET, 0, 0);
 		}
 	}
@@ -4227,6 +4275,34 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 	if (!argv) {
 		return 1;
 	}
+
+#ifdef MUMBLE_UPDATER_TEST_HOOKS
+	// Native presentation smoke test. This path never enters update execution,
+	// touches an installation, launches an installer, or requests elevation.
+	if (argc == 3 && std::wcscmp(argv[1], L"--test-ui-preview") == 0) {
+		const std::filesystem::path directory(argv[2]);
+		LocalFree(argv);
+		if (!std::filesystem::is_directory(directory)) return 2;
+		Options previewOptions;
+		previewOptions.updaterLogPath = (directory / L"preview-updater.log").wstring();
+		previewOptions.noRelaunch = true;
+		UpdaterProgressWindow preview(previewOptions);
+		if (!preview.create(instance)) return 3;
+		SetWindowTextW(g_updaterWindow.load(), L"Mumble update - UI test");
+		std::thread previewWriter([previewOptions]() {
+			for (int line = 0; line < 60; ++line) {
+				appendLog(previewOptions, L"UI preview output " + std::to_wstring(line));
+				Sleep(700);
+			}
+			if (HWND hwnd = g_updaterWindow.load()) {
+				PostMessageW(hwnd, UiDoneMessage, ERROR_INSTALL_USEREXIT, 0);
+			}
+		});
+		preview.run();
+		previewWriter.join();
+		return 0;
+	}
+#endif
 
 	Options options;
 	const bool valid = parseArguments(argc, argv, options);
