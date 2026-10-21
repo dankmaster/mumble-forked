@@ -1044,7 +1044,7 @@ TestCase {
 		verify(/id:\s*richResourceActivationSettleTimer[\s\S]*interval:\s*48[\s\S]*onTriggered:\s*\{[\s\S]*activationStableId[\s\S]*activationGeneration[\s\S]*Qt\.callLater\(function\(\)[\s\S]*activationGeneration\s*===\s*timeline\.scopePresentationGeneration[\s\S]*activationStableId\s*===\s*String\(messageDelegate\.stableId[\s\S]*messageDelegate\.accessibilityPooled\s*!==\s*true[\s\S]*messageDelegate\.completeRichLoaderResumeWhenReady\(\)/.test(mainSource))
 		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*messageRowReady[\s\S]*completeDeferredMaterialization\(stableId,[\s\S]*deferredMaterializationCleanupGeneration\)/.test(mainSource))
 		verify(/function\s+completeRichLoaderResumeWhenReady\(\)[\s\S]*completeNearViewportPrefetchIfReady\(stableId\)/.test(mainSource))
-		verify(/function\s+finishRichContentRecoveryIfIdle\(\)[\s\S]*Qt\.callLater[\s\S]*richLoaderResumeQueue\.length\s*>\s*0[\s\S]*deferredMaterializationQueue\.length\s*>\s*0[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
+		verify(/function\s+finishRichContentRecoveryIfIdle\(\)[\s\S]*richRecoveryIdleTimer\.start\(\)[\s\S]*richLoaderResumeQueue\.length\s*>\s*0[\s\S]*deferredMaterializationQueue\.length\s*>\s*0[\s\S]*chatModel\.presentationBusy\s*=\s*false/.test(mainSource))
 		const finishRecoveryStart =
 			mainSource.indexOf("function finishRichContentRecoveryIfIdle")
 		const finishRecoveryEnd =

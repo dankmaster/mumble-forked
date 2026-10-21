@@ -294,7 +294,9 @@ TestCase {
 		verify(probe.visiblePresentationHeightConvergencePending())
 		probe.rows = [{lightweight: true, deadlineFallback: true}]
 		verify(!probe.visiblePresentationHeightConvergencePending())
-		probe.rows = [{presentationHeightReleased: true}]
+		probe.rows = [{outerReady: false, messageReady: false}]
+		verify(probe.visiblePresentationHeightConvergencePending())
+		probe.rows = [{outerReady: true, messageReady: true, presentationHeightReleased: true}]
 		verify(!probe.visiblePresentationHeightConvergencePending())
 		probe.destroy()
 	}
@@ -386,6 +388,9 @@ TestCase {
 				property var richLoaderResumeTimer: ({running: false})
 				property var deferredMaterializationTimer: ({running: false})
 				property string richLoaderResumeActiveId: ""
+				property var richRecoveryIdleTimer: ({running: false, starts: 0,
+					start: function() { this.running = true; ++this.starts },
+					stop: function() { this.running = false }})
 				property var richLoaderResumeQueue: []
 				property var deferredMaterializationQueue: []
 				property bool prefetchSawColdPacing: true
@@ -394,6 +399,11 @@ TestCase {
 				function scheduleStaticPreviewSweep() {}
 				${productFunction("finishRichContentRecoveryIfIdle")}
 			}`, testCase)
+		probe.richLoaderResumeActiveId = "pending"
+		for (let retry = 0; retry < 5; ++retry)
+			probe.finishRichContentRecoveryIfIdle()
+		compare(probe.richRecoveryIdleTimer.starts, 1)
+		probe.richLoaderResumeActiveId = ""
 		probe.finishRichContentRecoveryIfIdle()
 		verify(!probe.prefetchSawColdPacing)
 		probe.coldPreviewHydrationPacingActive = true

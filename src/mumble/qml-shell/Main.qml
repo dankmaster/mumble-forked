@@ -5731,6 +5731,9 @@ ApplicationWindow {
 									return true
 								continue
 							}
+							if (row.deadlineFallback !== true
+									&& (row.outerReady !== true || row.messageReady !== true))
+								return true
 							if (row.presentationHeightReleased !== true
 									&& (row.richGeometrySettling === true
 										|| row.inactiveRichResources === true))
@@ -7368,6 +7371,12 @@ ApplicationWindow {
 						if (!(item.presentationHeightCommittedHeight > 0)
 								|| item.richGeometrySettling === true)
 							return false
+						// Animated/interactive media cannot hold a static offscreen lease.
+						// Do not repeatedly select it as the sequential warm slot advances.
+						if (item.staticPreviewPresentationReady !== true) {
+							retireTerminalNearViewportPrefetch(key)
+							return false
+						}
 						nearViewportPrefetchDeadlineTimer.stop()
 						nearViewportPrefetchActiveId = ""
 						nearViewportPrefetchReadyId = key
@@ -7385,6 +7394,7 @@ ApplicationWindow {
 					}
 
 					function suspendRichContentForScroll() {
+						richRecoveryIdleTimer.stop()
 						richLoaderResumeQueue = []
 						richLoaderResumeActiveId = ""
 						const children = contentItem ? contentItem.children : []
@@ -7996,14 +8006,16 @@ ApplicationWindow {
 								|| deferredMaterializationTimer.running
 								|| richLoaderResumeActiveId.length > 0
 								|| deferredMaterializationOwnershipActive()) {
-							Qt.callLater(function() {
-								timeline.finishRichContentRecoveryIfIdle()
-							})
+							// One paced wakeup leaves incubation time for the pending
+							// loaders. Self-queuing callLater callbacks spin between frames.
+							if (!richRecoveryIdleTimer.running)
+								richRecoveryIdleTimer.start()
 							return
 						}
 						if (richLoaderResumeQueue.length > 0
 								|| deferredMaterializationQueue.length > 0)
 							return
+						richRecoveryIdleTimer.stop()
 						if (topAnchorActive) {
 							restoreTopAnchor()
 							topAnchorSettleTimer.restart()
@@ -8579,6 +8591,13 @@ ApplicationWindow {
 							}
 							timeline.scheduleRichContentResume()
 						}
+					}
+
+					Timer {
+						id: richRecoveryIdleTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.finishRichContentRecoveryIfIdle()
 					}
 
 					Timer {
