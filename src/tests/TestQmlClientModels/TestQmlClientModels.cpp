@@ -2176,7 +2176,7 @@ void TestQmlClientModels::directMessageHistoryMergePublishesOnce() {
 	const QString mergeBody = source.mid(mergeStart, mergeEnd - mergeStart);
 	QCOMPARE(mergeBody.count(QStringLiteral("publishQmlDirectMessagesState();")), 1);
 	QVERIFY(QRegularExpression(QStringLiteral(
-		R"(appendModernPersistentDirectMessage\s*\(\s*response\.messages\s*\(\s*i\s*\)\s*,\s*false\s*,\s*false\s*\))"))
+		R"(appendModernPersistentDirectMessage\s*\(\s*message\s*,\s*false\s*,\s*false\s*\))"))
 			.match(mergeBody).hasMatch());
 
 	const qsizetype summariesStart = source.indexOf(QStringLiteral("QVariantMap MainWindow::buildModernShellDirectMessagesState"));

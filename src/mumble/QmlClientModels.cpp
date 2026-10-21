@@ -4043,7 +4043,9 @@ void ChatTimelineModel::cancelQueuedAppend(bool notify) {
 }
 
 void ChatTimelineModel::scheduleQueuedAppendDrain() {
-	if (!m_appendPending || m_pendingAppendMessages.isEmpty() || m_appendDrainScheduled) {
+	// An emptied queue still needs its completion turn (for example when the
+	// last queued message is deleted while an older page is being prepended).
+	if (!m_appendPending || m_appendDrainScheduled) {
 		return;
 	}
 	const qulonglong generation = m_appendGeneration;

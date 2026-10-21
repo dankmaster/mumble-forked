@@ -37,6 +37,14 @@
 #endif
 
 namespace {
+MumbleProto::ChatHistoryResponse directHistoryReply(unsigned int peerUserID, quint64 requestID = 0) {
+	MumbleProto::ChatHistoryResponse response;
+	response.set_scope(MumbleProto::Private);
+	response.set_scope_id(peerUserID);
+	if (requestID != 0) response.set_request_id(requestID);
+	return response;
+}
+
 QString readTestSource(const QString &path) {
 	QFile file(path);
 	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
