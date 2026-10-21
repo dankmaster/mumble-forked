@@ -7398,15 +7398,16 @@ ApplicationWindow {
 							// Cache-buffer delegates retain their bounded placeholder
 							// geometry. Rebuilding provider trees that are still outside
 							// the viewport consumes UI frames without drawing anything.
-							// The one named bounded prefetch row is the sole exception.
-							if (!visible && !prefetchEligible && !plainSourceOwned)
+							// Plain cached rows may also prepare while idle without provider work.
+							if (!visible && !prefetchEligible && !plainSourceOwned
+									&& !cachedPlainPresentationEligible(item))
 								continue
 							// A finalizing plain row that already owns its nested Loader is
 							// observed by visiblePresentationReady(). Re-enqueuing it while
 							// asynchronous incubation is pending would consume another bounded
 							// admission slot without making progress.
-							if (scopePresentationPending && scopePresentationFinalizing
-									&& (visible || plainSourceOwned)
+							if ((plainSourceOwned || (scopePresentationPending
+									&& scopePresentationFinalizing && visible))
 									&& item.plainScopeResumeEligible === true
 									&& item.messageRowMaterialized === true)
 								continue
@@ -7464,11 +7465,11 @@ ApplicationWindow {
 							const prefetchEligible = String(item.stableId || "")
 								=== nearViewportWarmId
 							const plainSourceOwned = item.plainDeferredSourceOwned === true
-							if (!stillVisible && !prefetchEligible && !plainSourceOwned)
+							if (!stillVisible && !prefetchEligible && !plainSourceOwned
+									&& !cachedPlainPresentationEligible(item))
 								continue
-							const plainScopeResume = scopePresentationPending
-								&& scopePresentationFinalizing
-								&& (stillVisible || plainSourceOwned)
+							const plainScopeResume = (plainSourceOwned || (scopePresentationPending
+								&& scopePresentationFinalizing && stillVisible))
 								&& item.plainScopeResumeEligible === true
 							if (plainScopeResume) {
 								if (item.messageRowMaterialized !== true
@@ -7655,6 +7656,23 @@ ApplicationWindow {
 						++scopePresentationHeightCommitCount
 					}
 
+					function cachedPlainPresentationEligible(item) {
+						// Prepare only already-instantiated cache delegates, after the scope
+						// is visible and input has released layout ownership. Never hydrate
+						// providers or scan the history model to populate this window.
+						if (activeScope.activity || scopePresentationPending || richScrollInProgress
+								|| !item || item.performanceTimelineDelegate !== true
+								|| item.accessibilityPooled === true)
+							return false
+						const point = item.mapToItem(timeline, 0, 0)
+						if (point.y + item.height <= -cacheBuffer
+								|| point.y >= height + cacheBuffer)
+							return false
+						return item.lightweightDeferredPresentation === true
+							? chatModel.deferredMessagePlainForMaterialization(String(item.stableId || ""))
+							: item.plainScopeResumeEligible === true
+					}
+
 					function queueVisibleDeferredMaterialization(allowDuringFinalization) {
 						const pendingAllowed = allowDuringFinalization === true
 							&& scopePresentationFinalizing
@@ -7675,15 +7693,16 @@ ApplicationWindow {
 							const item = children[childIndex]
 							if (!item || item.lightweightDeferredPresentation !== true
 									|| item.accessibilityPooled === true
-									|| item.contentNeedsHydration !== true || !item.visible)
+									|| item.contentNeedsHydration !== true)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
-							if (point.y + item.height <= 0.5
-									|| point.y >= height - 0.5)
+							const visible = item.visible && point.y + item.height > 0.5
+								&& point.y < height - 0.5
+							if (!visible && !cachedPlainPresentationEligible(item))
 								continue
 							const stableId = String(item.stableId || "")
 							if (stableId.length > 0 && queuedSet[stableId] !== true) {
-								candidates.push({ "id": stableId, "viewportY": point.y })
+								candidates.push({ "id": stableId, "viewportY": point.y, "visible": visible })
 								queuedSet[stableId] = true
 							}
 						}
@@ -7699,7 +7718,7 @@ ApplicationWindow {
 								continue
 							const stableId = item ? String(item.stableId || "") : ""
 							if (stableId.length > 0 && queuedSet[stableId] !== true) {
-								candidates.push({ "id": stableId, "viewportY": point.y })
+								candidates.push({ "id": stableId, "viewportY": point.y, "visible": true })
 								queuedSet[stableId] = true
 							}
 						}
@@ -7712,6 +7731,8 @@ ApplicationWindow {
 						// initial all-summary viewport from admitting an entire rich page
 						// that becomes offscreen as soon as its first cards expand.
 						candidates.sort(function(left, right) {
+							if (left.visible !== right.visible)
+								return left.visible ? -1 : 1
 							return right.viewportY - left.viewportY
 						})
 						const queued = candidates.map(function(candidate) {
@@ -7733,11 +7754,11 @@ ApplicationWindow {
 							const item = children[childIndex]
 							if (!item || item.lightweightDeferredPresentation !== true
 									|| item.accessibilityPooled === true
-									|| String(item.stableId || "") !== key || !item.visible)
+									|| String(item.stableId || "") !== key)
 								continue
 							const point = item.mapToItem(timeline, 0, 0)
-							return point.y + item.height > 0.5
-								&& point.y < height - 0.5
+							return (item.visible && point.y + item.height > 0.5
+								&& point.y < height - 0.5) || cachedPlainPresentationEligible(item)
 						}
 						const deferredRepeater = headerItem
 							? headerItem.deferredRepeater : null
@@ -7776,7 +7797,7 @@ ApplicationWindow {
 					function materializeNextDeferredRow() {
 						const pendingAllowed = scopePresentationPending
 							&& scopePresentationFinalizing
-						const serializeSourcePromotion = scopePresentationFinalizing
+						const serializeSourcePromotion = scopePresentationFinalizing || !activeScope.activity
 						if (richScrollInProgress
 								|| coldScopeMaterializationDelayTimer.running
 								|| prependAnchorActive
@@ -7834,7 +7855,9 @@ ApplicationWindow {
 								for (let plainIndex = 0;
 										plainIndex < plainCohortIds.length; ++plainIndex) {
 									const stableId = plainCohortIds[plainIndex]
-									if (!deferredPresentationStillEligible(stableId)
+									if (materializationGeneration !== scopePresentationGeneration
+											|| richScrollInProgress
+											|| !deferredPresentationStillEligible(stableId)
 											|| activeScope.activity
 											|| !chatModel.deferredMessagePlainForMaterialization(
 												stableId)) {
@@ -7886,6 +7909,8 @@ ApplicationWindow {
 						// loaders now, but keep source admission locked until that row
 						// reports its real geometry through completeDeferredMaterialization().
 						Qt.callLater(function() {
+							if (materializationGeneration !== timeline.scopePresentationGeneration)
+								return
 							if (finalizationGeneration >= 0
 									&& (timeline.scopePresentationGeneration
 										!== finalizationGeneration
@@ -9539,7 +9564,7 @@ ApplicationWindow {
 						timeline.scheduleViewportAnchorQuietRelease()
 						timeline.scheduleViewportMembershipUpdate()
 					root.update()
-					if (commitsDeadlineRecovery && item)
+					if ((commitsDeadlineRecovery || plainDeferredSourceOwned) && item)
 						item.completeRichLoaderResumeWhenReady()
 					return true
 								}
@@ -10006,13 +10031,18 @@ ApplicationWindow {
 								readonly property bool richResourcesRequired: item
 									? item.richResourcesRequired : false
 								readonly property bool plainScopeResumeEligible: item
-									? item.plainScopeResumeEligible : plainDeferredSourceOwned
+									? item.plainScopeResumeEligible && !item.messageRowFailed : !activeScope.activity
+										&& !deferredPresentation && !bodyHydrationPending
+										&& (!preview || Object.keys(preview).length === 0)
+										&& (!attachments || attachments.length === 0)
+										&& !root.messageContainsInlineImage(bodySegments)
 								property bool inVisibleViewport: false
 								property bool inHydrationWindow: false
 								readonly property bool richContentViewportEligible:
 									inVisibleViewport || stableId === timeline.nearViewportWarmId
 								function reconcileViewportMembership() {
-									if (richContentViewportEligible || item)
+									if (richContentViewportEligible || item || plainDeferredSourceOwned
+											|| timeline.cachedPlainPresentationEligible(asyncMessageDelegate))
 										return
 									const ownedStableId = resumeOwnedStableId
 									resumeRequested = false
@@ -11341,8 +11371,12 @@ ApplicationWindow {
 							// on the same frame as this card's poster/gallery.
 							if (richResourceActivationPending)
 								return
-							timeline.completeDeferredMaterialization(stableId,
-								asyncMessageDelegate.deferredMaterializationCleanupGeneration)
+							// Keep cached plain ownership until its current outer geometry is committed.
+							if (!asyncMessageDelegate.plainDeferredSourceOwned
+									|| timeline.scopePresentationPending
+									|| asyncMessageDelegate.presentationHeightCommittedHeight > 0)
+								timeline.completeDeferredMaterialization(stableId,
+									asyncMessageDelegate.deferredMaterializationCleanupGeneration)
 							timeline.completeNearViewportPrefetchIfReady(stableId)
 							// The complete message/card tree now owns its final layout
 							// geometry and its first bounded resource window has settled.
@@ -11599,7 +11633,9 @@ ApplicationWindow {
 								// ordered resume queue promote one visible message tree per
 								// frame instead of allowing every visible Loader binding to
 								// activate together on the first idle polish pass.
-								if (!logEntry && richContentViewportEligible) {
+								if (!logEntry && (richContentViewportEligible
+										|| asyncMessageDelegate.plainDeferredSourceOwned
+										|| timeline.cachedPlainPresentationEligible(asyncMessageDelegate))) {
 									if (!messageRowMaterialized && plainScopeResumeEligible
 											&& timeline.scopePresentationPending) {
 										diagnosticLoadGeneration = timeline.scopePresentationGeneration
@@ -12004,6 +12040,7 @@ ApplicationWindow {
 						readonly property bool hasAttachmentContent: !!attachments && attachments.length > 0
 						readonly property bool hasReplyContent: replyActor.length > 0 || replySnippet.length > 0
 						readonly property bool hasInlineImageContent: root.messageContainsInlineImage(bodySegments)
+						readonly property bool messageRowFailed: messageRowLoader.status === Loader.Error
 						readonly property bool plainScopeResumeEligible: !logEntry
 							&& !contentNeedsHydration && !hasPreviewContent
 							&& !hasAttachmentContent && !hasInlineImageContent
@@ -12224,10 +12261,12 @@ ApplicationWindow {
 										|| status === Loader.Null)
 									messageDelegate.notePlainLoaderEvent(status === Loader.Loading
 										? "loading" : status === Loader.Error ? "error" : "inactive")
-								if (status === Loader.Error
-										&& !timeline.abandonNearViewportPrefetch(
+								if (status === Loader.Error) {
+									asyncMessageDelegate.releaseDeferredMaterialization()
+									if (!timeline.abandonNearViewportPrefetch(
 											messageDelegate.stableId, true))
-									timeline.completeRichLoaderResume(messageDelegate.stableId)
+										timeline.completeRichLoaderResume(messageDelegate.stableId)
+								}
 							}
 								sourceComponent: Component {
 									RowLayout {

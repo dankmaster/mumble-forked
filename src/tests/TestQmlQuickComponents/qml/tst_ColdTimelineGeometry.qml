@@ -23,6 +23,133 @@ TestCase {
 		return source.slice(start, end)
 	}
 
+	function cachedPlainQueueProbe() {
+		return Qt.createQmlObject(`import QtQuick
+			QtObject {
+				id: probe
+				property var timeline: probe
+				property var activeScope: ({activity: false})
+				property bool richScrollInProgress: false
+				property bool prependAnchorActive: false
+				property bool scopePresentationPending: false
+				property bool scopePresentationFinalizing: false
+				property int scopePresentationGeneration: 7
+				property real height: 400
+				property real cacheBuffer: 800
+				property var contentItem: ({children: []})
+				property var headerItem: null
+				property var deferredMaterializationQueue: []
+				property var plainIds: ({})
+				property var promotedIds: []
+				property string interruptAfterFirst: ""
+				property var plainDeferredMaterializationActive: ({})
+				property string deferredMaterializationActiveId: ""
+				property int deferredMaterializationActiveGeneration: -1
+				property int plainDeferredMaterializationsPerFrame: 2
+				property int deferredMaterializationsPerFrame: 4
+				property int plainDeferredSourceAdmissionCount: 0
+				property int serializedDeferredSourceAdmissionCount: 0
+				property bool topAnchorActive: false
+				property var chatModel: probe
+				property var coldScopeMaterializationDelayTimer: ({running: false})
+				property var deferredMaterializationTimer: ({running: false, start: function() {}})
+				function deferredMaterializationOwnershipActive() {
+					return Object.keys(plainDeferredMaterializationActive).length > 0
+						|| deferredMaterializationActiveId.length > 0
+				}
+				function finishRichContentRecoveryIfIdle() {}
+				function scheduleRichContentResume() {}
+				function queueRichLoaderResumes() {}
+				function finishDeferredMaterializationCohort(generation) {}
+				function retirePlainDeferredMaterialization(id, generation) {
+					if (plainDeferredMaterializationActive[id] !== generation) return false
+					const next = Object.assign({}, plainDeferredMaterializationActive)
+					delete next[id]
+					plainDeferredMaterializationActive = next
+					return true
+				}
+				function deferredMessagePlainForMaterialization(id) { return plainIds[id] === true }
+				function materializeDeferredMessage(id) {
+					promotedIds = promotedIds.concat([id])
+					if (promotedIds.length === 1) {
+						if (interruptAfterFirst === "scroll") richScrollInProgress = true
+						if (interruptAfterFirst === "scope") ++scopePresentationGeneration
+						if (interruptAfterFirst === "rich") plainIds = {a: true}
+					}
+					return true
+				}
+				${productFunction("cachedPlainPresentationEligible")}
+				${productFunction("queueVisibleDeferredMaterialization")}
+				${productFunction("deferredPresentationStillEligible")}
+				${productFunction("materializeNextDeferredRow")}
+			}`, testCase, "cachedPlainQueueProbe")
+	}
+
+	function test_idle_prepares_cached_plain_rows_after_visible_rows() {
+		const probe = cachedPlainQueueProbe()
+		function row(id, y) {
+			return {stableId: id, performanceTimelineDelegate: true,
+				lightweightDeferredPresentation: true, contentNeedsHydration: true,
+				accessibilityPooled: false, visible: true, height: 70,
+				mapToItem: function() { return {y: y} }}
+		}
+		const rows = [row("cached-plain", -200), row("cached-rich", -100),
+			row("visible", 200), row("beyond-cache", -1000), row("pooled", -300)]
+		rows[4].accessibilityPooled = true
+		probe.contentItem = {children: rows}
+		probe.plainIds = {"cached-plain": true, "beyond-cache": true, "pooled": true}
+		probe.queueVisibleDeferredMaterialization(false)
+		compare(probe.deferredMaterializationQueue.join(","), "visible,cached-plain")
+		verify(probe.deferredPresentationStillEligible("cached-plain"))
+		probe.plainIds = {}
+		verify(!probe.deferredPresentationStillEligible("cached-plain"))
+		probe.deferredMaterializationQueue = []
+		probe.richScrollInProgress = true
+		probe.queueVisibleDeferredMaterialization(false)
+		compare(probe.deferredMaterializationQueue.length, 0)
+		probe.destroy()
+	}
+
+	function test_cached_plain_cohort_rechecks_reentrant_changes() {
+		for (const interruption of ["", "scroll", "scope", "rich"]) {
+			const probe = cachedPlainQueueProbe()
+			const rows = ["a", "b", "c"].map(function(id) {
+				return {stableId: id, performanceTimelineDelegate: true,
+					lightweightDeferredPresentation: true, contentNeedsHydration: true,
+					accessibilityPooled: false, visible: true, height: 70,
+					mapToItem: function() { return {y: -200} }}
+			})
+			probe.contentItem = {children: rows}
+			probe.plainIds = {a: true, b: true, c: true}
+			probe.deferredMaterializationQueue = ["a", "b", "c"]
+			probe.interruptAfterFirst = interruption
+			probe.materializeNextDeferredRow()
+			compare(probe.promotedIds.join(","), interruption.length ? "a" : "a,b", interruption)
+			verify(Object.keys(probe.plainDeferredMaterializationActive).length <= 2)
+			// Flush the generation-guarded deferred callback before destroying its owner.
+			wait(0)
+			probe.destroy()
+		}
+	}
+
+	function test_promoted_cached_plain_recovers_after_scroll_clears_source_ownership() {
+		const probe = cachedPlainQueueProbe()
+		const row = {stableId: "promoted", performanceTimelineDelegate: true,
+			lightweightDeferredPresentation: false, plainScopeResumeEligible: true,
+			accessibilityPooled: false, height: 70,
+			mapToItem: function() { return {y: -200} }}
+		probe.richScrollInProgress = true
+		verify(!probe.cachedPlainPresentationEligible(row))
+		probe.richScrollInProgress = false
+		verify(probe.cachedPlainPresentationEligible(row))
+		row.plainScopeResumeEligible = false
+		verify(!probe.cachedPlainPresentationEligible(row))
+		row.plainScopeResumeEligible = true
+		row.accessibilityPooled = true
+		verify(!probe.cachedPlainPresentationEligible(row))
+		probe.destroy()
+	}
+
 	function geometryProbe() {
 		const source = String(mainQmlSource)
 		const committedStart = source.indexOf("readonly property real presentationHeightCommittedHeight:")
