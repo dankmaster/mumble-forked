@@ -19,6 +19,7 @@
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QThread>
+#include <QtCore/QTimer>
 #include <QtCore/QTextStream>
 
 namespace {
@@ -185,9 +186,13 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 	if (parser.isSet(selfTestOption)) {
-		const QJsonObject reply = helperServer.runSelfTest();
-		QTextStream(stdout) << QJsonDocument(reply).toJson(QJsonDocument::Compact) << Qt::endl;
-		return Mumble::ScreenShare::IPC::replySucceeded(reply) ? 0 : 1;
+		QTimer::singleShot(0, &helperServer, [&helperServer]() {
+			helperServer.runSelfTest([](const QJsonObject &reply) {
+				QTextStream(stdout) << QJsonDocument(reply).toJson(QJsonDocument::Compact) << Qt::endl;
+				QCoreApplication::exit(Mumble::ScreenShare::IPC::replySucceeded(reply) ? 0 : 1);
+			});
+		});
+		return app.exec();
 	}
 
 	QString errorMessage;

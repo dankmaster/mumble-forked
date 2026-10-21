@@ -3562,6 +3562,48 @@ ApplicationWindow {
 						activeScope.scopeToken, actionId)
 				}
 
+				Item {
+					id: dockedScreenShare
+					objectName: "dockedScreenShare"
+					property var backend: (activeScope.screenShare || ({})).backend || null
+					readonly property bool presentationActive: backend !== null && !backend.detached
+					readonly property real desiredHeight: presentationActive
+						? Math.max(160, Math.min(320, root.height * 0.32)) : 0
+					property real committedHeight: 0
+					Layout.fillWidth: true
+					Layout.leftMargin: Theme.spacing
+					Layout.rightMargin: Theme.spacing
+					Layout.preferredHeight: committedHeight
+					visible: committedHeight > 0
+					onDesiredHeightChanged: {
+						// Capture before changing the layout budget. The existing timeline
+						// owner restores the anchor; user input and prepend keep priority.
+						const generation = timeline.scopePresentationGeneration
+						timeline.captureViewportAnchor()
+						committedHeight = desiredHeight
+						Qt.callLater(function() {
+							if (generation !== timeline.scopePresentationGeneration)
+								return
+							if (timeline.viewportAnchorActive)
+								timeline.scheduleViewportAnchorQuietRelease()
+						})
+					}
+					Loader {
+						anchors.fill: parent
+						active: dockedScreenShare.presentationActive
+						sourceComponent: Component {
+							ScreenShareSurface {
+								backend: dockedScreenShare.backend
+								renderActive: dockedScreenShare.presentationActive
+								visualFixtureMode: root.visualFixtureOverrideActive
+								onFullscreenRequested: enabled => {
+									if (enabled && backend) backend.requestFullscreen()
+								}
+							}
+						}
+					}
+				}
+
 				WatchTogetherBanner {
 					Layout.fillWidth: true
 					Layout.leftMargin: Theme.spacing
@@ -4498,6 +4540,18 @@ ApplicationWindow {
 					property bool scopePresentationObservationActive: false
 					property bool scopePresentationForcedByDeadline: false
 					property int scopePresentationGeneration: 0
+					property bool scopePresentationMilestonesDirty: true
+					property int orderedMessageRevision: 0
+					property int orderedIdentityRevision: -1
+					property int orderedIdentityGeneration: -1
+					property var orderedIdentityCache: ({ "count": 0, "hash": "" })
+					readonly property bool expectedHistoryLoaderVisible:
+						!!activeScope.canLoadOlder || activeScope.loadingState === "older"
+					readonly property int expectedHistoryLoaderHeight: expectedHistoryLoaderVisible ? 48 : 0
+					onScopePresentationGenerationChanged: scopePresentationMilestonesDirty = true
+					onScopePresentationFirstVisibleStableRowsCommittedAtChanged:
+						scopePresentationMilestonesDirty = true
+
 					property int frameSwappedSerial: 0
 					property int scopePresentationMutationCount: 0
 					property int scopePresentationTailContainedMutationCount: -1
@@ -4656,6 +4710,7 @@ ApplicationWindow {
 					}
 
 					function beginScopeChange() {
+						scopePresentationMilestonesDirty = true
 						scopePresentationStartedAt = Date.now()
 						// Publish the scope owner before cancelFlick(): Qt may synchronously
 						// emit movementEnded while retiring a native precision-wheel flick.
@@ -4796,6 +4851,7 @@ ApplicationWindow {
 					}
 
 					function noteScopePresentationDataReady() {
+						scopePresentationMilestonesDirty = true
 						if (!scopePresentationPending || activeScope.loading
 								|| chatModel.appendPending || chatModel.prependPending)
 							return false
@@ -4905,6 +4961,8 @@ ApplicationWindow {
 					}
 
 					function recordScopePresentationFrameMilestones() {
+						if (!scopePresentationMilestonesDirty && !scopePresentationPending)
+							return
 						if (scopePresentationStartedAt <= 0)
 							return
 						const committedAt = Date.now()
@@ -4919,6 +4977,7 @@ ApplicationWindow {
 						if (scopePresentationFirstVisibleStableRowsCommittedAt <= 0)
 							return
 
+						scopePresentationMilestonesDirty = false
 						const diagnostics = visiblePresentationDiagnostics()
 						const providerAppliedAt = Number(
 							diagnostics.providerResultAppliedAt || 0)
@@ -5148,6 +5207,7 @@ ApplicationWindow {
 					}
 
 					function noteScopePresentationMutation() {
+						scopePresentationMilestonesDirty = true
 						if (!scopePresentationPending)
 							return
 						++scopePresentationMutationCount
@@ -5774,15 +5834,21 @@ ApplicationWindow {
 					}
 
 					function prependOrderedMessageIdentity() {
+						if (orderedIdentityRevision === orderedMessageRevision
+								&& orderedIdentityGeneration === scopePresentationGeneration)
+							return orderedIdentityCache
 						const ids = []
 						for (let index = 0; index < chatModel.count; ++index) {
 							const row = chatModel.get(index) || ({})
 							ids.push(String(row.id || ""))
 						}
-						return {
+						orderedIdentityCache = {
 							"count": ids.length,
 							"hash": Qt.md5(ids.join("\u001f"))
 						}
+						orderedIdentityRevision = orderedMessageRevision
+						orderedIdentityGeneration = scopePresentationGeneration
+						return orderedIdentityCache
 					}
 
 					function prependSettlementGeometrySnapshot() {
@@ -5934,6 +6000,17 @@ ApplicationWindow {
 						if (prependSettlementState !== "ANCHOR_CORRECTION_ACTIVE"
 								&& prependSettlementState !== "FIRST_STABLE_GEOMETRY_OBSERVED")
 							return
+						// Reject unsettled ownership before walking delegates or hashing rows.
+						if (!prependSettlementPendingObserved || chatModel.prependPending
+								|| !prependAnchorActive || prependMutationInProgress
+								|| prependAnchorCorrectionFrames !== 0
+								|| String(activeScope.scopeToken || "") !== prependSettlementScopeToken
+								|| scopePresentationGeneration !== prependSettlementPresentationGeneration) {
+							prependSettlementFirstGeometryFingerprint = ""
+							prependSettlementFirstFrameSerial = 0
+							prependSettlementState = "ANCHOR_CORRECTION_ACTIVE"
+							return
+						}
 						const identity = prependOrderedMessageIdentity()
 						const snapshot = prependSettlementGeometrySnapshot()
 						const identityMatches = prependSettlementPendingObserved
@@ -5949,8 +6026,8 @@ ApplicationWindow {
 						const surfaceMatches = snapshot.blankCount === 0
 							&& snapshot.heightPendingCount === 0
 							&& snapshot.heightMismatchCount === 0
-							&& snapshot.historyLoaderVisible
-							&& Math.abs(snapshot.historyLoaderHeight - 48) <= 1
+							&& snapshot.historyLoaderVisible === expectedHistoryLoaderVisible
+							&& Math.abs(snapshot.historyLoaderHeight - expectedHistoryLoaderHeight) <= 1
 							&& snapshot.jumpToLatestVisible && snapshot.composerContiguous
 						if (!identityMatches || !surfaceMatches
 								|| frameSwappedSerial <= prependSettlementStartFrameSerial) {
@@ -7705,6 +7782,7 @@ ApplicationWindow {
 					}
 
 					function noteScopePresentationHeightCommit() {
+						scopePresentationMilestonesDirty = true
 						if (!scopePresentationPending)
 							return
 						const timestamp = Date.now()
@@ -8997,6 +9075,20 @@ ApplicationWindow {
 
 					Connections {
 						target: chatModel
+						function invalidate() {
+							++timeline.orderedMessageRevision
+							timeline.scopePresentationMilestonesDirty = true
+						}
+						function onRowsInserted() { invalidate() }
+						function onRowsRemoved() { invalidate() }
+						function onRowsMoved() { invalidate() }
+						function onModelReset() { invalidate() }
+						function onLayoutChanged() { invalidate() }
+						function onDataChanged() { invalidate() }
+					}
+
+					Connections {
+						target: chatModel
 						function onScopeReplacementPresentationRequested() {
 							// Rapid A -> B -> A navigation can restore the already
 							// selected token after A's rows were precleared. Re-open
@@ -9178,8 +9270,7 @@ ApplicationWindow {
 						Item {
 							id: olderHistoryControlRow
 							width: timelineHeader.width
-						height: (activeScope.canLoadOlder
-								|| activeScope.loadingState === "older") ? 48 : 0
+						height: timeline.expectedHistoryLoaderHeight
 							visible: height > 0
 							ModernButton {
 								anchors.horizontalCenter: parent.horizontalCenter
@@ -9376,6 +9467,23 @@ ApplicationWindow {
 						DelegateChoice {
 							Loader {
 								id: asyncMessageDelegate
+								Connections {
+									target: asyncMessageDelegate
+									function onSourceChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onPaintedSummaryChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onPaintedSurfaceChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onPaintedLoadingChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onPaintedTerminalChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onContentNeedsHydrationChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onRichResourcesActiveChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onRichResourcesRequiredChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onRichResourceActivationPendingChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onMessageRowReadyChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onPreviewPresentationReadyChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onPresentationHeightReleasedChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onHeightChanged() { timeline.scopePresentationMilestonesDirty = true }
+									function onAccessibilityPooledChanged() { timeline.scopePresentationMilestonesDirty = true }
+								}
 								required property string stableId
 								required property bool deferredPresentation
 								required property bool own

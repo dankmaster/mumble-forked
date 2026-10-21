@@ -26349,6 +26349,8 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	const bool usingNativeGpu     = selfOwned && m_screenShareManager->isUsingNativeGpuRuntime(streamID);
 
 	shareState.insert(QStringLiteral("streamId"), streamID);
+	shareState.insert(QStringLiteral("backend"),
+		QVariant::fromValue(m_screenShareManager->viewBackend(streamID)));
 	shareState.insert(QStringLiteral("ownerLabel"), ownerLabel);
 	shareState.insert(QStringLiteral("ownerSession"), static_cast< qulonglong >(session.ownerSession));
 	shareState.insert(QStringLiteral("detachedWindowOpen"), detachedWindowOpen);
@@ -26383,7 +26385,7 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(
 			QStringLiteral("screenShareStop"), tr("Stop sharing"), true, false, QStringLiteral("danger")));
 	} else if (viewing || viewPending) {
-		const bool viewerWindowOpen = detachedWindowOpen;
+		const bool viewerWindowOpen = viewing;
 		shareState.insert(QStringLiteral("mode"),
 						  usingFallback ? QStringLiteral("fallback")
 										: (viewPending ? QStringLiteral("connecting")
@@ -26412,7 +26414,7 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		shareState.insert(QStringLiteral("mode"), canWatch || !joinedRoom ? QStringLiteral("available") : QStringLiteral("error"));
 		shareState.insert(QStringLiteral("statusLabel"), tr("%1 is sharing in this room").arg(ownerLabel));
 		shareState.insert(QStringLiteral("statusTone"), canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
-		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), canWatch, unavailableReason,
+		setPrimaryAction(QStringLiteral("screenShareWatch"), tr("Watch share"), canWatch, unavailableReason,
 						 canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
 	}
 
@@ -42423,28 +42425,16 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		return true;
 	}
 
-	bool startedViewing = false;
-	if (!m_screenShareManager->isViewingSession(streamID)) {
+	if (!m_screenShareManager->viewBackend(streamID)) {
 		if (!m_screenShareManager->canViewSession(streamID)) {
 			notifyScreenShareIssue(tr("The screen-share window could not be opened right now."));
 			return false;
 		}
-
 		m_screenShareManager->requestStartViewing(streamID);
-		startedViewing = m_screenShareManager->isViewingSession(streamID);
 		scheduleQmlRoomStateUpdate();
 	}
-
 	const bool opened = m_screenShareManager->focusOrReopenDetachedWindow(streamID);
-	if (startedViewing) {
-		for (const int delayMsec : { 350, 1000, 2500, 5000 }) {
-			QTimer::singleShot(delayMsec, this, [this, streamID]() {
-				if (m_screenShareManager && m_screenShareManager->isViewingSession(streamID)) {
-					m_screenShareManager->focusOrReopenDetachedWindow(streamID);
-				}
-			});
-		}
-	}
+
 	if (!opened) {
 		if (m_screenShareManager->isViewingSession(streamID)) {
 			if (m_screenShareManager->hasRunningExternalRuntime(streamID)) {

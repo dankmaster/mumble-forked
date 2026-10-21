@@ -4,6 +4,10 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "RNNoiseSpeechCleanup.h"
+#include "AudioOutputSpeech.h"
+#include "ClientUser.h"
+#include "DeepFilterNetRealtimeWorker.h"
+#include "Global.h"
 #include "SpeechCleanupProcessor.h"
 #include "SpeechCleanupTransmitDrain.h"
 
@@ -18,10 +22,16 @@ extern "C" {
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QSemaphore>
+#include <QtCore/QThread>
+#include <QtCore/QThreadPool>
 #include <QtTest>
+#include <opus.h>
 
 #include <array>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -44,6 +54,16 @@ private slots:
 	void transmitDrainCanAppendUncountedTerminalFlushFrame();
 	void transmitDrainCanBeCancelledForFreshSpeech();
 	void processorOwnershipFollowsNoiseCancelModeWithoutModelInitialization();
+	void cancelledPreparationSkipsQueuedFactoryAndWakesDelay();
+	void cancelledPreparationDoesNotStartRealtimeWorker();
+	void preparedProcessorAndAbandonedResultRetireOffCaller();
+	void receiveAdapterPreservesStereoAndFailureTimeline();
+	void receiveWorkerSupportsBoundedCallbackBursts_data();
+	void receiveWorkerSupportsBoundedCallbackBursts();
+	void receiveOpusPacketsAreStagedAndDrained_data();
+	void receiveOpusPacketsAreStagedAndDrained();
+	void receiveMuteTransitionAdvancesCleanupTimeline_data();
+	void receiveMuteTransitionAdvancesCleanupTimeline();
 #ifdef TEST_EXPECT_RNNOISE
 	void customModelDirectoryFallsBackSafely();
 	void missingCustomModelFallsBackSafely();
@@ -97,6 +117,422 @@ public:
 	void reset() override {}
 	void processInPlace(float *, unsigned int, float) override {}
 };
+
+struct PreparationState {
+	std::atomic_int constructed { 0 };
+	std::atomic_int prepared { 0 };
+	std::atomic_int destroyed { 0 };
+	std::atomic_bool preparedOnCaller { false };
+	std::atomic_bool destroyedOnCaller { false };
+	Qt::HANDLE caller = QThread::currentThreadId();
+	QSemaphore entered;
+	QSemaphore release;
+};
+
+class PreparationProbe final : public SpeechCleanupProcessor {
+public:
+	explicit PreparationProbe(std::shared_ptr< PreparationState > state) : m_state(std::move(state)) {}
+	~PreparationProbe() override {
+		m_state->destroyedOnCaller.store(QThread::currentThreadId() == m_state->caller);
+		m_state->destroyed.fetch_add(1);
+	}
+	bool isReady() const override { return true; }
+	void reset() override {}
+	bool prepareRealtime() override {
+		m_state->preparedOnCaller.store(QThread::currentThreadId() == m_state->caller);
+		m_state->prepared.fetch_add(1);
+		return true;
+	}
+	void processInPlace(float *, unsigned int, float) override {}
+
+private:
+	std::shared_ptr< PreparationState > m_state;
+};
+
+class DelayedReceiveProbe final : public SpeechCleanupProcessor {
+public:
+	explicit DelayedReceiveProbe(unsigned int latency) : m_delay(latency, 0.0f) {}
+	bool isReady() const override { return m_ready; }
+	void reset() override {}
+	bool prepareRealtimeForReceive(unsigned int maximumBurstFrames) override {
+		burstBudget = maximumBurstFrames;
+		return true;
+	}
+	unsigned int latencySamples() const override { return static_cast< unsigned int >(m_delay.size()); }
+	void processInPlace(float *samples, unsigned int count, float mix) override {
+		++calls;
+		validFrames = validFrames && count == ReceiveSpeechCleanupProcessor::frameSamples;
+		if (calls == failAtCall) {
+			m_ready = false;
+			std::fill_n(samples, count, std::numeric_limits< float >::quiet_NaN());
+			return;
+		}
+		for (unsigned int index = 0; index < count; ++index) {
+			const float delayed = m_delay[m_position];
+			m_delay[m_position] = samples[index];
+			m_position = (m_position + 1) % m_delay.size();
+			samples[index] = delayed * (1.0f - mix * 0.5f);
+		}
+	}
+	unsigned int calls = 0;
+	unsigned int burstBudget = 0;
+	unsigned int failAtCall = 0;
+	bool validFrames = true;
+
+private:
+	std::vector< float > m_delay;
+	std::size_t m_position = 0;
+	bool m_ready = true;
+};
+
+struct ReceiveWorkerProbe {
+	QSemaphore release;
+	std::atomic_bool blocked { true };
+	static int process(void *context, const float *input, float *output) noexcept {
+		auto &self = *static_cast< ReceiveWorkerProbe * >(context);
+		if (self.blocked.exchange(false) && !self.release.tryAcquire(1, 2000)) return 1;
+		std::copy_n(input, DeepFilterNetRealtimeWorker::frameSamples, output);
+		return DeepFilterNetRealtimeWorker::statusOk;
+	}
+};
+
+class ReceiveOutputProbe final : public AudioOutputSpeech {
+public:
+	ReceiveOutputProbe(unsigned int callbackFrames, std::unique_ptr< SpeechCleanupProcessor > processor)
+		: AudioOutputSpeech(nullptr, 48000, Mumble::Protocol::AudioCodec::Opus, callbackFrames) {
+		m_remoteSpeechCleanup = std::move(processor);
+		m_remoteSpeechCleanupRequested = true;
+		m_remoteSpeechCleanupFrameStaging = true;
+		m_remoteSpeechCleanupActive = m_remoteSpeechCleanup->isReady();
+		m_remoteSpeechCleanupPreparationConsumed = true;
+		m_remoteSpeechCleanupMixFactor = 1.0f;
+	}
+	unsigned int drainedSamples() const { return m_remoteSpeechCleanupDrainedSamples; }
+	bool drainCompleted() const { return m_remoteSpeechCleanupDrainCompleted; }
+	void queueDecodedMarkerPacket() {
+		for (unsigned int frame = 0; frame < 12; ++frame) {
+			std::fill_n(m_pendingDecodedPacket.data() + frame * 960, 960,
+				static_cast< float >(frame + 1) * 0.05f);
+		}
+		m_pendingDecodedSamples = static_cast< unsigned int >(m_pendingDecodedPacket.size());
+		m_pendingDecodedOffset = 0;
+		m_pendingDecodedTerminator = true;
+	}
+};
+
+class ScopedGlobalOverride final {
+public:
+	explicit ScopedGlobalOverride(Global &global) : m_previous(Global::g_global_struct) {
+		Global::g_global_struct = &global;
+	}
+	~ScopedGlobalOverride() { Global::g_global_struct = m_previous; }
+
+private:
+	Global *m_previous;
+};
+}
+
+void TestSpeechCleanup::cancelledPreparationSkipsQueuedFactoryAndWakesDelay() {
+	QThreadPool pool;
+	pool.setMaxThreadCount(1);
+	auto state = std::make_shared< PreparationState >();
+	pool.start([state] {
+		state->entered.release();
+		(void) state->release.tryAcquire(1, 2000);
+	});
+	QVERIFY(state->entered.tryAcquire(1, 1000));
+	SpeechCleanupPreparation queued(pool, [state] {
+		state->constructed.fetch_add(1);
+		return std::make_unique< PreparationProbe >(state);
+	});
+	queued.cancel();
+	state->release.release();
+	QVERIFY(pool.waitForDone(1000));
+	QCOMPARE(state->constructed.load(), 0);
+	QVERIFY(queued.isFinished());
+	QVERIFY(!queued.takeResult());
+
+	SpeechCleanupPreparation delayed(pool, [state] {
+		state->constructed.fetch_add(1);
+		return std::make_unique< PreparationProbe >(state);
+	}, std::chrono::steady_clock::now() + std::chrono::seconds(30));
+	QTRY_COMPARE_WITH_TIMEOUT(pool.activeThreadCount(), 1, 1000);
+	delayed.cancel();
+	QVERIFY2(pool.waitForDone(1000), "Cancellation must wake the grace-period wait");
+	QCOMPARE(state->constructed.load(), 0);
+}
+
+void TestSpeechCleanup::cancelledPreparationDoesNotStartRealtimeWorker() {
+	QThreadPool pool;
+	auto state = std::make_shared< PreparationState >();
+	SpeechCleanupPreparation preparation(pool, [state] {
+		state->entered.release();
+		(void) state->release.tryAcquire(1, 2000);
+		state->constructed.fetch_add(1);
+		return std::make_unique< PreparationProbe >(state);
+	});
+	QVERIFY(state->entered.tryAcquire(1, 1000));
+	preparation.cancel();
+	state->release.release();
+	QVERIFY(pool.waitForDone(1000));
+	QCOMPARE(state->constructed.load(), 1);
+	QCOMPARE(state->prepared.load(), 0);
+	QCOMPARE(state->destroyed.load(), 1);
+	QVERIFY(!state->destroyedOnCaller.load());
+	QVERIFY(!preparation.takeResult());
+}
+
+void TestSpeechCleanup::preparedProcessorAndAbandonedResultRetireOffCaller() {
+	QThreadPool pool;
+	for (const bool adopt : { false, true }) {
+		auto state = std::make_shared< PreparationState >();
+		{
+			SpeechCleanupPreparation preparation(pool, [state] {
+				return std::make_unique< PreparationProbe >(state);
+			});
+			QVERIFY(pool.waitForDone(1000));
+			QVERIFY(preparation.isFinished());
+			QCOMPARE(state->prepared.load(), 1);
+			QVERIFY(!state->preparedOnCaller.load());
+			if (adopt) {
+				auto processor = preparation.takeResult();
+				QVERIFY(processor && processor->isReady());
+				retireSpeechCleanupProcessor(std::move(processor));
+			}
+		}
+		QTRY_COMPARE_WITH_TIMEOUT(state->destroyed.load(), 1, 1000);
+		QVERIFY(!state->destroyedOnCaller.load());
+	}
+}
+
+void TestSpeechCleanup::receiveAdapterPreservesStereoAndFailureTimeline() {
+	constexpr unsigned int latency = 600;
+	constexpr unsigned int chunk = ReceiveSpeechCleanupProcessor::frameSamples;
+	auto owned = std::make_unique< DelayedReceiveProbe >(latency);
+	auto *probe = owned.get();
+	probe->failAtCall = 7;
+	ReceiveSpeechCleanupProcessor processor(std::move(owned), 4);
+	QVERIFY(processor.prepareRealtime());
+	QCOMPARE(probe->burstBudget, 4u);
+	QCOMPARE(processor.latencySamples(), latency);
+	const unsigned int totalFrames = chunk * 9 + 336;
+	std::vector< float > original(totalFrames * 2);
+	for (unsigned int frame = 0; frame < totalFrames; ++frame) {
+		original[frame * 2] = 0.2f + static_cast< float >(frame % 13) * 0.01f;
+		original[frame * 2 + 1] = frame / chunk == 2 ? -original[frame * 2] : original[frame * 2];
+	}
+	std::vector< float > actual = original;
+	for (unsigned int offset = 0; offset < totalFrames; offset += chunk) {
+		const unsigned int count = std::min(chunk, totalFrames - offset);
+		QVERIFY(processor.processStereoFrame(actual.data() + offset * 2, count * 2, 1.0f));
+		for (unsigned int frame = offset; frame < offset + count; ++frame) {
+			for (unsigned int channel = 0; channel < 2; ++channel) {
+				float expected = 0.0f;
+				if (frame >= latency) {
+					const unsigned int source = frame - latency;
+					const bool wet = offset / chunk < 6 && source / chunk != 2;
+					expected = original[source * 2 + channel] * (wet ? 0.5f : 1.0f);
+				}
+				QCOMPARE(actual[frame * 2 + channel], expected);
+			}
+		}
+	}
+	QVERIFY(processor.isReady());
+	QVERIFY(processor.usingDryFallback());
+	QVERIFY(probe->validFrames);
+	QCOMPARE(probe->calls, 7u);
+}
+
+void TestSpeechCleanup::receiveWorkerSupportsBoundedCallbackBursts_data() {
+	QTest::addColumn< unsigned int >("burstFrames");
+	for (unsigned int frames : { 1u, 2u, 6u, 12u, 63u }) {
+		QTest::newRow(qPrintable(QString::number(frames))) << frames;
+	}
+}
+
+void TestSpeechCleanup::receiveWorkerSupportsBoundedCallbackBursts() {
+	QFETCH(unsigned int, burstFrames);
+	ReceiveWorkerProbe state;
+	DeepFilterNetRealtimeWorker worker;
+	const unsigned int delay = std::max(2u, burstFrames + 1);
+	QVERIFY(worker.start(&state, &ReceiveWorkerProbe::process, delay));
+	QCOMPARE(worker.configuredDelayFrames(), delay);
+	std::array< float, 480 > input;
+	std::array< float, 480 > output;
+	// Deliberately hold inference while the callback admits its whole burst.
+	for (unsigned int frame = 0; frame < burstFrames; ++frame) {
+		input.fill(static_cast< float >(frame + 1) / 100.0f);
+		QVERIFY(worker.processFrame(input.data(), output.data()));
+		QVERIFY(std::all_of(output.cbegin(), output.cend(), [](float value) { return value == 0.0f; }));
+	}
+	state.release.release();
+	QVERIFY(worker.finishOfflineProcessing());
+	for (unsigned int frame = burstFrames; frame < delay + burstFrames; ++frame) {
+		QVERIFY(worker.prepareOfflineFrame());
+		input.fill(0.0f);
+		QVERIFY(worker.processFrame(input.data(), output.data()));
+		const float expected = frame < delay ? 0.0f : static_cast< float >(frame - delay + 1) / 100.0f;
+		QVERIFY(std::all_of(output.cbegin(), output.cend(), [expected](float value) { return value == expected; }));
+	}
+	QVERIFY(worker.finishOfflineProcessing());
+	worker.stop();
+	QVERIFY(worker.start(&state, &ReceiveWorkerProbe::process));
+	QCOMPARE(worker.configuredDelayFrames(), 2u);
+	worker.stop();
+	QVERIFY(!worker.start(&state, &ReceiveWorkerProbe::process, 65));
+}
+
+void TestSpeechCleanup::receiveOpusPacketsAreStagedAndDrained_data() {
+	QTest::addColumn< unsigned int >("packetFrames");
+	QTest::addColumn< unsigned int >("callbackFrames");
+	QTest::addColumn< bool >("muted");
+	for (unsigned int packet : { 1u, 2u, 4u, 6u, 8u, 12u }) {
+		for (unsigned int callback : { 240u, 480u, 1440u }) {
+			QTest::newRow(qPrintable(QStringLiteral("%1ms-%2samples").arg(packet * 10).arg(callback)))
+				<< packet << callback << false;
+		}
+	}
+	for (unsigned int callback : { 240u, 480u, 1440u }) {
+		QTest::newRow(qPrintable(QStringLiteral("120ms-%1samples-muted").arg(callback)))
+			<< 12u << callback << true;
+	}
+}
+
+void TestSpeechCleanup::receiveOpusPacketsAreStagedAndDrained() {
+	QFETCH(unsigned int, packetFrames);
+	QFETCH(unsigned int, callbackFrames);
+	QFETCH(bool, muted);
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	Global global(directory.filePath(QStringLiteral("receive-test.ini")));
+	ScopedGlobalOverride overrideGlobal(global);
+	global.s.iJitterBufferSize = 0;
+	using Encoder = std::unique_ptr< OpusEncoder, decltype(&opus_encoder_destroy) >;
+	using Decoder = std::unique_ptr< OpusDecoder, decltype(&opus_decoder_destroy) >;
+	using Repacketizer = std::unique_ptr< OpusRepacketizer, decltype(&opus_repacketizer_destroy) >;
+	Encoder encoder(opus_encoder_create(48000, 1, OPUS_APPLICATION_RESTRICTED_LOWDELAY, nullptr), opus_encoder_destroy);
+	Decoder decoder(opus_decoder_create(48000, 2, nullptr), opus_decoder_destroy);
+	Repacketizer repacketizer(opus_repacketizer_create(), opus_repacketizer_destroy);
+	QVERIFY(encoder && decoder && repacketizer);
+	QCOMPARE(opus_encoder_ctl(encoder.get(), OPUS_SET_BITRATE(64000)), OPUS_OK);
+	QCOMPARE(opus_encoder_ctl(encoder.get(), OPUS_SET_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND)), OPUS_OK);
+	QCOMPARE(opus_decoder_ctl(decoder.get(), OPUS_SET_PHASE_INVERSION_DISABLED(1)), OPUS_OK);
+	std::array< std::array< unsigned char, 1275 >, 12 > encoded {};
+	std::array< float, 480 > frame;
+	for (unsigned int index = 0; index < packetFrames; ++index) {
+		for (unsigned int sample = 0; sample < frame.size(); ++sample)
+			frame[sample] = 0.25f * std::sin(static_cast< float >(sample + index * 480) * 0.071f);
+		const int bytes = opus_encode_float(encoder.get(), frame.data(), 480, encoded[index].data(), 1275);
+		QVERIFY(bytes > 0);
+		QCOMPARE(opus_repacketizer_cat(repacketizer.get(), encoded[index].data(), bytes), OPUS_OK);
+	}
+	std::array< unsigned char, 12 * 1275 > packet {};
+	const int bytes = opus_repacketizer_out(repacketizer.get(), packet.data(), static_cast< opus_int32 >(packet.size()));
+	QVERIFY(bytes > 0);
+	std::vector< float > decoded(packetFrames * 480 * 2);
+	QCOMPARE(opus_decode_float(decoder.get(), packet.data(), bytes, decoded.data(), packetFrames * 480, 0),
+		static_cast< int >(packetFrames * 480));
+
+	constexpr unsigned int latency = 960;
+	auto owned = std::make_unique< DelayedReceiveProbe >(latency);
+	auto *probe = owned.get();
+	auto adapter = std::make_unique< ReceiveSpeechCleanupProcessor >(std::move(owned), (callbackFrames + 499) / 480);
+	QVERIFY(adapter->prepareRealtime());
+	ClientUser localUser;
+	ReceiveOutputProbe receiver(callbackFrames, std::move(adapter));
+	if (muted) {
+		localUser.bLocalMute = true;
+		receiver.p = &localUser;
+	}
+	const float *const initialBuffer = receiver.pfBuffer;
+	Mumble::Protocol::AudioData audio;
+	audio.payload = { packet.data(), static_cast< std::size_t >(bytes) };
+	audio.isLastFrame = true;
+	receiver.addFrameToBuffer(audio);
+	std::vector< float > output;
+	bool ended = false;
+	for (unsigned int callback = 0; callback < 40; ++callback) {
+		const unsigned int before = probe->calls;
+		if (!receiver.prepareSampleBuffer(callbackFrames)) {
+			ended = true;
+			break;
+		}
+		QCOMPARE(receiver.pfBuffer, initialBuffer);
+		QVERIFY(probe->calls - before <= (callbackFrames + 499) / 480);
+		output.insert(output.end(), receiver.pfBuffer, receiver.pfBuffer + callbackFrames * 2);
+	}
+	QVERIFY(ended);
+	QVERIFY(receiver.drainCompleted());
+	QCOMPARE(receiver.drainedSamples(), latency);
+	QVERIFY(probe->validFrames);
+	QCOMPARE(probe->calls, packetFrames + latency / 480);
+	const std::size_t expectedEnd = decoded.size() + latency * 2;
+	QVERIFY(output.size() >= expectedEnd);
+	for (std::size_t sample = 0; sample < output.size(); ++sample) {
+		float expected = 0.0f;
+		if (!muted && sample >= latency * 2 && sample < expectedEnd) {
+			expected = decoded[sample - latency * 2] * 0.5f;
+			if (sample >= expectedEnd - 960) {
+				const unsigned int fadeIndex = static_cast< unsigned int >((sample - (expectedEnd - 960)) / 2);
+				expected *= std::sin(static_cast< float >(479 - fadeIndex) * static_cast< float >(M_PI / 960.0));
+			}
+		}
+		QVERIFY2(std::fabs(output[sample] - expected) < 1.0e-6f,
+			qPrintable(QStringLiteral("Receive timeline mismatch at stereo sample %1").arg(sample)));
+	}
+}
+
+void TestSpeechCleanup::receiveMuteTransitionAdvancesCleanupTimeline_data() {
+	QTest::addColumn< bool >("failWhileMuted");
+	QTest::newRow("wet") << false;
+	QTest::newRow("dry-fallback") << true;
+}
+
+void TestSpeechCleanup::receiveMuteTransitionAdvancesCleanupTimeline() {
+	QFETCH(bool, failWhileMuted);
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	Global global(directory.filePath(QStringLiteral("receive-mute-test.ini")));
+	ScopedGlobalOverride overrideGlobal(global);
+	auto owned = std::make_unique< DelayedReceiveProbe >(960);
+	auto *probe = owned.get();
+	if (failWhileMuted) probe->failAtCall = 4;
+	auto adapter = std::make_unique< ReceiveSpeechCleanupProcessor >(std::move(owned), 2);
+	QVERIFY(adapter->prepareRealtime());
+	ClientUser localUser;
+	ReceiveOutputProbe receiver(480, std::move(adapter));
+	receiver.p = &localUser;
+	receiver.queueDecodedMarkerPacket();
+	unsigned int playedFrames = 0;
+	for (; playedFrames < 20; ++playedFrames) {
+		// Five muted callbacks exceed the two-frame cleanup latency. The first
+		// callback has one lookahead frame, so admitted source frames 3..7 are muted.
+		localUser.bLocalMute = playedFrames >= 2 && playedFrames < 7;
+		if (!receiver.prepareSampleBuffer(480)) break;
+		for (unsigned int sample = 0; sample < 480; ++sample) {
+			float expected = 0.0f;
+			if (!localUser.bLocalMute && playedFrames >= 2) {
+				const unsigned int sourceFrame = playedFrames - 2;
+				if (sourceFrame < 12 && !(sourceFrame >= 3 && sourceFrame <= 7)) {
+					expected = static_cast< float >(sourceFrame + 1) * 0.05f * (failWhileMuted ? 1.0f : 0.5f);
+					if (playedFrames == 13)
+						expected *= std::sin(static_cast< float >(479 - sample) * static_cast< float >(M_PI / 960.0));
+				}
+			}
+			// AudioOutput::prepareOutputBuffers excludes locally muted users from
+			// mixing, including already-prefetched samples from the preceding callback.
+			for (unsigned int channel = 0; channel < 2; ++channel) {
+				const float rendered = localUser.bLocalMute ? 0.0f : receiver.pfBuffer[2 * sample + channel];
+				QVERIFY2(std::fabs(rendered - expected) < 1.0e-6f,
+					qPrintable(QStringLiteral("Mute transition replayed stale audio at frame %1 sample %2")
+						.arg(playedFrames).arg(sample)));
+			}
+		}
+	}
+	QCOMPARE(playedFrames, 14u);
+	QVERIFY(receiver.drainCompleted());
+	QCOMPARE(receiver.drainedSamples(), 960u);
+	QCOMPARE(probe->calls, failWhileMuted ? 4u : 14u);
 }
 
 void TestSpeechCleanup::windowsDelayLoadsNeuralRuntimesOnFirstUse() {

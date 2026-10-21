@@ -18,7 +18,7 @@ public:
 		connect(m_timer, &QTimer::timeout, this, &ScreenShareNativeFrameReader::poll);
 	}
 public slots:
-	void configure(const QString &key, const quint64 generation) {
+	void configure(const QString &key, const quint64 generation, const quint64 configuration) {
 		m_timer->stop();
 		m_transport.detach();
 		m_pendingFrame = {};
@@ -26,9 +26,10 @@ public slots:
 		m_inFlightGeneration = 0;
 		m_inFlightSequence = 0;
 		m_generation = generation;
+		m_configuration = configuration;
 		const bool active = !key.trimmed().isEmpty() && m_transport.attach(key);
 		if (active) m_timer->start();
-		emit activeChanged(active);
+		emit activeChanged(configuration, generation, active);
 	}
 	void shutdown() {
 		m_timer->stop();
@@ -47,16 +48,17 @@ public slots:
 		m_pendingFrame = std::move(frame);
 		deliverPendingFrame();
 	}
-	void acknowledgeFrame(const quint64 generation, const quint64 sequence) {
-		if (!m_deliveryPending || generation != m_inFlightGeneration || sequence != m_inFlightSequence) return;
+	void acknowledgeFrame(const quint64 configuration, const quint64 generation, const quint64 sequence) {
+		if (configuration != m_configuration || !m_deliveryPending
+			|| generation != m_inFlightGeneration || sequence != m_inFlightSequence) return;
 		m_deliveryPending = false;
 		m_inFlightGeneration = 0;
 		m_inFlightSequence = 0;
 		deliverPendingFrame();
 	}
 signals:
-	void activeChanged(bool active);
-	void frameReady(const QImage &frame, quint64 generation, quint64 sequence, qint64 timestampUsec);
+	void activeChanged(quint64 configuration, quint64 generation, bool active);
+	void frameReady(const QImage &frame, quint64 configuration, quint64 generation, quint64 sequence);
 private:
 	void deliverPendingFrame() {
 		if (m_deliveryPending || m_pendingFrame.bgra.isEmpty()) return;
@@ -70,12 +72,13 @@ private:
 		m_deliveryPending = true;
 		m_inFlightGeneration = frame.generation;
 		m_inFlightSequence = frame.sequence;
-		emit frameReady(wrapped, frame.generation, frame.sequence, frame.timestampUsec);
+		emit frameReady(wrapped, m_configuration, frame.generation, frame.sequence);
 	}
 	QTimer *m_timer;
 	Mumble::ScreenShare::FrameTransport m_transport;
 	Mumble::ScreenShare::NativeFrame m_pendingFrame;
 	quint64 m_generation = 0;
+	quint64 m_configuration = 0;
 	quint64 m_inFlightGeneration = 0;
 	quint64 m_inFlightSequence = 0;
 	bool m_deliveryPending = false;
@@ -223,6 +226,9 @@ ScreenShareViewBackend::ScreenShareViewBackend(const ScreenShareSession &session
 	m_audioDispatchTimer = new QTimer(this);
 	m_audioDispatchTimer->setSingleShot(true);
 	connect(m_audioDispatchTimer, &QTimer::timeout, this, &ScreenShareViewBackend::dispatchAudioControls);
+	m_frameFreshnessTimer = new QTimer(this);
+	m_frameFreshnessTimer->setInterval(250);
+	connect(m_frameFreshnessTimer, &QTimer::timeout, this, &ScreenShareViewBackend::checkNativeFrameFreshness);
 #ifdef Q_OS_WIN
 	// Windows Core Audio session discovery can enumerate every active endpoint
 	// and session. Keep it entirely off the GUI thread, and only ever queue the
@@ -246,26 +252,27 @@ ScreenShareViewBackend::ScreenShareViewBackend(const ScreenShareSession &session
 	m_frameReader->moveToThread(m_frameThread);
 	connect(m_frameThread, &QThread::finished, m_frameReader, &QObject::deleteLater);
 	connect(m_frameThread, &QThread::finished, m_frameThread, &QObject::deleteLater);
-	connect(m_frameReader, &ScreenShareNativeFrameReader::activeChanged, this, [this](const bool active) {
-		if (active && !m_acceptNativeFrames) return;
-		if (m_nativeFrameActive == active) return;
-		m_nativeFrameActive = active;
-		emit nativeFrameActiveChanged();
-		setStatus(active ? tr("Connecting to the native Qt Quick video surface...")
-						 : tr("The native frame transport is unavailable; using the external viewer fallback."));
-	});
+	connect(m_frameReader, &ScreenShareNativeFrameReader::activeChanged, this,
+		&ScreenShareViewBackend::handleNativeFrameTransportActive);
 	connect(m_frameReader, &ScreenShareNativeFrameReader::frameReady, this,
-			[this](const QImage &frame, const quint64 generation, const quint64 sequence, qint64) {
+			[this](const QImage &frame, const quint64 configuration, const quint64 generation, const quint64 sequence) {
 				// A frame can already be queued for delivery when the GUI thread
 				// pauses or replaces the transport. Pause intentionally retains the
 				// last frame and transport identity, but must not advance presentation.
-				if (m_acceptNativeFrames && !m_paused && generation == m_nativeFrameGeneration) {
-					m_currentFrame = frame;
-					emit frameChanged();
-					setStatus(tr("Live via native Qt Quick frame transport."));
+				if (m_acceptNativeFrames && configuration == m_nativeFrameConfiguration
+					&& generation == m_nativeFrameGeneration && sequence > m_nativeFrameSequence) {
+					m_nativeFrameSequence = sequence;
+					if (!m_paused) {
+						m_nativeFrameFreshness.restart();
+						setNativeFrameStalled(false);
+						m_currentFrame = frame;
+						emit frameChanged();
+						if (m_operationStatus == QStringLiteral("ready"))
+							setStatus(tr("Live via native Qt Quick frame transport."));
+					}
 				}
 				QMetaObject::invokeMethod(m_frameReader, "acknowledgeFrame", Qt::QueuedConnection,
-								  Q_ARG(quint64, generation), Q_ARG(quint64, sequence));
+								  Q_ARG(quint64, configuration), Q_ARG(quint64, generation), Q_ARG(quint64, sequence));
 			});
 	m_frameThread->start();
 }
@@ -300,6 +307,7 @@ QString ScreenShareViewBackend::detail() const {
 }
 QString ScreenShareViewBackend::status() const { return m_status; }
 bool ScreenShareViewBackend::paused() const { return m_paused; }
+bool ScreenShareViewBackend::detached() const { return m_detached; }
 bool ScreenShareViewBackend::audioMuted() const { return m_audioMuted; }
 bool ScreenShareViewBackend::audioAvailable() const { return m_session.captureAudio; }
 int ScreenShareViewBackend::audioVolume() const { return m_audioVolume; }
@@ -317,8 +325,14 @@ QString ScreenShareViewBackend::nativeFrameTransportBlocker() const {
 bool ScreenShareViewBackend::nativeFrameActive() const { return m_nativeFrameActive; }
 QImage ScreenShareViewBackend::currentFrame() const { return m_currentFrame; }
 bool ScreenShareViewBackend::hasCurrentFrame() const { return !m_currentFrame.isNull(); }
-QString ScreenShareViewBackend::operationStatus() const { return m_operationStatus; }
-QString ScreenShareViewBackend::operationError() const { return m_operationError; }
+QString ScreenShareViewBackend::operationStatus() const {
+	return m_nativeFrameStalled ? QStringLiteral("stalled") : m_operationStatus;
+}
+QString ScreenShareViewBackend::operationError() const {
+	return m_nativeFrameStalled
+		? tr("No new video frames have arrived for 5 seconds. Playback will resume automatically when frames return.")
+		: m_operationError;
+}
 bool ScreenShareViewBackend::operationCancellable() const { return m_operationCancellable; }
 
 void ScreenShareViewBackend::setOperationState(const QString &status, const QString &error, const bool cancellable) {
@@ -326,16 +340,76 @@ void ScreenShareViewBackend::setOperationState(const QString &status, const QStr
 	m_operationStatus = status;
 	m_operationError = error;
 	m_operationCancellable = cancellable;
+	resetNativeFrameFreshness();
+	if (status == QStringLiteral("error"))
+		setStatus(error.isEmpty() ? tr("The viewer is unavailable.") : error);
 	emit operationStateChanged();
 }
 
 void ScreenShareViewBackend::setNativeFrameTransport(const QString &sharedMemoryKey, const quint64 generation) {
+	++m_nativeFrameConfiguration;
 	m_acceptNativeFrames = !sharedMemoryKey.trimmed().isEmpty();
 	m_nativeFrameGeneration = m_acceptNativeFrames ? generation : 0;
+	m_nativeFrameSequence = 0;
+	if (m_nativeFrameActive) {
+		m_nativeFrameActive = false;
+		emit nativeFrameActiveChanged();
+	}
+	resetNativeFrameFreshness();
 	m_currentFrame = {};
 	emit frameChanged();
 	QMetaObject::invokeMethod(m_frameReader, "configure", Qt::QueuedConnection, Q_ARG(QString, sharedMemoryKey),
-						  Q_ARG(quint64, generation));
+						  Q_ARG(quint64, m_nativeFrameGeneration), Q_ARG(quint64, m_nativeFrameConfiguration));
+}
+
+void ScreenShareViewBackend::handleNativeFrameTransportActive(const quint64 configuration,
+															const quint64 generation, const bool active) {
+	if (configuration != m_nativeFrameConfiguration || generation != m_nativeFrameGeneration) return;
+	if (active && !m_acceptNativeFrames) return;
+	if (m_nativeFrameActive != active) {
+		m_nativeFrameActive = active;
+		emit nativeFrameActiveChanged();
+	}
+	resetNativeFrameFreshness();
+	setStatus(m_paused ? tr("Paused locally. The receiver remains connected on the current frame.")
+		: active ? tr("Connecting to the native Qt Quick video surface...")
+				 : tr("The native frame transport is unavailable; using the external viewer fallback."));
+}
+
+void ScreenShareViewBackend::resetNativeFrameFreshness() {
+	m_frameFreshnessTimer->stop();
+	m_nativeFrameFreshness.invalidate();
+	setNativeFrameStalled(false);
+	if (m_acceptNativeFrames && m_nativeFrameActive && !m_paused
+		&& m_operationStatus == QStringLiteral("ready")) {
+		m_nativeFrameFreshness.start();
+		m_frameFreshnessTimer->start();
+	}
+}
+
+void ScreenShareViewBackend::checkNativeFrameFreshness() {
+	if (!m_acceptNativeFrames || !m_nativeFrameActive || m_paused
+		|| m_operationStatus != QStringLiteral("ready") || !m_nativeFrameFreshness.isValid()) return;
+	// FrameTransport increments sequence on every published frame, including
+	// identical pixel content. A static desktop is therefore still live.
+	if (m_nativeFrameFreshness.elapsed() >= 5000) {
+		setNativeFrameStalled(true);
+	}
+}
+
+void ScreenShareViewBackend::setNativeFrameStalled(const bool stalled) {
+	if (m_nativeFrameStalled == stalled) return;
+	m_nativeFrameStalled = stalled;
+	if (stalled) {
+		setStatus(operationError());
+	}
+	emit operationStateChanged();
+}
+
+void ScreenShareViewBackend::setDetached(const bool detached) {
+	if (m_detached == detached) return;
+	m_detached = detached;
+	emit detachedChanged();
 }
 
 #if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -396,6 +470,7 @@ void ScreenShareViewBackend::setProcessId(const qint64 processId) {
 void ScreenShareViewBackend::setPaused(const bool paused) {
 	if (m_paused == paused) return;
 	m_paused = paused;
+	resetNativeFrameFreshness();
 	if (paused) {
 		setStatus(tr("Paused locally. The receiver remains connected on the current frame."));
 	} else if (m_nativeFrameActive && hasCurrentFrame()) {
@@ -441,6 +516,9 @@ void ScreenShareViewBackend::setAudioVolume(const int percent) {
 void ScreenShareViewBackend::requestRetry() { emit retryRequested(streamId()); }
 void ScreenShareViewBackend::requestStop() { emit stopRequested(streamId()); }
 void ScreenShareViewBackend::requestClose() { emit closeRequested(streamId()); }
+void ScreenShareViewBackend::requestDetach() { emit detachRequested(streamId()); }
+void ScreenShareViewBackend::requestDock() { emit dockRequested(streamId()); }
+void ScreenShareViewBackend::requestFullscreen() { emit fullscreenRequested(streamId()); }
 
 void ScreenShareViewBackend::pollForVideoWindow() {
 #ifdef Q_OS_WIN

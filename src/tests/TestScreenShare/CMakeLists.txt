@@ -19,3 +19,4 @@ if(TARGET mumble-screen-share-macos-capture)
 endif()
 
 add_test(NAME TestScreenShare COMMAND $<TARGET_FILE:TestScreenShare>)
+configure_client_test_runtime(TestScreenShare TestScreenShare)

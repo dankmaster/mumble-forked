@@ -9,6 +9,7 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <functional>
 
 class QObject;
 class QProcess;
@@ -93,7 +94,9 @@ public:
 };
 
 	struct LaunchResult {
-		bool started  = false;
+		// A prepared process has not been started. Its owner must connect signals first.
+		bool prepared = false;
+		bool hasNextAttempt = false;
 		bool usedStub = false;
 		QString errorMessage;
 		QString executionMode;
@@ -108,12 +111,13 @@ public:
 		bool nativeFrameFeed = false;
 		quint32 nativeFrameWidth = 0;
 		quint32 nativeFrameHeight = 0;
+		std::function< bool(QString *) > onStarted;
 	};
 
 	static RuntimeSupport probeRuntimeSupport(bool refresh = false);
 	static QJsonObject runtimeSupportToJson(const RuntimeSupport &support);
-	static LaunchResult startPublish(const QJsonObject &plan, QObject *parent = nullptr);
-	static LaunchResult startView(const QJsonObject &plan, QObject *parent = nullptr);
+	static LaunchResult preparePublish(const QJsonObject &plan, QObject *parent = nullptr);
+	static LaunchResult prepareView(const QJsonObject &plan, QObject *parent = nullptr);
 	static void stop(QProcess *process, int timeoutMsec = 2000);
 };
 

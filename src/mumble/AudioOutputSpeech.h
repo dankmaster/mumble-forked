@@ -9,7 +9,6 @@
 #include <speex/speex_jitter.h>
 #include <speex/speex_resampler.h>
 
-#include <QtCore/QFuture>
 #include <QtCore/QMutex>
 
 #include "AudioOutputBuffer.h"
@@ -65,9 +64,16 @@ protected:
 	QList< QByteArray > qlFrames;
 
 	std::unique_ptr< SpeechCleanupProcessor > m_remoteSpeechCleanup;
-	QFuture< std::unique_ptr< SpeechCleanupProcessor > > m_remoteSpeechCleanupPreparation;
+	std::unique_ptr< SpeechCleanupPreparation > m_remoteSpeechCleanupPreparation;
 	Mumble::SpeechCleanup::Selection m_remoteSpeechCleanupSelection = {};
 	std::array< float, 5760 > m_remoteSpeechCleanupMonoBuffer = {};
+	// Decode complete Opus packets once, then admit 10 ms blocks only as the
+	// mixer consumes them. Never burst 120 ms through a realtime worker at once.
+	std::array< float, 5760 * 2 > m_pendingDecodedPacket = {};
+	unsigned int m_pendingDecodedSamples = 0;
+	unsigned int m_pendingDecodedOffset = 0;
+	bool m_pendingDecodedTerminator = false;
+	bool m_remoteSpeechCleanupFrameStaging = false;
 	bool m_remoteSpeechCleanupRequested = false;
 	bool m_remoteSpeechCleanupActive = false;
 	bool m_remoteSpeechCleanupWasApplied = false;

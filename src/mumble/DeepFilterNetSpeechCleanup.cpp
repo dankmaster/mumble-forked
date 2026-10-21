@@ -190,7 +190,7 @@ public:
 #endif
 	}
 
-	bool prepareRealtime() {
+	bool prepareRealtime(unsigned int delayFrames = DeepFilterNetRealtimeWorker::schedulingDelayFrames) {
 #ifdef USE_DEEPFILTERNET
 		if (!m_ready || !m_state || !m_processFrameV2
 			|| m_frameLength != DeepFilterNetRealtimeWorker::frameSamples) {
@@ -198,16 +198,20 @@ public:
 			return false;
 		}
 
-		m_latencySamples = m_realtimeLatencySamples;
+		if (delayFrames < DeepFilterNetRealtimeWorker::schedulingDelayFrames
+			|| delayFrames > DeepFilterNetRealtimeWorker::maximumSchedulingDelayFrames) return false;
+		m_latencySamples = m_realtimeLatencySamples - DeepFilterNetRealtimeWorker::schedulingDelaySamples
+			+ delayFrames * DeepFilterNetRealtimeWorker::frameSamples;
 		m_dryDelay.assign(m_latencySamples, 0.0f);
 		m_dryDelayPosition = 0;
 		m_realtimeOutputFrame.fill(0.0f);
-		m_realtimePrepared = m_realtimeWorker.start(this, &Implementation::processRealtimeFrame);
+		m_realtimePrepared = m_realtimeWorker.start(this, &Implementation::processRealtimeFrame, delayFrames);
 		if (!m_realtimePrepared) {
 			m_ready = false;
 		}
 		return m_realtimePrepared;
 #else
+		(void) delayFrames;
 		return false;
 #endif
 	}
@@ -317,7 +321,7 @@ public:
 	}
 
 	unsigned int workerSchedulingDelayFrames() const noexcept {
-		return m_realtimePrepared ? DeepFilterNetRealtimeWorker::schedulingDelayFrames : 0;
+		return m_realtimePrepared ? m_realtimeWorker.configuredDelayFrames() : 0;
 	}
 
 	unsigned int workerSchedulingSlackFrames() const noexcept {
@@ -512,6 +516,14 @@ void DeepFilterNetSpeechCleanup::reset() {
 
 bool DeepFilterNetSpeechCleanup::prepareRealtime() {
 	return m_impl && m_impl->prepareRealtime();
+}
+
+bool DeepFilterNetSpeechCleanup::prepareRealtimeForReceive(unsigned int maximumBurstFrames) {
+	// The first callback may fill its complete device buffer plus interaural
+	// lookahead without yielding. Reserve one more frame beyond that burst.
+	if (maximumBurstFrames >= DeepFilterNetRealtimeWorker::maximumSchedulingDelayFrames) return false;
+	return m_impl && m_impl->prepareRealtime(std::max(DeepFilterNetRealtimeWorker::schedulingDelayFrames,
+		maximumBurstFrames + 1));
 }
 
 bool DeepFilterNetSpeechCleanup::prepareOfflineFrame() noexcept {

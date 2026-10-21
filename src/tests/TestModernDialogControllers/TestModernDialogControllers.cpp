@@ -10,6 +10,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLockFile>
+#include <QtCore/QUuid>
 #include <QtTest>
 
 #include <algorithm>
@@ -31,6 +32,9 @@
 #include "GlobalShortcutTypes.h"
 #include "Log.h"
 #include "MainWindow.h"
+#include "ScreenShareFrameTransport.h"
+#include "ScreenShareViewBackend.h"
+#include "SpeechCleanup.h"
 #include "VoiceActivationDebugCapture.h"
 #if defined(Q_OS_WIN) && defined(USE_WASAPI)
 #	include "WASAPIDeviceRouting.h"
@@ -159,6 +163,9 @@ private slots:
 	void connectControllerPublishesVisualContract();
 	void productCertificateDialogUsesProductionContract();
 	void productScreenShareEditorUsesProductionContract();
+	void screenShareBackendDockingRequestsPreservePlayback();
+	void screenShareBackendIgnoresSupersededTransportNotifications();
+	void screenShareBackendDetectsStallAndRecoversFromIdenticalFrames();
 	void settingsControllerForcesModernAndAppliesDraft();
 	void settingsControllerPublishesLiveStonksAndPermissionGatedAdministration();
 	void settingsControllerPublishesPermissionAwareMotdEditor();
@@ -229,6 +236,132 @@ private slots:
 	void directHistoryRegisteredZeroAndUnregisteredIdentityRemainDistinct();
 	void directHistoryNewUnregisteredSessionDoesNotInheritPrivateMessages();
 };
+
+void TestModernDialogControllers::screenShareBackendDockingRequestsPreservePlayback() {
+	ScreenShareSession session;
+	session.streamID = QStringLiteral("dock-stream");
+	ScreenShareViewBackend backend(session);
+	QSignalSpy detachedSpy(&backend, &ScreenShareViewBackend::detachedChanged);
+	QSignalSpy detachSpy(&backend, &ScreenShareViewBackend::detachRequested);
+	QSignalSpy dockSpy(&backend, &ScreenShareViewBackend::dockRequested);
+	QSignalSpy fullscreenSpy(&backend, &ScreenShareViewBackend::fullscreenRequested);
+	QSignalSpy closeSpy(&backend, &ScreenShareViewBackend::closeRequested);
+	QSignalSpy stopSpy(&backend, &ScreenShareViewBackend::stopRequested);
+	QSignalSpy pauseSpy(&backend, &ScreenShareViewBackend::pauseToggled);
+	backend.setAudioVolume(37);
+	backend.setAudioMuted(true);
+
+	QVERIFY(!backend.detached());
+	backend.requestDetach();
+	QVERIFY(!backend.detached()); // The manager owns the surface transition.
+	backend.setDetached(true);
+	backend.setDetached(true);
+	QCOMPARE(detachedSpy.count(), 1);
+	backend.requestDock();
+	backend.setDetached(false);
+	backend.requestFullscreen();
+	backend.requestClose();
+	QCOMPARE(detachSpy.count(), 1);
+	QCOMPARE(dockSpy.count(), 1);
+	QCOMPARE(fullscreenSpy.count(), 1);
+	QCOMPARE(closeSpy.count(), 1);
+	for (const QSignalSpy *spy : { &detachSpy, &dockSpy, &fullscreenSpy, &closeSpy }) {
+		QCOMPARE(spy->constFirst().constFirst().toString(), session.streamID);
+	}
+	QCOMPARE(detachedSpy.count(), 2);
+	QCOMPARE(stopSpy.count(), 0);
+	QCOMPARE(pauseSpy.count(), 0);
+	QCOMPARE(backend.audioVolume(), 37);
+	QVERIFY(backend.audioMuted());
+}
+
+void TestModernDialogControllers::screenShareBackendIgnoresSupersededTransportNotifications() {
+	const QString key = QStringLiteral("mumble-backend-generation-%1")
+		.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+	Mumble::ScreenShare::FrameTransport producer;
+	QVERIFY(producer.create(key, 64));
+	ScreenShareViewBackend backend(ScreenShareSession {});
+	backend.setNativeFrameTransport(key, 7);
+	QTRY_VERIFY(backend.nativeFrameActive());
+
+	// Even reusing the same transport generation is a new local configuration.
+	backend.setNativeFrameTransport(key, 7);
+	QVERIFY(!backend.nativeFrameActive());
+	QVERIFY(QMetaObject::invokeMethod(&backend, "handleNativeFrameTransportActive", Qt::DirectConnection,
+		Q_ARG(quint64, 1), Q_ARG(quint64, 7), Q_ARG(bool, true)));
+	QVERIFY(!backend.nativeFrameActive());
+	QTRY_VERIFY(backend.nativeFrameActive());
+	QVERIFY(QMetaObject::invokeMethod(&backend, "handleNativeFrameTransportActive", Qt::DirectConnection,
+		Q_ARG(quint64, 1), Q_ARG(quint64, 7), Q_ARG(bool, false)));
+	QVERIFY(backend.nativeFrameActive());
+
+	backend.setNativeFrameTransport({}, 0);
+	QVERIFY(!backend.nativeFrameActive());
+	QVERIFY(QMetaObject::invokeMethod(&backend, "handleNativeFrameTransportActive", Qt::DirectConnection,
+		Q_ARG(quint64, 2), Q_ARG(quint64, 7), Q_ARG(bool, true)));
+	QVERIFY(!backend.nativeFrameActive());
+}
+
+void TestModernDialogControllers::screenShareBackendDetectsStallAndRecoversFromIdenticalFrames() {
+	const QString key = QStringLiteral("mumble-backend-freshness-%1")
+		.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+	Mumble::ScreenShare::FrameTransport producer;
+	QVERIFY(producer.create(key, 64));
+	ScreenShareViewBackend backend(ScreenShareSession {});
+	backend.setOperationState(QStringLiteral("ready"), {}, false);
+	backend.setNativeFrameTransport(key, 11);
+	QTRY_VERIFY(backend.nativeFrameActive());
+	Mumble::ScreenShare::NativeFrame frame;
+	frame.generation = 11;
+	frame.width      = 2;
+	frame.height     = 2;
+	frame.stride     = 8;
+	frame.sequence   = 1;
+	frame.bgra       = QByteArray(16, '\xff');
+	QVERIFY(producer.publish(frame));
+	QTRY_VERIFY(backend.hasCurrentFrame());
+	const QImage original = backend.currentFrame();
+	QSignalSpy frameSpy(&backend, &ScreenShareViewBackend::frameChanged);
+
+	// Publish identical pixels for longer than the freshness deadline. The
+	// transport sequence, not an image-content comparison, proves liveness.
+	QElapsedTimer publishing;
+	publishing.start();
+	while (publishing.elapsed() < 5500) {
+		QVERIFY(producer.publish(frame));
+		QTest::qWait(100);
+		QCOMPARE(backend.operationStatus(), QStringLiteral("ready"));
+	}
+	QVERIFY(frameSpy.count() > 10);
+	QCOMPARE(backend.currentFrame(), original);
+	QTRY_COMPARE_WITH_TIMEOUT(backend.operationStatus(), QStringLiteral("stalled"), 7000);
+	QVERIFY(!backend.operationError().isEmpty());
+	QCOMPARE(backend.status(), backend.operationError());
+	QCOMPARE(backend.currentFrame(), original);
+
+	QVERIFY(producer.publish(frame));
+	QTRY_COMPARE(backend.operationStatus(), QStringLiteral("ready"));
+	QVERIFY(backend.operationError().isEmpty());
+	QCOMPARE(backend.currentFrame(), original);
+
+	backend.setPaused(true);
+	QTest::qWait(5500);
+	QCOMPARE(backend.operationStatus(), QStringLiteral("ready"));
+	backend.setPaused(false);
+	QTest::qWait(350); // Resume must not inherit the expired pre-pause clock.
+	QCOMPARE(backend.operationStatus(), QStringLiteral("ready"));
+
+	// A manager-owned failure remains authoritative even if a late frame arrives.
+	backend.setOperationState(QStringLiteral("error"), QStringLiteral("receiver stopped"), false);
+	QVERIFY(producer.publish(frame));
+	QTest::qWait(100);
+	QCOMPARE(backend.operationStatus(), QStringLiteral("error"));
+	QCOMPARE(backend.operationError(), QStringLiteral("receiver stopped"));
+	QCOMPARE(backend.status(), QStringLiteral("receiver stopped"));
+	backend.setNativeFrameTransport({}, 0);
+	QVERIFY(!backend.nativeFrameActive());
+	QVERIFY(!backend.hasCurrentFrame());
+}
 
 void TestModernDialogControllers::productCertificateDialogUsesProductionContract() {
 	Mumble::ModernProductDialogs::CertificateDialogInput input;
@@ -2395,6 +2528,10 @@ void TestModernDialogControllers::settingsControllerPreservedLegacyOverrideBypas
 void TestModernDialogControllers::settingsControllerStoresAdvancedLegacyOverrideOnCurrentMicrophone() {
 	using namespace Mumble::InputEnhancement;
 	ScopedGlobalOverride noGlobal(nullptr);
+	const auto backend = Mumble::SpeechCleanup::isBackendAvailable(::Settings::DTLNBackend)
+		? ::Settings::DTLNBackend : Mumble::SpeechCleanup::fallbackBackend();
+	const QString modelID = backend == ::Settings::DTLNBackend ? QStringLiteral("dtln:norm40h")
+		: QString::fromLatin1(Mumble::SpeechCleanup::defaultModelId(backend));
 	DraftInputRegistrar registrar;
 	::Settings settings;
 	settings.qsAudioInput = registrar.name;
@@ -2410,8 +2547,8 @@ void TestModernDialogControllers::settingsControllerStoresAdvancedLegacyOverride
 	controller.updateField(QStringLiteral("audio.noiseCancelMode"),
 								   static_cast< int >(::Settings::NoiseCancelRNN));
 	controller.updateField(QStringLiteral("audio.noiseCancelBackend"),
-								   static_cast< int >(::Settings::DTLNBackend));
-	controller.updateField(QStringLiteral("audio.noiseCancelModel"), QStringLiteral("dtln:norm40h"));
+								   static_cast< int >(backend));
+	controller.updateField(QStringLiteral("audio.noiseCancelModel"), modelID);
 	controller.updateField(QStringLiteral("audio.speexNoiseStrength"), 67);
 	const ModernSettingsController::ActionResult result =
 		controller.invokeAction(QStringLiteral("ok"), QVariantMap());
@@ -2422,8 +2559,8 @@ void TestModernDialogControllers::settingsControllerStoresAdvancedLegacyOverride
 	QVERIFY(saved);
 	QVERIFY(saved->legacyOverride.has_value());
 	QCOMPARE(saved->legacyOverride->noiseCancelMode, static_cast< int >(::Settings::NoiseCancelRNN));
-	QCOMPARE(saved->legacyOverride->backend, static_cast< int >(::Settings::DTLNBackend));
-	QCOMPARE(saved->legacyOverride->modelId, QStringLiteral("dtln:norm40h"));
+	QCOMPARE(saved->legacyOverride->backend, static_cast< int >(backend));
+	QCOMPARE(saved->legacyOverride->modelId, modelID);
 	QCOMPARE(saved->legacyOverride->speexNoiseCancelStrength, -67);
 	QVERIFY(!saved->pendingValidation);
 	QVERIFY(!result.settingsToApply->inputEnhancement.legacyOverride.has_value());

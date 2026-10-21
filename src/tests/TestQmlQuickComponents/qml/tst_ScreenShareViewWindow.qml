@@ -19,6 +19,7 @@ TestCase {
 		property string status: "The live viewer is ready."
 		property string operationStatus: "ready"
 		property string operationError: ""
+		property bool detached: true
 		property bool paused: false
 		property bool audioAvailable: true
 		property bool audioMuted: false
@@ -34,6 +35,8 @@ TestCase {
 		property int stopCalls: 0
 		property int retryCalls: 0
 		property int closeCalls: 0
+		property int dockCalls: 0
+		property int detachCalls: 0
 
 		function setPaused(value) { pauseCalls += 1; paused = value }
 		function setAudioMuted(value) { muteCalls += 1; audioMuted = value }
@@ -41,6 +44,8 @@ TestCase {
 		function requestStop() { stopCalls += 1 }
 		function requestRetry() { retryCalls += 1 }
 		function requestClose() { closeCalls += 1 }
+		function requestDock() { dockCalls += 1; detached = false }
+		function requestDetach() { detachCalls += 1; detached = true }
 	}
 
 	function init() {
@@ -51,6 +56,7 @@ TestCase {
 		shareBackend.status = "The live viewer is ready."
 		shareBackend.operationStatus = "ready"
 		shareBackend.operationError = ""
+		shareBackend.detached = true
 		shareBackend.paused = false
 		shareBackend.audioAvailable = true
 		shareBackend.audioMuted = false
@@ -66,6 +72,8 @@ TestCase {
 		shareBackend.stopCalls = 0
 		shareBackend.retryCalls = 0
 		shareBackend.closeCalls = 0
+		shareBackend.dockCalls = 0
+		shareBackend.detachCalls = 0
 	}
 
 	function test_window_and_header_keep_sharer_and_room_identity() {
@@ -120,6 +128,7 @@ TestCase {
 
 	function verifyInside(item, container, label) {
 		verify(item !== null, label + " exists")
+		verify(item.width > 0 && item.height > 0, label + " has a pointer target")
 		const origin = item.mapToItem(container, 0, 0)
 		verify(origin.x >= -0.5, label + " starts inside the header")
 		verify(origin.y >= -0.5, label + " starts inside the header")
@@ -144,7 +153,7 @@ TestCase {
 		const closeOrigin = close.mapToItem(header, 0, 0)
 		verify(Math.abs(pauseOrigin.y - closeOrigin.y) <= 0.5,
 			"Close viewer stays in the same deliberate action row as Pause")
-		compare(close.Accessible.name, "Close viewer")
+		compare(close.Accessible.name, "Stop viewing")
 		compare(pause.iconName, shareBackend.paused ? "play" : "pause")
 		compare(mute.iconName, shareBackend.audioMuted ? "volume-off" : "volume")
 		compare(fullscreen.iconName, "fullscreen")
@@ -209,31 +218,83 @@ TestCase {
 		viewer.destroy()
 	}
 
-	function test_fullscreen_is_video_only_without_persistent_chrome() {
+	function test_fullscreen_keeps_visible_exit_and_stop_controls() {
 		shareBackend.nativeFrameActive = true
 		shareBackend.hasCurrentFrame = true
 		const viewer = createViewer(1120, 720)
 		const header = findChild(viewer.contentItem, "screenShareViewerHeader")
 		const canvas = findChild(viewer.contentItem, "screenShareCanvas")
-		const audioStatus = findChild(viewer.contentItem, "screenShareAudioControlStatus")
-		verify(header !== null && canvas !== null && audioStatus !== null)
-
+		const exit = findChild(viewer.contentItem, "screenShareFullscreenButton")
+		const stop = findChild(viewer.contentItem, "screenShareCloseButton")
 		viewer.setFullscreen(true)
 		tryCompare(viewer, "fullscreen", true)
-		tryCompare(header, "visible", false)
-		verify(!audioStatus.visible)
-		tryVerify(function() {
-			const canvasOrigin = canvas.mapToItem(viewer.contentItem, 0, 0)
-			return Math.abs(canvasOrigin.x) <= 0.5 && Math.abs(canvasOrigin.y) <= 0.5
-				&& Math.abs(canvas.width - viewer.contentItem.width) <= 0.5
-				&& Math.abs(canvas.height - viewer.contentItem.height) <= 0.5
-		}, 5000, "fullscreen layout settles to the complete content area")
-		verify(findChild(viewer.contentItem, "screenShareLiveBadge") === null)
-
-		viewer.setFullscreen(false)
+		verify(header.visible)
+		verify(exit.visible && stop.visible)
+		compare(exit.Accessible.name, "Exit full screen")
+		compare(exit.iconName, "fullscreen-exit")
+		verifyInside(exit, header, "exit full screen")
+		verifyInside(stop, header, "stop viewing")
+		verify(canvas.height > viewer.height * 0.8)
+		mouseClick(stop)
+		compare(shareBackend.stopCalls, 1)
+		mouseClick(exit)
 		tryCompare(viewer, "fullscreen", false)
-		tryCompare(header, "visible", true)
-		compare(findChild(viewer.contentItem, "screenShareFullscreenButton").iconName, "fullscreen")
+		compare(exit.iconName, "fullscreen")
+		viewer.destroy()
+	}
+
+	function test_fullscreen_error_keeps_exit_and_recovery_available() {
+		const viewer = createViewer(1120, 720)
+		viewer.setFullscreen(true)
+		tryCompare(viewer, "fullscreen", true)
+		shareBackend.operationError = "No frames arrived."
+		shareBackend.operationStatus = "error"
+		const retry = findChild(viewer.contentItem, "screenShareFailureRetryButton")
+		const exit = findChild(viewer.contentItem, "screenShareFullscreenButton")
+		tryCompare(retry, "visible", true)
+		verify(exit.visible && exit.enabled)
+		// Visible is synchronous; geometry for the newly shown recovery row is not.
+		verify(waitForPolish(viewer), "Fullscreen recovery layout finishes")
+		verifyInside(retry, findChild(viewer.contentItem, "screenShareStateSurface"), "retry")
+		mousePress(retry)
+		try {
+			compare(retry.pressed, true, "The fullscreen retry control receives the pointer press")
+		} finally {
+			mouseRelease(retry)
+		}
+		compare(shareBackend.retryCalls, 1)
+		mouseClick(exit)
+		tryCompare(viewer, "fullscreen", false)
+		viewer.destroy()
+	}
+
+	function test_dock_releases_rendering_without_stopping_the_receiver() {
+		shareBackend.nativeFrameActive = true
+		shareBackend.hasCurrentFrame = true
+		const viewer = createViewer(1120, 720)
+		const presentation = findChild(viewer.contentItem, "screenSharePresentationButton")
+		const frame = findChild(viewer.contentItem, "screenShareNativeVideoFrame")
+		compare(frame.backend, shareBackend)
+		compare(presentation.Accessible.name, "Return to channel")
+		mouseClick(presentation)
+		compare(shareBackend.dockCalls, 1)
+		compare(shareBackend.stopCalls, 0)
+		compare(shareBackend.retryCalls, 0)
+		compare(frame.backend, null)
+		verify(!frame.visible)
+		viewer.destroy()
+	}
+
+	function test_window_close_requests_redocking_once_and_host_close_is_final() {
+		const viewer = createViewer(1120, 720)
+		viewer.close()
+		viewer.close()
+		tryCompare(shareBackend, "closeCalls", 1)
+		compare(shareBackend.stopCalls, 0)
+		verify(viewer.visible)
+		viewer.closeFromHost()
+		tryCompare(viewer, "visible", false)
+		compare(shareBackend.closeCalls, 1)
 		viewer.destroy()
 	}
 
@@ -375,14 +436,15 @@ TestCase {
 		viewer.destroy()
 	}
 
-	function test_standard_close_shortcut_binds_every_platform_sequence() {
+	function test_standard_close_shortcut_redocks_for_every_platform_sequence() {
 		const viewer = createViewer(1120, 720)
 		const shortcut = findChild(viewer, "screenShareCloseShortcut")
 		verify(shortcut !== null)
 		verify(shortcut.sequences.length > 0)
 		for (let index = 0; index < shortcut.sequences.length; ++index) {
 			keySequence(shortcut.sequences[index])
-			compare(shareBackend.stopCalls, index + 1)
+			compare(shareBackend.closeCalls, index + 1)
+			compare(shareBackend.stopCalls, 0)
 		}
 		viewer.destroy()
 	}

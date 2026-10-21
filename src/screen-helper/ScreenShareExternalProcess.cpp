@@ -25,6 +25,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QProcess>
+#include <QtCore/QTimer>
 #include <QtCore/QProcessEnvironment>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStandardPaths>
@@ -42,7 +43,6 @@ constexpr int PROBE_TIMEOUT_MSEC = 5000;
 // without misreporting a slow cold registry as a missing WebRTC plugin.
 constexpr int GST_REGISTRY_PROBE_TIMEOUT_MSEC = 15000;
 constexpr int START_TIMEOUT_MSEC = 3000;
-constexpr int START_SETTLE_MSEC  = 1000;
 
 struct RelayEndpoint {
 	bool valid = false;
@@ -52,7 +52,7 @@ struct RelayEndpoint {
 	QString localFilePath;
 };
 
-ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, const QStringList &arguments,
+ScreenShareExternalProcess::LaunchResult prepareProcess(const QString &program, const QStringList &arguments,
 												  QObject *parent, const QString &executionMode,
 												  bool binaryStandardOutput = false);
 
@@ -1577,7 +1577,8 @@ ScreenShareExternalProcess::LaunchResult
 		}
 	}
 
-	if (!useTestPattern && captureSelection.browserWindowFollow) {
+	if (!useTestPattern && captureSelection.browserWindowFollow
+		&& plan.value(QStringLiteral("_launch_attempt")).toInt() == 0) {
 		// Run the pipeline in-process (via the helper's --internal-gst-window-follow sub-mode) so the
 		// monitor crop tracks the Chromium window as it moves, instead of staying pinned to its start
 		// position. The pipeline tokens are forwarded verbatim after "--" and fed to gst_parse_launchv.
@@ -1591,42 +1592,34 @@ ScreenShareExternalProcess::LaunchResult
 						<< QStringLiteral("--gst-bin-dir=%1").arg(QFileInfo(support.gstLaunchPath).absolutePath())
 						<< QStringLiteral("--") << pipelineTokens;
 
-		launch = startProcess(QCoreApplication::applicationFilePath(), followArguments, parent,
+		launch = prepareProcess(QCoreApplication::applicationFilePath(), followArguments, parent,
 							  QStringLiteral("gstreamer-livekit-publish-window-follow"));
-		if (!launch.started) {
+		if (!launch.prepared) {
 			// Fall back to the static-crop gst-launch path so browser sharing still works (without
 			// follow) if the in-process pipeline could not start.
 			launchWarnings.append(QStringLiteral("Window-following capture could not start (%1); falling back to a "
 												 "fixed monitor crop that will not track window moves.")
 									  .arg(launch.errorMessage.trimmed()));
-			launch = startProcess(support.gstLaunchPath, arguments, parent,
+			launch = prepareProcess(support.gstLaunchPath, arguments, parent,
 								  QStringLiteral("gstreamer-livekit-publish"));
 		}
 	} else {
-		launch = startProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-publish"));
+		launch = prepareProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-publish"));
 	}
+	launch.hasNextAttempt = !useTestPattern && captureSelection.browserWindowFollow
+		&& plan.value(QStringLiteral("_launch_attempt")).toInt() == 0;
 	launch.warnings += launchWarnings;
-	if (!launch.started) {
+	if (!launch.prepared) {
 		return launch;
 	}
 
 #ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
 	if (!useTestPattern) {
-		QString captureError;
-		if (!ScreenShareMacOSNativeCapture::start(
-				launch.process, static_cast< unsigned int >(width), static_cast< unsigned int >(height),
-				static_cast< unsigned int >(fps), plan.value(QStringLiteral("capture_source_id")).toString(),
-				&captureError)) {
-			launch.errorMessage = captureError;
-			if (launch.process) {
-				launch.process->terminate();
-				launch.process->waitForFinished(1000);
-				launch.process->deleteLater();
-				launch.process = nullptr;
-			}
-			launch.started = false;
-			return launch;
-		}
+		launch.onStarted = [process = launch.process, width, height, fps, plan](QString *error) {
+			return ScreenShareMacOSNativeCapture::start(process, static_cast< unsigned int >(width),
+				static_cast< unsigned int >(height), static_cast< unsigned int >(fps),
+				plan.value(QStringLiteral("capture_source_id")).toString(), error);
+		};
 	}
 #endif
 
@@ -1772,10 +1765,10 @@ ScreenShareExternalProcess::LaunchResult
 				  << QStringLiteral("!") << QStringLiteral("autoaudiosink") << QStringLiteral("sync=false");
 	}
 
-	launch = startProcess(support.gstLaunchPath, arguments, parent,
+	launch = prepareProcess(support.gstLaunchPath, arguments, parent,
 						 nativeFrames ? QStringLiteral("gstreamer-native-frame-view")
 									  : QStringLiteral("gstreamer-livekit-view"), nativeFrames);
-	if (!launch.started) {
+	if (!launch.prepared) {
 		return launch;
 	}
 
@@ -1787,7 +1780,7 @@ ScreenShareExternalProcess::LaunchResult
 	return launch;
 }
 
-ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, const QStringList &arguments,
+ScreenShareExternalProcess::LaunchResult prepareProcess(const QString &program, const QStringList &arguments,
 												  QObject *parent, const QString &executionMode,
 												  const bool binaryStandardOutput) {
 	ScreenShareExternalProcess::LaunchResult launch;
@@ -1797,25 +1790,10 @@ ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, co
 	QProcess *process = new QProcess(parent);
 	process->setProcessChannelMode(binaryStandardOutput ? QProcess::SeparateChannels : QProcess::MergedChannels);
 	process->setProcessEnvironment(processEnvironmentForExternalProgram(program));
-	process->start(program, arguments);
-	if (!process->waitForStarted(START_TIMEOUT_MSEC)) {
-		launch.errorMessage = process->errorString();
-		process->deleteLater();
-		return launch;
-	}
-
-	if (process->waitForFinished(START_SETTLE_MSEC)) {
-		const QString output = QString::fromUtf8(binaryStandardOutput ? process->readAllStandardError()
-																	 : process->readAll()).trimmed();
-		launch.errorMessage =
-			output.isEmpty() ? QStringLiteral("The external media process exited immediately.") : output;
-		process->deleteLater();
-		return launch;
-	}
-
-	launch.started = true;
+	process->setProgram(program);
+	process->setArguments(arguments);
+	launch.prepared = true;
 	launch.process = process;
-	launch.processID = process->processId();
 	return launch;
 }
 } // namespace
@@ -2152,7 +2130,7 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 	return payload;
 }
 
-ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublish(const QJsonObject &plan,
+ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::preparePublish(const QJsonObject &plan,
 																				  QObject *parent) {
 	LaunchResult launch;
 	const RuntimeSupport support = probeRuntimeSupport();
@@ -2164,7 +2142,7 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 			plan.value(QStringLiteral("relay_contract_description"))
 				.toString(QStringLiteral("The negotiated relay transport is not executable in this helper build."));
 		if (envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_STUB")) {
-			launch.started       = true;
+			launch.prepared       = true;
 			launch.usedStub      = true;
 			launch.executionMode = QStringLiteral("stub");
 			launch.warnings.append(launch.errorMessage);
@@ -2174,7 +2152,7 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 	if (!support.ffmpegAvailable) {
 		launch.errorMessage = QStringLiteral("ffmpeg is not installed on this host.");
 		if (envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_STUB")) {
-			launch.started       = true;
+			launch.prepared       = true;
 			launch.usedStub      = true;
 			launch.executionMode = QStringLiteral("stub");
 			launch.warnings.append(QStringLiteral(
@@ -2187,7 +2165,7 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 	if (!endpoint.valid) {
 		launch.errorMessage = endpoint.errorMessage;
 		if (envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_STUB")) {
-			launch.started       = true;
+			launch.prepared       = true;
 			launch.usedStub      = true;
 			launch.executionMode = QStringLiteral("stub");
 			launch.warnings.append(endpoint.errorMessage);
@@ -2205,6 +2183,8 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 	const QStringList candidateBackends = candidateBackendOrder(support, codec, plannedBackend);
 
 	QString lastError;
+	int preparedCandidate = 0;
+	const int requestedAttempt = plan.value(QStringLiteral("_launch_attempt")).toInt();
 	for (const QString &candidateBackend : candidateBackends) {
 		QJsonObject attemptPlan = plan;
 		attemptPlan.insert(QStringLiteral("planned_encoder_backend"), candidateBackend);
@@ -2240,9 +2220,11 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 		arguments.append(endpoint.outputFormat);
 		arguments.append(endpoint.localFilePath.isEmpty() ? endpoint.endpointUrl : endpoint.localFilePath);
 
+		if (preparedCandidate++ < requestedAttempt) continue;
+
 		LaunchResult attemptLaunch =
-			startProcess(support.ffmpegPath, arguments, parent, QStringLiteral("ffmpeg-publish"));
-		if (!attemptLaunch.started) {
+			prepareProcess(support.ffmpegPath, arguments, parent, QStringLiteral("ffmpeg-publish"));
+		if (!attemptLaunch.prepared) {
 			lastError = attemptLaunch.errorMessage;
 			if (candidateBackend != candidateBackends.back()) {
 				launch.warnings.append(
@@ -2254,23 +2236,16 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 
 #ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
 		if (captureSource == QLatin1String("screencapturekit-bgra")) {
-			QString nativeCaptureError;
-			if (!ScreenShareMacOSNativeCapture::start(
-					attemptLaunch.process, static_cast< unsigned int >(width), static_cast< unsigned int >(height),
-					static_cast< unsigned int >(fps), plan.value(QStringLiteral("capture_source_id")).toString(),
-					&nativeCaptureError)) {
-				lastError = nativeCaptureError;
-				if (attemptLaunch.process) {
-					attemptLaunch.process->terminate();
-					attemptLaunch.process->waitForFinished(1000);
-					attemptLaunch.process->deleteLater();
-				}
-				continue;
-			}
+			attemptLaunch.onStarted = [process = attemptLaunch.process, width, height, fps, plan](QString *error) {
+				return ScreenShareMacOSNativeCapture::start(process, static_cast< unsigned int >(width),
+					static_cast< unsigned int >(height), static_cast< unsigned int >(fps),
+					plan.value(QStringLiteral("capture_source_id")).toString(), error);
+			};
 		}
 #endif
 
 		launch                       = attemptLaunch;
+		launch.hasNextAttempt = candidateBackend != candidateBackends.back();
 		launch.endpointUrl           = endpoint.endpointUrl;
 		launch.selectedEncoder       = selectedEncoder;
 		launch.selectedCaptureSource = captureSource;
@@ -2285,7 +2260,7 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 	launch.errorMessage =
 		lastError.isEmpty() ? QStringLiteral("No external ffmpeg encoder backend could be started.") : lastError;
 	if (envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_STUB")) {
-		launch.started       = true;
+		launch.prepared       = true;
 		launch.usedStub      = true;
 		launch.executionMode = QStringLiteral("stub");
 		launch.warnings.append(launch.errorMessage);
@@ -2293,17 +2268,17 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 	return launch;
 }
 
-ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(const QJsonObject &plan,
+ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::prepareView(const QJsonObject &plan,
 																								   QObject *parent) {
 	LaunchResult launch;
 	const RuntimeSupport support = probeRuntimeSupport();
 	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("gstreamer-livekit-runtime")) {
 		launch = startGStreamerLiveKitView(support, plan, parent);
-		if (launch.started || !plan.value(QStringLiteral("native_frame_requested")).toBool(false)) return launch;
+		if (launch.prepared || !plan.value(QStringLiteral("native_frame_requested")).toBool(false)) return launch;
 		QJsonObject fallbackPlan = plan;
 		fallbackPlan.insert(QStringLiteral("native_frame_requested"), false);
 		LaunchResult fallback = startGStreamerLiveKitView(support, fallbackPlan, parent);
-		if (fallback.started) fallback.warnings.append(QStringLiteral("Native frame output failed; using external GStreamer window fallback: %1").arg(launch.errorMessage));
+		if (fallback.prepared) fallback.warnings.append(QStringLiteral("Native frame output failed; using external GStreamer window fallback: %1").arg(launch.errorMessage));
 		return fallback;
 	}
 	if (!plan.value(QStringLiteral("relay_runtime_executable")).toBool(true)) {
@@ -2311,7 +2286,7 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 			plan.value(QStringLiteral("relay_contract_description"))
 				.toString(QStringLiteral("The negotiated relay transport is not executable in this helper build."));
 		if (envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_STUB")) {
-			launch.started       = true;
+			launch.prepared       = true;
 			launch.usedStub      = true;
 			launch.executionMode = QStringLiteral("stub");
 			launch.warnings.append(launch.errorMessage);
@@ -2327,7 +2302,7 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 								  ? QStringLiteral("ffmpeg is not installed on this host for headless viewer mode.")
 								  : QStringLiteral("ffplay is not installed on this host.");
 		if (envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_STUB")) {
-			launch.started       = true;
+			launch.prepared       = true;
 			launch.usedStub      = true;
 			launch.executionMode = QStringLiteral("stub");
 			launch.warnings.append(
@@ -2344,7 +2319,7 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 	if (!endpoint.valid) {
 		launch.errorMessage = endpoint.errorMessage;
 		if (envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_STUB")) {
-			launch.started       = true;
+			launch.prepared       = true;
 			launch.usedStub      = true;
 			launch.executionMode = QStringLiteral("stub");
 			launch.warnings.append(endpoint.errorMessage);
@@ -2390,14 +2365,14 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 		arguments.append(inputLocation);
 	}
 
-	launch = startProcess(program, arguments, parent,
+	launch = prepareProcess(program, arguments, parent,
 						 nativeFrames ? QStringLiteral("ffmpeg-native-frame-view") : executionMode, nativeFrames);
-	if (!launch.started) {
+	if (!launch.prepared) {
 		if (nativeFrames) {
 			QJsonObject fallbackPlan = plan;
 			fallbackPlan.insert(QStringLiteral("native_frame_requested"), false);
-			LaunchResult fallback = startView(fallbackPlan, parent);
-			if (fallback.started)
+			LaunchResult fallback = prepareView(fallbackPlan, parent);
+			if (fallback.prepared)
 				fallback.warnings.append(QStringLiteral("Native ffmpeg frame output failed; using external window fallback: %1")
 										 .arg(launch.errorMessage));
 			return fallback;
@@ -2427,10 +2402,12 @@ void ScreenShareExternalProcess::stop(QProcess *process, const int timeoutMsec) 
 		return;
 	}
 
+	// Keep the event loop responsive during shutdown. Delete only after process exit.
+	QObject::connect(process, qOverload< int, QProcess::ExitStatus >(&QProcess::finished),
+		process, &QObject::deleteLater);
+	QObject::connect(process, &QProcess::started, process, &QProcess::terminate);
 	process->terminate();
-	if (!process->waitForFinished(timeoutMsec)) {
-		process->kill();
-		process->waitForFinished(500);
-	}
-	process->deleteLater();
+	QTimer::singleShot(qMax(0, timeoutMsec), process, [process]() {
+		if (process->state() != QProcess::NotRunning) process->kill();
+	});
 }

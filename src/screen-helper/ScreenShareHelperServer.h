@@ -11,13 +11,16 @@
 #include <QtCore/QHash>
 #include <QtCore/QJsonObject>
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtNetwork/QLocalServer>
 
 #include <memory>
+#include <functional>
 
 class QLocalSocket;
 class QProcess;
+class ScreenShareProcessJob;
 namespace Mumble::ScreenShare { class FrameTransport; }
 
 class ScreenShareHelperServer : public QObject {
@@ -32,13 +35,15 @@ public:
 	bool start(QString *errorMessage = nullptr);
 	bool start(const QString &socketBaseName, QString *errorMessage);
 	QJsonObject capabilityPayload() const;
-	QJsonObject runSelfTest();
+	using ReplyCallback = std::function< void(const QJsonObject &) >;
+	void runSelfTest(ReplyCallback callback);
 
 	struct ManagedSession {
 		QJsonObject payload;
-		QProcess *process = nullptr;
-		QTimer *nativeFrameTimer = nullptr;
-		std::shared_ptr< Mumble::ScreenShare::FrameTransport > nativeFrameTransport;
+		QPointer< ScreenShareProcessJob > job;
+		QPointer< QLocalSocket > requestSocket;
+		qint64 ownerProcessID = 0;
+		QString ownerProcessIdentity;
 	};
 
 private slots:
@@ -48,18 +53,20 @@ private slots:
 	void handleIdleTimeout();
 
 private:
-	QJsonObject dispatchRequest(const QJsonObject &request);
+	void dispatchRequest(const QJsonObject &request, ReplyCallback callback, QLocalSocket *socket = nullptr);
 	QJsonObject handleQueryCapabilities() const;
-	QJsonObject handleStartPublish(const QJsonObject &payload);
-	QJsonObject handleStopPublish(const QJsonObject &payload);
-	QJsonObject handleStartView(const QJsonObject &payload);
-	QJsonObject handleStopView(const QJsonObject &payload);
+	void startSession(const QJsonObject &payload, bool publish, ReplyCallback callback, QLocalSocket *socket);
+	void stopSessionRequest(const QJsonObject &payload, bool publish, ReplyCallback callback);
 	void logSessionPlanSummary(const QJsonObject &payload, const QString &label, const QString &phase) const;
 	static void logPayloadWarnings(const QJsonObject &payload, const QString &label, const QString &streamID);
 	void stopAllSessions();
-	void stopSession(QHash< QString, ManagedSession > &sessions, const QString &streamID);
+	void stopSession(QHash< QString, ManagedSession > &sessions, const QString &streamID,
+					 std::function< void() > stopped = {});
 	void attachProcessLogging(const QString &streamID, bool publish, const QString &label);
 	void refreshIdleTimer();
+	bool acceptOwnerOperation(qint64 processID, const QString &identity, const QString &streamID,
+		bool publish, bool stop, quint64 sequence, QString *error);
+	struct OwnerOperations;
 
 	QLocalServer *m_server;
 	QTimer m_idleTimer;
@@ -67,6 +74,7 @@ private:
 	QHash< QLocalSocket *, QByteArray > m_socketBuffers;
 	QHash< QString, ManagedSession > m_publishSessions;
 	QHash< QString, ManagedSession > m_viewSessions;
+	QHash< QString, std::shared_ptr< OwnerOperations > > m_ownerOperations;
 };
 
 #endif // MUMBLE_SCREENHELPER_SCREENSHAREHELPERSERVER_H_

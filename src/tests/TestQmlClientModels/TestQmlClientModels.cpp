@@ -7962,7 +7962,8 @@ void TestQmlClientModels::mediaSessionMaterializesDataSourcesWithoutStaleGenerat
 		QStringLiteral("materialized-a")));
 	QVERIFY(media.playbackSourcePreparing());
 	QVERIFY(!media.playbackSourceReady());
-	QTRY_VERIFY_WITH_TIMEOUT(media.playbackSourceReady(), 10000);
+	QTRY_VERIFY_WITH_TIMEOUT(!media.playbackSourcePreparing(), 10000);
+	QVERIFY2(media.playbackSourceReady(), qPrintable(media.errorCode() + QStringLiteral(": ") + media.error()));
 	QVERIFY(!media.playbackSourcePreparing());
 	QVERIFY(media.playbackUrl().isLocalFile());
 	QCOMPARE(media.url(), wavDataUrl);

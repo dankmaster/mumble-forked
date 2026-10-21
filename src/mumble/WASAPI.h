@@ -42,6 +42,8 @@ public:
 	static Mumble::WASAPI::DeviceDescriptor descriptorForEndpoint(const QString &endpointId, EDataFlow dataflow);
 	static Mumble::WASAPI::DeviceDescriptor defaultDeviceDescriptor(EDataFlow dataflow, ERole role);
 	static Mumble::WASAPI::RuntimeState runtimeState(EDataFlow dataflow);
+	static QString inputEndpointForPreparedIdentity(
+		const QString &configuredDevice, const Mumble::InputEnhancement::DeviceIdentity &preparedIdentity);
 	static UINT32 selectSharedModePeriod(Mumble::WASAPI::LatencyProfile profile, UINT32 defaultFrames,
 									 UINT32 fundamentalFrames, UINT32 minimumFrames, UINT32 maximumFrames);
 	static Mumble::InputEnhancement::DeviceIdentity resolveInputDeviceIdentity(const QString &configuredDevice,
