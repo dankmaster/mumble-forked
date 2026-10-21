@@ -275,6 +275,39 @@ TestCase {
 		probe.destroy()
 	}
 
+	function test_cached_room_retires_empty_hydration_pacing_before_idle_prefetch() {
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				id: probe
+				property var timeline: probe
+				property var root: probe
+				property var chatModel: ({presentationBusy: true})
+				property var pendingPreviewHydrationIds: ({})
+				property bool coldPreviewHydrationPacingActive: true
+				property bool richScrollInProgress: false
+				property bool scopePresentationPending: false
+				property bool topAnchorActive: false
+				property var richContentResumeTimer: ({running: false})
+				property var richLoaderResumeTimer: ({running: false})
+				property var deferredMaterializationTimer: ({running: false})
+				property string richLoaderResumeActiveId: ""
+				property var richLoaderResumeQueue: []
+				property var deferredMaterializationQueue: []
+				property bool prefetchSawColdPacing: true
+				function deferredMaterializationOwnershipActive() { return false }
+				function scheduleNearViewportPrefetch() { prefetchSawColdPacing = coldPreviewHydrationPacingActive }
+				function scheduleStaticPreviewSweep() {}
+				${productFunction("finishRichContentRecoveryIfIdle")}
+			}`, testCase)
+		probe.finishRichContentRecoveryIfIdle()
+		verify(!probe.prefetchSawColdPacing)
+		probe.coldPreviewHydrationPacingActive = true
+		probe.pendingPreviewHydrationIds = {message: {id: "message"}}
+		probe.finishRichContentRecoveryIfIdle()
+		verify(probe.prefetchSawColdPacing)
+		probe.destroy()
+	}
+
 	function test_measured_native_link_fallback_is_visible_before_optional_provider() {
 		const source = String(mainQmlSource)
 		const handoff = source.indexOf("id: asyncRichHandoff")

@@ -2375,6 +2375,9 @@ ApplicationWindow {
 				"nearViewportPrefetchActiveId": timeline.nearViewportPrefetchActiveId,
 				"nearViewportWarmId": timeline.nearViewportWarmId,
 				"nearViewportPrefetchReadyId": timeline.nearViewportPrefetchReadyId,
+				"nearViewportPrefetchAllowed": timeline.nearViewportPrefetchAllowed(),
+				"nearViewportPrefetchCandidate": timeline.nearestDeferredPrefetchCandidate(),
+				"coldPreviewHydrationPacingActive": root.coldPreviewHydrationPacingActive,
 				"nearViewportPrefetch": nearViewportPrefetchDiagnostics(),
 				"staticPreviewPreheatActiveId": timeline.staticPreviewPreheatActiveId,
 				"staticPreviewPreheatQueueCount": timeline.staticPreviewPreheatQueue.length,
@@ -7976,6 +7979,10 @@ ApplicationWindow {
 							topAnchorSettleTimer.restart()
 						}
 						chatModel.presentationBusy = false
+						// A fully cached room may never enqueue hydration after reveal.
+						// Its cold pacing flag must not indefinitely block idle prefetch.
+						if (Object.keys(root.pendingPreviewHydrationIds).length === 0)
+							root.coldPreviewHydrationPacingActive = false
 						scheduleNearViewportPrefetch()
 						scheduleStaticPreviewSweep()
 					}
