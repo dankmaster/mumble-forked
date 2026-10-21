@@ -451,6 +451,16 @@ namespace {
 			? safeExternalUrl(url) : QString();
 	}
 
+	bool hasMonospaceFontFamily(const QTextCharFormat &format) {
+		// A QTextDocument HTML round trip (Log::validHtml) drops the fixed-pitch flag that
+		// <code> and <pre> set and keeps only the family Qt assigns them ("Courier New").
+		static const QRegularExpression monospaceFamily(QStringLiteral(R"(courier|mono|consolas)"),
+			QRegularExpression::CaseInsensitiveOption);
+		const QStringList families = format.fontFamilies().toStringList();
+		return std::any_of(families.cbegin(), families.cend(),
+			[](const QString &family) { return monospaceFamily.match(family).hasMatch(); });
+	}
+
 	QVariantMap richTextSegment(const QString &text, const QTextCharFormat &format = {}) {
 		QString safeText = text;
 		safeText.remove(QChar::ObjectReplacementCharacter);
@@ -460,7 +470,7 @@ namespace {
 		if (format.fontWeight() >= QFont::DemiBold) segment.insert(QStringLiteral("bold"), true);
 		if (format.fontItalic()) segment.insert(QStringLiteral("italic"), true);
 		if (format.fontStrikeOut()) segment.insert(QStringLiteral("strike"), true);
-		if (format.fontFixedPitch()) segment.insert(QStringLiteral("code"), true);
+		if (format.fontFixedPitch() || hasMonospaceFontFamily(format)) segment.insert(QStringLiteral("code"), true);
 		if (format.isAnchor()) {
 			const QString href = safeExternalUrl(format.anchorHref(), true);
 			if (!href.isEmpty()) segment.insert(QStringLiteral("href"), href);
@@ -529,9 +539,13 @@ namespace {
 
 	bool messageBodyNeedsRichParsing(const QString &bodyHtml) {
 		// The overwhelmingly common chat path is plain text that has merely been
-		// HTML-escaped or wrapped in structural line-break tags.
+		// HTML-escaped or wrapped in structural line-break tags. Formatting can arrive
+		// as tags, or, after the Log::validHtml QTextDocument round trip that persistent
+		// Markdown bodies go through, only as styled spans and block tags. Missing the
+		// latter falls back to the raw Markdown source text.
 		static const QRegularExpression richTagExpression(
-			QStringLiteral(R"(<\s*/?\s*(?:a|b|strong|i|em|s|strike|del|code|img)\b)"),
+			QStringLiteral(R"(<\s*/?\s*(?:a|b|strong|i|em|s|strike|del|code|img|pre|tt|h[1-6])\b)"
+						   R"(|\bstyle\s*=\s*["'][^"']*\b(?:font-weight|font-style|text-decoration|font-family)\s*:)"),
 			QRegularExpression::CaseInsensitiveOption);
 		return richTagExpression.match(bodyHtml.left(MaxRichBodyCharacters)).hasMatch();
 	}

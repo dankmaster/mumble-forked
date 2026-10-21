@@ -3,6 +3,7 @@
 #include "QmlClientModels.h"
 #include "ChatPerfTrace.h"
 #include "EmbedDocument.h"
+#include "Markdown.h"
 #include "ModernShellPreviewPublicationPolicy.h"
 #include "PersistentChatPreviewUrl.h"
 #include <QtCore/QDateTime>
@@ -14,6 +15,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaProperty>
 #include <QtCore/QRegularExpression>
+#include <QtGui/QTextDocument>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QtTest>
 
@@ -86,6 +88,7 @@ private slots:
 	void chatTimelineSearchStateTracksIncrementalMutations();
 	void chatTimelineBoundsReactionDelegates();
 	void chatTimelineSanitizesStructuredRichText();
+	void chatTimelineFormatsSanitizedMarkdownWithoutLinks();
 	void chatTimelineParsesLinkedManagedImage();
 	void chatTimelineCompletesOwnedRichParseUnderVisualOverride();
 	void chatTimelineDrainsBoundedRichTextBacklog();
@@ -4478,6 +4481,68 @@ void TestQmlClientModels::chatTimelineSanitizesStructuredRichText() {
 	QVERIFY(foundBold);
 	QVERIFY(foundGoodLink);
 	QCOMPARE(model.roleNames().value(StableListModel::BodySegmentsRole), QByteArray("bodySegments"));
+}
+
+namespace {
+	// Mirrors how MainWindow builds bodyHtml for a MarkdownLite persistent message:
+	// Markdown::markdownToHTML, then persistentChatContentHtml, whose Log::validHtml
+	// QTextDocument round trip re-serializes <b>, <i>, <code> and friends as styled spans.
+	// (validHtml also lays the document out for its size check, which does not change
+	// the exported HTML and needs a GUI application this test does not create.)
+	QString persistentMarkdownBodyHtml(const QString &markdown) {
+		const QString html = Markdown::markdownToHTML(markdown);
+		if (!Qt::mightBeRichText(html)) return html;
+		QTextDocument document;
+		document.setHtml(html);
+		const QString sanitized = document.toHtml();
+		static const QRegularExpression bodyPattern(QLatin1String("<body[^>]*>(.*)</body>"),
+			QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption);
+		const QRegularExpressionMatch match = bodyPattern.match(sanitized);
+		return match.hasMatch() ? match.captured(1) : sanitized;
+	}
+} // namespace
+
+void TestQmlClientModels::chatTimelineFormatsSanitizedMarkdownWithoutLinks() {
+	struct Case {
+		QString markdown;
+		QString text;
+		QString flag;
+	};
+	// Inline code, code blocks and headings make QTextDocument resolve fonts, which needs
+	// a QGuiApplication; this suite runs without one, so it covers the font-free cases.
+	const QList< Case > cases {
+		{ QStringLiteral("Some **bold** words"), QStringLiteral("bold"), QStringLiteral("bold") },
+		{ QStringLiteral("Some *italic* words"), QStringLiteral("italic"), QStringLiteral("italic") },
+		{ QStringLiteral("Some ~~struck~~ words"), QStringLiteral("struck"), QStringLiteral("strike") },
+		{ QStringLiteral("> quoted reply"), QStringLiteral("quoted reply"), QStringLiteral("italic") },
+	};
+	for (const Case &testCase : cases) {
+		const QString bodyHtml = persistentMarkdownBodyHtml(testCase.markdown);
+		ChatTimelineModel model;
+		// Without a link or image the sanitized HTML carries its formatting only as
+		// styled spans and block tags; it must still be parsed rather than falling
+		// back to the raw Markdown source.
+		QVERIFY(model.upsertMessage({ { QStringLiteral("messageKey"), QStringLiteral("markdown:1") },
+									  { QStringLiteral("bodyText"), testCase.markdown },
+									  { QStringLiteral("bodyHtml"), bodyHtml } }));
+		QTRY_VERIFY_WITH_TIMEOUT(!model.get(0).value(QStringLiteral("bodyHydrationPending")).toBool(), 5000);
+
+		QString renderedText;
+		bool formatted = false;
+		for (const QVariant &entry : model.get(0).value(QStringLiteral("bodySegments")).toList()) {
+			const QVariantMap segment = entry.toMap();
+			const QString text = segment.value(QStringLiteral("text")).toString();
+			renderedText += text;
+			if (text.contains(testCase.text) && segment.value(testCase.flag).toBool()) formatted = true;
+		}
+		QVERIFY2(formatted, qPrintable(QStringLiteral("'%1' rendered as '%2' from %3")
+											.arg(testCase.markdown, renderedText, bodyHtml)));
+		for (const QString &marker : { QStringLiteral("**"), QStringLiteral("~~"), QStringLiteral("`"),
+									   QStringLiteral("## "), QStringLiteral("> ") }) {
+			QVERIFY2(!renderedText.contains(marker),
+					 qPrintable(QStringLiteral("raw Markdown '%1' rendered as '%2'").arg(testCase.markdown, renderedText)));
+		}
+	}
 }
 
 void TestQmlClientModels::chatTimelineParsesLinkedManagedImage() {
