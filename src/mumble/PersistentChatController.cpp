@@ -6,6 +6,7 @@
 #include "PersistentChatController.h"
 
 #include <QtCore/QSet>
+#include <QtCore/QTimer>
 
 namespace {
 	constexpr unsigned int WARMUP_HISTORY_PAGE_SIZE = 20;
@@ -41,7 +42,8 @@ namespace {
 	}
 }
 
-PersistentChatController::PersistentChatController(QObject *parent) : QObject(parent) {
+PersistentChatController::PersistentChatController(QObject *parent, int historyRequestTimeoutMs)
+	: QObject(parent), m_historyRequestTimeoutMs(qMax(1, historyRequestTimeoutMs)) {
 }
 
 void PersistentChatController::setGateway(PersistentChatGateway *gateway) {
@@ -53,18 +55,28 @@ void PersistentChatController::setGateway(PersistentChatGateway *gateway) {
 		disconnect(m_gateway, nullptr, this, nullptr);
 	}
 
+	// A replacement gateway owns a different transport even if its numeric generation happens to match.
+	reset();
+	m_ambiguousLegacyScopes.clear();
+	m_serverCorrelatesHistory = false;
 	m_gateway = gateway;
+	m_historyConnectionGeneration = gateway ? gateway->connectionGeneration() : 0;
 	if (!m_gateway) {
 		return;
 	}
 
 	connect(m_gateway, &PersistentChatGateway::historyReceived, this, &PersistentChatController::handleHistoryResponse);
+	connect(m_gateway, &PersistentChatGateway::connectionChanged, this, &PersistentChatController::handleConnectionChanged);
 	connect(m_gateway, &PersistentChatGateway::messageReceived, this, &PersistentChatController::handleMessage);
 	connect(m_gateway, &PersistentChatGateway::readStateReceived, this, &PersistentChatController::handleReadState);
 }
 
 void PersistentChatController::reset() {
-	m_historyRequestConnectionGenerations.clear();
+	// Reset may happen without replacing the transport. Do not let an abandoned legacy reply satisfy a later request.
+	for (auto it = m_pendingHistoryRequests.cbegin(); it != m_pendingHistoryRequests.cend(); ++it) {
+		m_ambiguousLegacyScopes.insert(it.key());
+	}
+	m_pendingHistoryRequests.clear();
 	m_store.clear();
 	m_activeScope = PersistentChatScopeKey();
 	emit unreadStateChanged();
@@ -124,22 +136,32 @@ void PersistentChatController::warmupScopes(const QList< PersistentChatScopeKey 
 		seen.insert(cacheKey);
 
 		PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
-		if (state.snapshot.initialLoaded || state.initialRequestInFlight || state.olderRequestInFlight) {
+		if (state.snapshot.initialLoaded || !canRequestHistory(state)) {
 			continue;
 		}
 
 		requests.push_back(qMakePair(key.scope, key.scopeID));
 		requestedKeys.push_back(key);
+		if (requestedKeys.size() == 20) {
+			// Match the server's bounded warmup batch size.
+			break;
+		}
 	}
 
-	if (!requests.isEmpty() && m_gateway->requestWarmupPages(requests, WARMUP_HISTORY_PAGE_SIZE)) {
+	if (requests.isEmpty()) {
+		return;
+	}
+	const quint64 requestID = nextHistoryRequestID();
+	for (const PersistentChatScopeKey &key : requestedKeys) {
+		PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
+		state.initialRequestInFlight = true;
+		state.snapshot.loadingState = state.snapshot.messages.isEmpty() ? PersistentChatLoadingState::Initial
+																	   : PersistentChatLoadingState::Refreshing;
+		trackHistoryRequest(key, requestID);
+	}
+	if (!m_gateway->requestWarmupPages(requests, WARMUP_HISTORY_PAGE_SIZE, requestID)) {
 		for (const PersistentChatScopeKey &key : requestedKeys) {
-			PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
-			state.initialRequestInFlight           = true;
-			m_historyRequestConnectionGenerations.insert(
-				key.cacheKey(), m_gateway->connectionGeneration());
-			state.snapshot.loadingState = state.snapshot.messages.isEmpty() ? PersistentChatLoadingState::Initial
-																		   : PersistentChatLoadingState::Refreshing;
+			failHistoryRequest(key, { m_historyConnectionGeneration, requestID }, tr("Chat history is unavailable."));
 		}
 	}
 }
@@ -180,15 +202,20 @@ bool PersistentChatController::requestOlderForActiveScope() {
 
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(m_activeScope);
 	if (!state.snapshot.hasOlder || state.snapshot.oldestLoadedMessageId == 0
-		|| state.initialRequestInFlight || state.olderRequestInFlight) {
+		|| !canRequestHistory(state)) {
+		emit activeSnapshotChanged();
 		return false;
 	}
 
 	state.olderRequestInFlight      = true;
 	state.snapshot.loadingState     = PersistentChatLoadingState::Older;
-	m_historyRequestConnectionGenerations.insert(
-		m_activeScope.cacheKey(), m_gateway->connectionGeneration());
-	m_gateway->requestOlder(m_activeScope.scope, m_activeScope.scopeID, state.snapshot.oldestLoadedMessageId);
+	const quint64 requestID = nextHistoryRequestID();
+	trackHistoryRequest(m_activeScope, requestID);
+	if (!m_gateway->requestOlder(m_activeScope.scope, m_activeScope.scopeID, state.snapshot.oldestLoadedMessageId,
+								 requestID)) {
+		failHistoryRequest(m_activeScope, { m_historyConnectionGeneration, requestID }, tr("Chat history is unavailable."));
+		return false;
+	}
 	emit activeSnapshotChanged();
 	return true;
 }
@@ -282,14 +309,28 @@ void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHist
 	}
 	const bool responseOwnsOlderRequest   = state->olderRequestInFlight;
 	const bool responseOwnsInitialRequest = state->initialRequestInFlight;
-	const auto generationIt = m_historyRequestConnectionGenerations.constFind(key.cacheKey());
+	const auto requestIt = m_pendingHistoryRequests.constFind(key.cacheKey());
 	if ((!responseOwnsOlderRequest && !responseOwnsInitialRequest)
-		|| generationIt == m_historyRequestConnectionGenerations.cend()
-		|| generationIt.value() != connectionGeneration
+		|| requestIt == m_pendingHistoryRequests.cend()
+		|| requestIt->connectionGeneration != connectionGeneration
 		|| !m_gateway || m_gateway->connectionGeneration() != connectionGeneration) {
 		return;
 	}
-	m_historyRequestConnectionGenerations.erase(generationIt);
+	if (response.has_request_id()) {
+		if (response.request_id() != requestIt->requestID) {
+			return;
+		}
+		m_serverCorrelatesHistory = true;
+	} else if (m_serverCorrelatesHistory || m_ambiguousLegacyScopes.contains(key.cacheKey())) {
+		return;
+	}
+	if (response.error() != MumbleProto::ChatHistoryResponse_Error_NoError) {
+		const QString message = response.has_error_message() ? QString::fromStdString(response.error_message()).trimmed()
+															: QString();
+		failHistoryRequest(key, requestIt.value(), message.isEmpty() ? tr("Chat history could not be loaded.") : message);
+		return;
+	}
+	m_pendingHistoryRequests.erase(requestIt);
 	if (responseOwnsOlderRequest) {
 		state->olderRequestInFlight = false;
 	} else if (responseOwnsInitialRequest) {
@@ -368,21 +409,97 @@ void PersistentChatController::setUnreadFromMessages(PersistentChatStore::ScopeS
 }
 
 bool PersistentChatController::startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload) {
-	if (!m_gateway || !m_gateway->isReady() || state.olderRequestInFlight
-		|| state.initialRequestInFlight) {
+	if (!forceReload && state.snapshot.initialLoaded) {
+		if (!state.initialRequestInFlight && !state.olderRequestInFlight) {
+			state.snapshot.loadingState = PersistentChatLoadingState::Idle;
+		}
 		return false;
 	}
-
-	if (!forceReload && state.snapshot.initialLoaded) {
-		state.snapshot.loadingState = PersistentChatLoadingState::Idle;
+	if (!canRequestHistory(state)) {
 		return false;
 	}
 
 	state.initialRequestInFlight      = true;
-	m_historyRequestConnectionGenerations.insert(
-		state.snapshot.key.cacheKey(), m_gateway->connectionGeneration());
 	state.snapshot.loadingState =
 		state.snapshot.initialLoaded ? PersistentChatLoadingState::Refreshing : PersistentChatLoadingState::Initial;
-	m_gateway->requestInitialPage(state.snapshot.key.scope, state.snapshot.key.scopeID);
+	const quint64 requestID = nextHistoryRequestID();
+	trackHistoryRequest(state.snapshot.key, requestID);
+	if (!m_gateway->requestInitialPage(state.snapshot.key.scope, state.snapshot.key.scopeID, requestID)) {
+		failHistoryRequest(state.snapshot.key, { m_historyConnectionGeneration, requestID },
+						   tr("Chat history is unavailable."));
+		return false;
+	}
 	return true;
+}
+
+void PersistentChatController::handleConnectionChanged(quint64 connectionGeneration) {
+	if (m_historyConnectionGeneration == connectionGeneration) {
+		return;
+	}
+	const auto pending = m_pendingHistoryRequests;
+	for (auto it = pending.cbegin(); it != pending.cend(); ++it) {
+		failHistoryRequest(it->key, it.value(), tr("The connection changed. Try loading history again."));
+	}
+	m_historyConnectionGeneration = connectionGeneration;
+	m_ambiguousLegacyScopes.clear();
+	m_serverCorrelatesHistory = false;
+}
+
+bool PersistentChatController::canRequestHistory(PersistentChatStore::ScopeState &state) {
+	if (!m_gateway || !m_gateway->isReady()) {
+		return false;
+	}
+	handleConnectionChanged(m_gateway->connectionGeneration());
+	if (state.initialRequestInFlight || state.olderRequestInFlight) {
+		return false;
+	}
+	if (!m_serverCorrelatesHistory && m_ambiguousLegacyScopes.contains(state.snapshot.key.cacheKey())) {
+		state.snapshot.errorMessage = tr("Reconnect to load chat history again. This server cannot identify late replies.");
+		state.snapshot.loadingState = PersistentChatLoadingState::Idle;
+		return false;
+	}
+	return true;
+}
+
+quint64 PersistentChatController::nextHistoryRequestID() {
+	if (++m_nextHistoryRequestID == 0) {
+		++m_nextHistoryRequestID;
+	}
+	return m_nextHistoryRequestID;
+}
+
+void PersistentChatController::trackHistoryRequest(const PersistentChatScopeKey &key, quint64 requestID) {
+	const PendingHistoryRequest request = { m_gateway->connectionGeneration(), requestID, key };
+	m_pendingHistoryRequests.insert(key.cacheKey(), request);
+	m_store.ensureScope(key).snapshot.errorMessage.clear();
+	QTimer::singleShot(m_historyRequestTimeoutMs, this, [this, key, request]() {
+		failHistoryRequest(key, request, m_serverCorrelatesHistory
+			? tr("Chat history timed out. Try again.")
+			: tr("Chat history timed out. Reconnect to try again."), true);
+	});
+}
+
+void PersistentChatController::failHistoryRequest(const PersistentChatScopeKey &key,
+												 const PendingHistoryRequest &request, const QString &errorMessage,
+												 bool timedOut) {
+	const auto it = m_pendingHistoryRequests.constFind(key.cacheKey());
+	if (it == m_pendingHistoryRequests.cend() || it->requestID != request.requestID
+		|| it->connectionGeneration != request.connectionGeneration) {
+		return;
+	}
+	if (timedOut) {
+		m_ambiguousLegacyScopes.insert(key.cacheKey());
+	}
+	m_pendingHistoryRequests.erase(it);
+	PersistentChatStore::ScopeState *state = m_store.scopeState(key);
+	if (!state) {
+		return;
+	}
+	state->initialRequestInFlight = false;
+	state->olderRequestInFlight = false;
+	state->snapshot.loadingState = PersistentChatLoadingState::Idle;
+	state->snapshot.errorMessage = errorMessage;
+	if (m_activeScope.cacheKey() == key.cacheKey()) {
+		emit activeSnapshotChanged();
+	}
 }

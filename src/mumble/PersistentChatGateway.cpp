@@ -28,6 +28,7 @@ void PersistentChatGateway::setServerHandler(ServerHandler *serverHandler) {
 	if (++m_connectionGeneration == 0) {
 		++m_connectionGeneration;
 	}
+	emit connectionChanged(m_connectionGeneration);
 }
 
 ServerHandler *PersistentChatGateway::serverHandler() const {
@@ -42,30 +43,31 @@ bool PersistentChatGateway::isReady() const {
 	return m_serverHandler && m_serverHandler->isRunning();
 }
 
-void PersistentChatGateway::requestInitialPage(MumbleProto::ChatScope scope, unsigned int scopeID) {
+bool PersistentChatGateway::requestInitialPage(MumbleProto::ChatScope scope, unsigned int scopeID, quint64 requestID) {
 	if (!isReady()) {
-		return;
+		return false;
 	}
 
-	m_serverHandler->requestChatHistory(scope, scopeID, 0, INITIAL_HISTORY_PAGE_SIZE, std::nullopt);
+	return m_serverHandler->requestChatHistory(scope, scopeID, 0, INITIAL_HISTORY_PAGE_SIZE, std::nullopt, requestID);
 }
 
 bool PersistentChatGateway::requestWarmupPages(
-	const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes, unsigned int limitPerScope) {
+	const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes, unsigned int limitPerScope, quint64 requestID) {
 	if (!isReady() || scopes.isEmpty()) {
 		return false;
 	}
 
 	return m_serverHandler->requestChatHistoryWarmup(scopes,
-													 limitPerScope == 0 ? WARMUP_HISTORY_PAGE_SIZE : limitPerScope);
+													 limitPerScope == 0 ? WARMUP_HISTORY_PAGE_SIZE : limitPerScope, requestID);
 }
 
-void PersistentChatGateway::requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID) {
+bool PersistentChatGateway::requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID,
+										quint64 requestID) {
 	if (!isReady() || beforeMessageID == 0) {
-		return;
+		return false;
 	}
 
-	m_serverHandler->requestChatHistory(scope, scopeID, 0, OLDER_HISTORY_PAGE_SIZE, beforeMessageID);
+	return m_serverHandler->requestChatHistory(scope, scopeID, 0, OLDER_HISTORY_PAGE_SIZE, beforeMessageID, requestID);
 }
 
 void PersistentChatGateway::send(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &body,
@@ -108,6 +110,9 @@ void PersistentChatGateway::markRead(MumbleProto::ChatScope scope, unsigned int 
 }
 
 void PersistentChatGateway::handleIncomingHistory(const MumbleProto::ChatHistoryResponse &response) {
+	// The caller dispatches only after MainWindow::customEvent has checked the event's
+	// actual source handler and connection run epoch. Never attach a pending request ID
+	// here: only the server can correlate a reply to the request that produced it.
 	emit historyReceived(response, m_connectionGeneration);
 }
 

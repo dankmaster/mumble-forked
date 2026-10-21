@@ -173,6 +173,7 @@ public:
 class MainWindow : public QObject {
 	friend class UserModel;
 	friend class QmlVisualFixtureController;
+	friend class TestModernDialogControllers;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	friend class ModernUiAutomationServer;
 #	endif
@@ -520,6 +521,8 @@ public:
 	struct ModernDirectMessageConversation {
 		unsigned int peerSession = 0;
 		unsigned int peerUserID  = 0;
+		bool peerIdentityInitialized = false;
+		std::optional< unsigned int > peerIdentity;
 		QString label;
 		QString subtitle;
 		qint64 lastActivityAtMs = 0;
@@ -529,6 +532,10 @@ public:
 		bool historyLoading      = false;
 		bool historyLoaded       = false;
 		QString historyError;
+		quint64 historyRequestID = 0;
+		quint64 historyConnectionGeneration = 0;
+		bool historyReplyCorrelation = false;
+		bool historyLegacyAmbiguous = false;
 		unsigned int lastReadMessageID = 0;
 		unsigned int lastMessageID     = 0;
 		QSet< QString > persistentMessageKeys;
@@ -844,6 +851,8 @@ public:
 	bool mergeModernDirectMessageHistory(const MumbleProto::ChatHistoryResponse &response);
 	bool setModernDirectMessageMode(unsigned int session, const QString &mode);
 	void requestModernDirectMessageHistory(unsigned int session);
+	bool prepareModernDirectMessageHistoryRequest(unsigned int session, quint64 requestID);
+	void reconcileModernDirectMessagePeer(const ClientUser *peer, bool newSessionOccupant);
 	void warmupModernDirectMessageHistory();
 	bool sendModernDirectMessage(unsigned int session, const QString &message,
 								 std::optional< unsigned int > replyMessageID = std::nullopt,
@@ -984,6 +993,35 @@ public:
 	bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result);
 	unsigned int uiNewHardware;
 #endif
+private:
+	struct DirectHistoryRequestIdentity {
+		unsigned int session;
+		unsigned int peerUserID;
+		quint64 requestID;
+		quint64 connectionGeneration;
+	};
+	enum class DirectHistoryReplyResult { Ignored, Failed, Accepted };
+	static bool bindDirectMessagePeer(ModernDirectMessageConversation &conversation, unsigned int session,
+		std::optional< unsigned int > peerUserID, bool newSessionOccupant = false);
+	static bool beginDirectHistoryRequest(ModernDirectMessageConversation &conversation,
+										 const DirectHistoryRequestIdentity &request);
+	static void abandonDirectHistoryRequest(ModernDirectMessageConversation &conversation, const QString &reason = {});
+	static bool directHistoryRequestMatches(const ModernDirectMessageConversation &conversation,
+											 const DirectHistoryRequestIdentity &request, quint64 currentConnectionGeneration);
+	static bool failUnsentDirectHistoryRequest(ModernDirectMessageConversation &conversation,
+											  const DirectHistoryRequestIdentity &request);
+	static bool expireDirectHistoryRequest(ModernDirectMessageConversation &conversation,
+										  const DirectHistoryRequestIdentity &request, quint64 currentConnectionGeneration);
+	static void armDirectHistoryTimeout(QObject *context, const DirectHistoryRequestIdentity &request,
+		std::function< ModernDirectMessageConversation *() > lookup,
+		std::function< quint64() > currentConnectionGeneration, std::function< void() > expired,
+		int timeoutMs = 15000);
+	static DirectHistoryReplyResult applyDirectHistoryResponse(ModernDirectMessageConversation &conversation,
+		const MumbleProto::ChatHistoryResponse &response, quint64 currentConnectionGeneration,
+		const std::function< void(const MumbleProto::ChatMessage &) > &appendMessage);
+	static void updateDirectHistoryPeer(ModernDirectMessageConversation &conversation, unsigned int session,
+		unsigned int peerUserID, const QString &label, const QString &subtitle);
+
 protected:
 	Usage uUsage;
 	QTimer *qtReconnect;
@@ -1256,6 +1294,7 @@ protected:
 	mutable QHash< QString, QString > m_persistentChatPreviewKeyCache;
 	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
 	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;
+	quint64 m_nextDirectHistoryRequestID = 0;
 	quint64 m_modernDirectMessageLocalID = 0;
 	bool m_modernDirectMessageTrayOpenProbe = false;
 	QTimer *m_modernShellPreviewHydrationTimer             = nullptr;

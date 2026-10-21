@@ -33,6 +33,8 @@ private slots:
 	void revokeFailureRestoresGrantAndMembership();
 	void committedGrantSurvivesServerReload();
 	void legacySingleItemMutationRemainsCompatible();
+	void historyResponsesEchoCorrelationAndErrors();
+	void historyWarmupFailuresAreCorrelated();
 };
 
 namespace {
@@ -183,6 +185,45 @@ namespace {
 				MumbleProto::ChatHistoryGrantSync response;
 				if (!response.ParseFromArray(payload.constData(), static_cast< int >(payload.size()))) {
 					QTest::qFail("Grant response protobuf could not be parsed", __FILE__, __LINE__);
+					return {};
+				}
+				return response;
+			}
+		}
+
+		MumbleProto::ChatHistoryResponse readHistoryResponse() {
+			if (!(actorSocket->waitForBytesWritten(3000) || actorSocket->bytesToWrite() == 0)) {
+				QTest::qFail("History response was not written to the test transport", __FILE__, __LINE__);
+				return {};
+			}
+			responseBuffer += peer->readAll();
+			for (;;) {
+				while (responseBuffer.size() < 6) {
+					if (!peer->waitForReadyRead(3000)) {
+						QTest::qFail("History response header timed out", __FILE__, __LINE__);
+						return {};
+					}
+					responseBuffer += peer->readAll();
+				}
+				const quint16 type = qFromBigEndian< quint16 >(
+					reinterpret_cast< const uchar * >(responseBuffer.constData()));
+				const quint32 size = qFromBigEndian< quint32 >(
+					reinterpret_cast< const uchar * >(responseBuffer.constData() + 2));
+				while (responseBuffer.size() < 6 + static_cast< int >(size)) {
+					if (!peer->waitForReadyRead(3000)) {
+						QTest::qFail("History response body timed out", __FILE__, __LINE__);
+						return {};
+					}
+					responseBuffer += peer->readAll();
+				}
+				const QByteArray payload = responseBuffer.mid(6, static_cast< int >(size));
+				responseBuffer.remove(0, 6 + static_cast< int >(size));
+				if (type != static_cast< quint16 >(Mumble::Protocol::TCPMessageType::ChatHistoryResponse)) {
+					continue;
+				}
+				MumbleProto::ChatHistoryResponse response;
+				if (!response.ParseFromArray(payload.constData(), static_cast< int >(payload.size()))) {
+					QTest::qFail("History response protobuf could not be parsed", __FILE__, __LINE__);
 					return {};
 				}
 				return response;
@@ -370,6 +411,96 @@ void TestChatHistoryGrantHandler::legacySingleItemMutationRemainsCompatible() {
 	QCOMPARE(revoked.result(), MumbleProto::ChatHistoryGrantSync_Result_Accepted);
 	QVERIFY(!fixture.server->m_dbWrapper.getChatHistoryGrant(fixture.serverID, fixture.targetID,
 		mumble::server::db::ChatThreadScope::Channel, Mumble::ROOT_CHANNEL_ID));
+}
+
+void TestChatHistoryGrantHandler::historyResponsesEchoCorrelationAndErrors() {
+	Fixture fixture;
+	MumbleProto::ChatHistoryRequest request;
+	request.set_scope(MumbleProto::Channel);
+	request.set_scope_id(Mumble::ROOT_CHANNEL_ID);
+	request.set_request_id(9001);
+	fixture.server->msgChatHistoryRequest(fixture.actor.get(), request);
+	auto response = fixture.readHistoryResponse();
+	QCOMPARE(response.request_id(), quint64(9001));
+	QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_NoError);
+	QCOMPARE(response.scope(), request.scope());
+	QCOMPARE(response.scope_id(), request.scope_id());
+
+	request.clear_request_id();
+	fixture.server->msgChatHistoryRequest(fixture.actor.get(), request);
+	response = fixture.readHistoryResponse();
+	QVERIFY(!response.has_request_id());
+	QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_NoError);
+
+	request.set_request_id(9002);
+	request.set_scope(MumbleProto::TextChannel);
+	request.set_scope_id(99999);
+	fixture.server->msgChatHistoryRequest(fixture.actor.get(), request);
+	response = fixture.readHistoryResponse();
+	QCOMPARE(response.request_id(), quint64(9002));
+	QCOMPARE(response.scope_id(), 99999U);
+	QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_Unavailable);
+	QVERIFY(!response.error_message().empty());
+
+	fixture.actor->iId = -1;
+	request.set_request_id(9003);
+	request.set_scope(MumbleProto::Private);
+	request.set_scope_id(fixture.targetID);
+	fixture.server->msgChatHistoryRequest(fixture.actor.get(), request);
+	response = fixture.readHistoryResponse();
+	QCOMPARE(response.request_id(), quint64(9003));
+	QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_PermissionDenied);
+	QCOMPARE(response.messages_size(), 0);
+
+	fixture.actor->qlSupportedChatFeatures.removeAll(MumbleProto::ChatFeaturePersistentHistory);
+	request.set_request_id(9004);
+	fixture.server->msgChatHistoryRequest(fixture.actor.get(), request);
+	response = fixture.readHistoryResponse();
+	QCOMPARE(response.request_id(), quint64(9004));
+	QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_Unsupported);
+
+	fixture.actor->leakyBucket = LeakyBucket(0, 0);
+	request.set_request_id(9005);
+	fixture.server->msgChatHistoryRequest(fixture.actor.get(), request);
+	response = fixture.readHistoryResponse();
+	QCOMPARE(response.request_id(), quint64(9005));
+	QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_RateLimited);
+}
+
+void TestChatHistoryGrantHandler::historyWarmupFailuresAreCorrelated() {
+	Fixture fixture;
+	MumbleProto::ChatHistoryWarmupRequest batch;
+	for (unsigned int scopeID : { 99998U, 99999U }) {
+		auto *request = batch.add_requests();
+		request->set_scope(MumbleProto::TextChannel);
+		request->set_scope_id(scopeID);
+		request->set_request_id(9010);
+	}
+	fixture.server->msgChatHistoryWarmupRequest(fixture.actor.get(), batch);
+	for (unsigned int scopeID : { 99998U, 99999U }) {
+		const auto response = fixture.readHistoryResponse();
+		QCOMPARE(response.request_id(), quint64(9010));
+		QCOMPARE(response.scope_id(), scopeID);
+		QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_Unavailable);
+	}
+
+	fixture.actor->qlSupportedChatFeatures.removeAll(MumbleProto::ChatFeatureHistoryWarmup);
+	fixture.server->msgChatHistoryWarmupRequest(fixture.actor.get(), batch);
+	for (unsigned int scopeID : { 99998U, 99999U }) {
+		const auto response = fixture.readHistoryResponse();
+		QCOMPARE(response.request_id(), quint64(9010));
+		QCOMPARE(response.scope_id(), scopeID);
+		QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_Unsupported);
+	}
+
+	fixture.actor->leakyBucket = LeakyBucket(0, 0);
+	fixture.server->msgChatHistoryWarmupRequest(fixture.actor.get(), batch);
+	for (unsigned int scopeID : { 99998U, 99999U }) {
+		const auto response = fixture.readHistoryResponse();
+		QCOMPARE(response.request_id(), quint64(9010));
+		QCOMPARE(response.scope_id(), scopeID);
+		QCOMPARE(response.error(), MumbleProto::ChatHistoryResponse_Error_RateLimited);
+	}
 }
 
 QTEST_GUILESS_MAIN(TestChatHistoryGrantHandler)

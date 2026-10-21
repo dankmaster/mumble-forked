@@ -1665,6 +1665,11 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 		clearUserCommentRequest(pDst->uiSession);
 	}
 	appendUserStateTrace(QStringLiteral("post-comment"));
+	if (createdUser || persistentIdentityChanged) {
+		// userAdded precedes user_id assignment. Reconcile only after this message
+		// has established the final identity, avoiding the temporary unregistered state.
+		reconcileModernDirectMessagePeer(pDst, createdUser);
+	}
 
 	{
 		const PersistentChatTarget activeTarget = currentPersistentChatTarget();

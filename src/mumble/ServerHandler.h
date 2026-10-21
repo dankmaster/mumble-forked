@@ -296,11 +296,11 @@ public:
 						   unsigned int aclChannelID, unsigned int position, bool create);
 	void removeTextChannel(unsigned int textChannelID);
 	void setDefaultTextChannel(unsigned int textChannelID);
-	void requestChatHistory(MumbleProto::ChatScope scope, unsigned int scopeID = 0, unsigned int startOffset = 0,
+	bool requestChatHistory(MumbleProto::ChatScope scope, unsigned int scopeID = 0, unsigned int startOffset = 0,
 							unsigned int limit = 50,
-							std::optional< unsigned int > beforeMessageID = std::nullopt);
+							std::optional< unsigned int > beforeMessageID = std::nullopt, quint64 requestID = 0);
 	bool requestChatHistoryWarmup(const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes,
-								  unsigned int limitPerScope = 20);
+								  unsigned int limitPerScope = 20, quint64 requestID = 0);
 	void updateChatReadState(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int lastReadMessageID);
 	void sendWatchTogetherSync(const MumbleProto::WatchTogetherSync &sync);
 	void setUserComment(unsigned int uiSession, const QString &comment);
