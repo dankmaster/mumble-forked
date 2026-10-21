@@ -280,6 +280,73 @@ TestCase {
 		probe.destroy()
 	}
 
+	function test_cold_visible_cohort_keeps_anchor_until_promotion_finishes() {
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				property var rows: []
+				function visiblePresentationDiagnostics() {
+					return {rows: rows, presentationHeightPendingCount: 0,
+						presentationHeightMismatchCount: 0}
+				}
+				${productFunction("visiblePresentationHeightConvergencePending")}
+			}`, testCase)
+		probe.rows = [{lightweight: true}, {presentationHeightReleased: true}]
+		verify(probe.visiblePresentationHeightConvergencePending())
+		probe.rows = [{lightweight: true, deadlineFallback: true}]
+		verify(!probe.visiblePresentationHeightConvergencePending())
+		probe.rows = [{presentationHeightReleased: true}]
+		verify(!probe.visiblePresentationHeightConvergencePending())
+		probe.destroy()
+	}
+
+	function test_anchor_retry_survives_asynchronous_delegate_replacement() {
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				id: probe
+				property var timeline: probe
+				property bool viewportAnchorActive: true
+				property bool viewportAnchorReleasePending: false
+				property bool restoringViewportAnchor: false
+				property bool stickToBottom: false
+				property bool prependAnchorActive: false
+				property bool scopePresentationPending: false
+				property bool moving: false
+				property bool dragging: false
+				property bool flicking: false
+				property bool scrollbarDragActive: false
+				property bool scrollbarReleasePending: false
+				property var timelineScrollBar: ({pressed: false})
+				property string viewportAnchorId: "message"
+				property int viewportAnchorRetries: 0
+				property real viewportAnchorOffset: 50
+				property real contentY: 900
+				property real originY: 0
+				property real contentHeight: 2000
+				property real height: 600
+				property bool replacementReady: false
+				property Timer retryTimer: Timer {
+					id: viewportAnchorRestoreTimer
+					interval: 16
+					onTriggered: probe.restoreViewportAnchor()
+				}
+				property Timer replaceTimer: Timer {
+					interval: 40
+					running: true
+					onTriggered: probe.replacementReady = true
+				}
+				function timelineDelegateForStableId(id) {
+					return replacementReady ? {mapToItem: function() { return {y: 1000 - contentY} }} : null
+				}
+				function releaseViewportAnchor() { viewportAnchorActive = false }
+				${productFunction("restoreViewportAnchor")}
+			}`, testCase)
+		verify(!probe.restoreViewportAnchor())
+		tryCompare(probe, "contentY", 950)
+		verify(probe.viewportAnchorActive)
+		compare(probe.viewportAnchorRetries, 0)
+		probe.destroy()
+	}
+
 	function test_prefetch_skips_retained_stills_and_selects_next_cold_card() {
 		const probe = Qt.createQmlObject(`import QtQuick
 			QtObject {

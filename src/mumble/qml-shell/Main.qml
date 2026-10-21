@@ -5726,8 +5726,11 @@ ApplicationWindow {
 							return true
 						for (let index = 0; index < diagnostics.rows.length; ++index) {
 							const row = diagnostics.rows[index]
-							if (row.lightweight === true)
+							if (row.lightweight === true) {
+								if (row.deadlineFallback !== true)
+									return true
 								continue
+							}
 							if (row.presentationHeightReleased !== true
 									&& (row.richGeometrySettling === true
 										|| row.inactiveRichResources === true))
@@ -6208,6 +6211,7 @@ ApplicationWindow {
 
 					function releaseViewportAnchor() {
 						clearViewportAnchorQuietRelease()
+						viewportAnchorRestoreTimer.stop()
 						// An explicit release invalidates any speculative prefetch
 						// ownership. Its late completion must not release a newer anchor
 						// captured by scrollbar or navigation input.
@@ -8032,7 +8036,9 @@ ApplicationWindow {
 						const item = timelineDelegateForStableId(viewportAnchorId)
 						if (!item) {
 							if (++viewportAnchorRetries <= 8)
-								Qt.callLater(function() { timeline.restoreViewportAnchor() })
+								// DelegateChooser replacement needs a polish/animation turn.
+								// callLater can spend every retry before that turn occurs.
+								viewportAnchorRestoreTimer.restart()
 							else
 								releaseViewportAnchor()
 							return false
@@ -8772,6 +8778,13 @@ ApplicationWindow {
 								timeline.scheduleNearViewportPrefetch()
 							}
 						}
+					}
+
+					Timer {
+						id: viewportAnchorRestoreTimer
+						interval: 16
+						repeat: false
+						onTriggered: timeline.restoreViewportAnchor()
 					}
 
 					Timer {
