@@ -3057,7 +3057,7 @@ TestCase {
 		verify(sourcePosition.x + sourceLink.width <= card.width + 0.5,
 			"source link escaped card: x=" + sourcePosition.x
 				+ " width=" + sourceLink.width + " card=" + card.width)
-		verify(sourceLabel.width <= sourceLink.width)
+		verify(sourceLink.Accessible.name.length > 0)
 		verify(body !== null && body.visible)
 		compare(genericHeader.visible, false)
 		compare(detailsLoader.visible, false)

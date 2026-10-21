@@ -922,10 +922,10 @@ TestCase {
 			"richLoaderResumeActiveId = stableId", plainResumeStart)
 		verify(plainResumeStart >= 0 && plainResumeEnd > plainResumeStart)
 		const plainResumeSource = mainSource.slice(plainResumeStart, plainResumeEnd)
-		verify(/scopePresentationPending[\s\S]*scopePresentationFinalizing[\s\S]*stillVisible\s*\|\|\s*plainSourceOwned[\s\S]*item\.plainScopeResumeEligible\s*===\s*true[\s\S]*resumeRichContentAfterScroll\(true,\s*false\)[\s\S]*plainAdmissions\s*>=\s*plainScopeResumeAdmissionsPerFrame/.test(
+		verify(/plainSourceOwned[\s\S]*scopePresentationPending[\s\S]*scopePresentationFinalizing\s*&&\s*stillVisible[\s\S]*item\.plainScopeResumeEligible\s*===\s*true[\s\S]*resumeRichContentAfterScroll\(true,\s*false\)[\s\S]*plainAdmissions\s*>=\s*plainScopeResumeAdmissionsPerFrame/.test(
 			plainResumeSource))
 		verify(!/richLoaderResumeActiveId\s*=/.test(plainResumeSource))
-		verify(/scopePresentationPending\s*&&\s*scopePresentationFinalizing[\s\S]*visible\s*\|\|\s*plainSourceOwned[\s\S]*item\.plainScopeResumeEligible\s*===\s*true[\s\S]*item\.messageRowMaterialized\s*===\s*true[\s\S]*continue/.test(mainSource))
+		verify(/plainSourceOwned\s*\|\|\s*\(scopePresentationPending\s*&&\s*scopePresentationFinalizing\s*&&\s*visible[\s\S]*item\.plainScopeResumeEligible\s*===\s*true[\s\S]*item\.messageRowMaterialized\s*===\s*true[\s\S]*continue/.test(mainSource))
 		verify(/readonly property bool plainDeferredSourceOwned:[\s\S]*plainDeferredMaterializationOwns\([\s\S]*deferredMaterializationCleanupId[\s\S]*deferredMaterializationCleanupGeneration[\s\S]*readonly property bool plainScopeResumeEligible:\s*item[\s\S]*item\.plainScopeResumeEligible\s*:\s*plainDeferredSourceOwned/.test(mainSource))
 		verify(/function\s+captureDeferredMaterializationOwnership\(\)[\s\S]*deferredMaterializationGenerationFor\([\s\S]*function\s+releaseDeferredMaterialization\(stableIdOverride,[\s\S]*generationOverride[\s\S]*completeDeferredMaterialization\(key,\s*generation\)/.test(mainSource))
 		verify(/ListView\.onPooled:[\s\S]*releaseDeferredMaterialization\([\s\S]*ListView\.onReused:[\s\S]*deferredMaterializationCleanupGeneration[\s\S]*captureDeferredMaterializationOwnership\(\)[\s\S]*onStableIdChanged:[\s\S]*retiredMaterializationGeneration[\s\S]*releaseDeferredMaterialization\(retiredMaterializationId,[\s\S]*Component\.onDestruction:[\s\S]*deferredMaterializationCleanupGeneration/.test(mainSource))

@@ -13,6 +13,7 @@ Button {
 	property string providerLabel: ""
 	property color accent: Theme.accent
 	signal openRequested(string url)
+	padding: compactPresentation ? 2 : 6
 
 	visible: sourceUrl.length > 0
 	focusPolicy: Qt.StrongFocus
@@ -58,8 +59,9 @@ Button {
 
 			Label {
 				Layout.fillWidth: true
-				visible: root.providerLabel.length > 0
-				text: root.providerLabel
+				visible: root.compactPresentation || root.providerLabel.length > 0
+				text: root.providerLabel || qsTr("Open source")
+				elide: Text.ElideRight
 				textFormat: Text.PlainText
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontCaption

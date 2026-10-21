@@ -113,9 +113,8 @@ Item {
 	readonly property color bubbleBorderColor: root.systemMessage ? Theme.surfaceBorder
 		: root.own ? Theme.chatOwnBorder : Theme.chatIncomingBorder
 	readonly property int bubbleBorderWidth: 1
-	// The incoming avatar sits outside its bubble in Main.qml, so this technical
-	// frame stays transparent for incoming rows while exposing the semantic
-	// bubble roles to its content. Own/system rows can paint the complete frame.
+	// Authored messages use a transparent reading surface. System messages and
+	// Activity retain their separate visual treatment.
 	readonly property color surfaceColor: root.logEntry
 		? (root.hovered ? Theme.withAlpha(Theme.surfaceHover, 0.78)
 			: root.logAlternating ? Theme.withAlpha(Theme.surfaceRaised, 0.52) : "transparent")

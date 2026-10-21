@@ -23,6 +23,17 @@ TestCase {
 		return source.slice(start, end)
 	}
 
+	function test_readonly_author_without_avatar_is_not_a_system_message() {
+		const probe = Qt.createQmlObject('import QtQuick; QtObject {'
+			+ productFunction("isSystemChatMessage") + '}', testCase)
+		compare(probe.isSystemChatMessage({actor: "Alex"}, "", false, false, false), false)
+		compare(probe.isSystemChatMessage({actorKey: "user:2"}, "", false, false, false), false)
+		compare(probe.isSystemChatMessage({system: true, actor: "Server"}, "", false, false, false), true)
+		compare(probe.isSystemChatMessage({}, "", false, false, false), true)
+		compare(probe.isSystemChatMessage({}, "", false, false, true), false)
+		probe.destroy()
+	}
+
 	function cachedPlainQueueProbe() {
 		return Qt.createQmlObject(`import QtQuick
 			QtObject {

@@ -596,6 +596,11 @@ ApplicationWindow {
 		return Math.max(metadataFloor, Math.min(Theme.chatPlainMaximumWidth, textEstimate))
 	}
 
+	function isSystemChatMessage(message, avatar, replyAllowed, reactionAllowed, ownMessage) {
+		return !!message.system || (!message.actorKey && !message.actor
+			&& avatar.length === 0 && !replyAllowed && !reactionAllowed && !ownMessage)
+	}
+
 	function safeRenderImageSource(value) {
 		const source = String(value === undefined || value === null ? "" : value).trim()
 		if (/^(image:\/\/mumble\/|qrc:\/)/i.test(source))
@@ -9643,8 +9648,7 @@ ApplicationWindow {
 								readonly property bool cachedStaticHandoffCompact:
 									timeline.staticPreviewHandoffUsesCompactHeader(preview || ({}))
 								readonly property bool cachedStaticHandoffSystemMessage:
-									!!source.system || (!source.actorKey && avatarUrl.length === 0
-										&& !canReply && !canReact && !own)
+									root.isSystemChatMessage(source, avatarUrl, canReply, canReact, own)
 								readonly property string cachedStaticHandoffProvider: String(preview
 									? (preview.host || preview.providerName || preview.provider
 										|| preview.embedKind || "") : "").trim()
@@ -11951,8 +11955,7 @@ ApplicationWindow {
 						property bool canDelete: asyncMessageDelegate.canDelete
 						searchCurrent: root.conversationSearchOpen
 							&& stableId === String(chatModel.currentMatchStableId || "")
-						systemMessage: logEntry || !!source.system
-							|| (!source.actorKey && avatarUrl.length === 0 && !canReply && !canReact && !own)
+						systemMessage: logEntry || root.isSystemChatMessage(source, avatarUrl, canReply, canReact, own)
 						startsGroup: modelStartsGroup
 						dateSeparatorLabel: dateBoundary ? root.messageDateLabel(source) : ""
 						bodyImplicitHeight: logEntry
