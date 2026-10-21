@@ -5,6 +5,10 @@
 
 add_executable(TestPersistentChatController
 	TestPersistentChatController.cpp
+	../../mumble/ChatRowBuilder.cpp
+	../../mumble/ChatRowModel.cpp
+	../../mumble/ChatTimelineFeed.cpp
+	../../mumble/Markdown.cpp
 	../../mumble/PersistentChatGateway.h
 	../../mumble/PersistentChatController.cpp
 	../../mumble/PersistentChatStore.cpp
@@ -12,7 +16,7 @@ add_executable(TestPersistentChatController
 
 set_target_properties(TestPersistentChatController PROPERTIES AUTOMOC ON)
 
-target_link_libraries(TestPersistentChatController PRIVATE shared Qt6::Test)
+target_link_libraries(TestPersistentChatController PRIVATE shared Qt6::Gui Qt6::Test)
 
 add_test(NAME TestPersistentChatController COMMAND $<TARGET_FILE:TestPersistentChatController>)
 

@@ -57,4 +57,25 @@ struct PersistentChatScopeStateSnapshot {
 	QString errorMessage;
 };
 
+// What changed in the active scope's messages, so a consumer can update only
+// those rows instead of diffing the whole snapshot.
+struct PersistentChatMessageChange {
+	enum class Kind {
+		// The active scope changed or the store was cleared; key is the new scope.
+		Reset,
+		// Messages were added, replaced or removed (deleted messages leave the store).
+		Messages,
+		// A message's embeds or reactions were replaced in place.
+		Patched
+	};
+	Kind kind = Kind::Reset;
+	PersistentChatScopeKey key;
+	// (thread_id << 32) | message_id of every affected message.
+	QVector< quint64 > identities;
+
+	static quint64 identity(const MumbleProto::ChatMessage &message) {
+		return (static_cast< quint64 >(message.thread_id()) << 32U) | static_cast< quint64 >(message.message_id());
+	}
+};
+
 #endif // MUMBLE_MUMBLE_PERSISTENTCHATSTATE_H_

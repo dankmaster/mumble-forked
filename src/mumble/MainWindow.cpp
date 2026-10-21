@@ -48,6 +48,8 @@
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 #		include "ModernUiAutomationServer.h"
 #	endif
+#include "ChatRowBuilder.h"
+#include "ChatTimelineFeed.h"
 #include "PersistentChatController.h"
 #include "PersistentChatGateway.h"
 #include "PersistentChatRenderTypes.h"
@@ -14920,6 +14922,7 @@ void MainWindow::applyShellLayout() {
 	{
 		if (!m_qmlShellHost) {
 			m_qmlShellHost = std::make_unique< QmlShellHost >(m_clientActionRegistry.get(), this);
+			initializeChatTimelineV2Feed();
 			ClientSessionController *session = m_qmlShellHost->sessionController();
 			UiCommandController *commands = m_qmlShellHost->commandController();
 			connect(m_qmlShellHost->chatModel(), &ChatTimelineModel::presentationBusyChanged, this, [this]() {
@@ -30802,6 +30805,28 @@ void MainWindow::initializePersistentChatBackend() {
 				publishQmlActiveScopeState();
 				scheduleQmlRoomStateUpdate();
 			});
+}
+
+void MainWindow::initializeChatTimelineV2Feed() {
+	// Phase 1 of the v2 timeline: the new data layer runs next to the current
+	// timeline on the same controller traffic, behind a development switch, so
+	// its build and apply costs can be traced in connected sessions.
+	if (m_chatTimelineV2Feed || !m_persistentChatController || !m_qmlShellHost
+		|| qEnvironmentVariableIntValue("MUMBLE_CHAT_TIMELINE_V2") <= 0) {
+		return;
+	}
+	m_chatTimelineV2Feed =
+		new ChatTimelineFeed(m_persistentChatController, m_qmlShellHost->chatTimelineV2Model(), this);
+	m_chatTimelineV2Feed->setOptionsProvider([]() {
+		ChatRowBuilder::Options options;
+		options.ownSession = Global::get().uiSession;
+		QReadLocker locker(&ClientUser::c_qrwlUsers);
+		if (const ClientUser *self = ClientUser::c_qmUsers.value(Global::get().uiSession);
+			self && self->iId >= 0) {
+			options.ownUserId = static_cast< quint32 >(self->iId);
+		}
+		return options;
+	});
 }
 
 void MainWindow::publishPersistentChatSnapshot() {

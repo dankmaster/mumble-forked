@@ -65,6 +65,7 @@ class PersistentChatGateway;
 class PersistentChatController;
 class ChatAttachmentUploader;
 class ModernDialogController;
+class ChatTimelineFeed;
 class QmlShellHost;
 class QmlVisualFixtureController;
 class QmlSelectionState;
@@ -331,6 +332,7 @@ public:
 	void syncServerNavigatorUserMenu();
 	void positionServerNavigatorUserMenu();
 	void initializePersistentChatBackend();
+	void initializeChatTimelineV2Feed();
 	void publishPersistentChatSnapshot();
 	bool publishPersistentChatPrependVisualFixture(
 		MumbleProto::ChatScope scope, unsigned int scopeID,
@@ -1096,6 +1098,7 @@ protected:
 	qt_unique_ptr< ListenerVolumeController > m_listenerVolumeController;
 	PersistentChatGateway *m_persistentChatGateway                 = nullptr;
 	PersistentChatController *m_persistentChatController           = nullptr;
+	ChatTimelineFeed *m_chatTimelineV2Feed                          = nullptr;
 	QString m_persistentChatWelcomeText;
 	QString m_modernPersistentChatWelcomeHtml;
 	QStringList m_modernPersistentChatWelcomeImageUrls;

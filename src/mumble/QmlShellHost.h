@@ -17,6 +17,7 @@ class AsyncOperationModel;
 class AsyncOperationOverlayProxyModel;
 class ActionModel;
 class ActiveScopeController;
+class ChatRowModel;
 class ChatTimelineModel;
 class ComposerController;
 class ClientActionRegistry;
@@ -67,6 +68,8 @@ public:
 	ParticipantModel *participantModel() const;
 	void clearConnectionState();
 	ChatTimelineModel *chatModel() const;
+	// The v2 timeline's typed rows; filled only when MUMBLE_CHAT_TIMELINE_V2 is set.
+	ChatRowModel *chatTimelineV2Model() const;
 	ComposerController *composerController() const;
 	ToastController *toastController() const;
 	AsyncOperationModel *operationModel() const;
@@ -124,6 +127,7 @@ private:
 	std::unique_ptr< NavigationRailModel > m_navigationModel;
 	std::unique_ptr< ParticipantModel > m_participantModel;
 	std::unique_ptr< ChatTimelineModel > m_chatModel;
+	std::unique_ptr< ChatRowModel > m_chatTimelineV2Model;
 	std::unique_ptr< ToastController > m_toastController;
 	std::unique_ptr< AsyncOperationModel > m_operationModel;
 	std::unique_ptr< AsyncOperationOverlayProxyModel > m_operationOverlayModel;

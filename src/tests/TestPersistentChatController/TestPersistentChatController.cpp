@@ -7,6 +7,9 @@
 
 #include <initializer_list>
 
+#include "mumble/ChatRowBuilder.h"
+#include "mumble/ChatRowModel.h"
+#include "mumble/ChatTimelineFeed.h"
 #include "mumble/PersistentChatController.h"
 
 namespace {
@@ -224,6 +227,16 @@ private slots:
 	void preservesReplyMetadataFromHistory();
 	void appliesReactionUpdatesToCachedMessages();
 	void removesDeletedMessageFromCachedSnapshot();
+	void reportsActiveMessageChanges();
+	void rowBuilderSplitsMarkdownIntoBlocks();
+	void rowBuilderSanitizesLinks();
+	void rowBuilderKeepsLegacyFormattingAndSplitsInlineImages();
+	void rowBuilderClassifiesMediaAndCards();
+	void rowBuilderMarksSystemAndOwnMessages();
+	void rowBuilderDecoratesAcrossPageBoundaries();
+	void rowModelKeepsNewestFirstAndReportsExactRoles();
+	void timelineFeedMirrorsActiveScope();
+	void timelineFeedDropsWorkForRetiredScope();
 };
 
 void TestPersistentChatController::activeSnapshotChangedPublishesTwoHistoryMessages() {
@@ -976,6 +989,418 @@ void TestPersistentChatController::completedRequestTimeoutDoesNotCancelItsSucces
 	history.set_request_id(currentID);
 	gateway.handleIncomingHistory(history);
 	QCOMPARE(controller.activeSnapshot().loadingState, PersistentChatLoadingState::Idle);
+}
+
+namespace {
+	MumbleProto::ChatMessage makeMarkdownMessage(unsigned int messageID, quint64 createdAt, unsigned int authorID,
+												 const QString &body) {
+		MumbleProto::ChatMessage message =
+			makeMessage(messageID, createdAt, MumbleProto::TextChannel, 90, body);
+		message.set_actor_user_id(authorID);
+		message.set_actor_name(QStringLiteral("User %1").arg(authorID).toUtf8().constData());
+		message.set_body_format(MumbleProto::ChatBodyFormatMarkdownLite);
+		return message;
+	}
+
+	QVariantMap blockAt(const ChatTimelineRow &row, int index) {
+		return row.bodyBlocks.value(index).toMap();
+	}
+
+	ChatTimelineRow rowWithKey(quint32 messageID, quint64 createdAt) {
+		ChatTimelineRow row;
+		row.key.createdAt = createdAt;
+		row.key.threadId  = messageID;
+		row.key.messageId = messageID;
+		row.plainText     = QStringLiteral("message %1").arg(messageID);
+		row.authorName    = QStringLiteral("Alice");
+		return row;
+	}
+
+	QList< quint32 > modelMessageIDs(const ChatRowModel &model) {
+		QList< quint32 > ids;
+		for (int row = 0; row < model.count(); ++row) {
+			ids << model.rowAt(row).key.messageId;
+		}
+		return ids;
+	}
+} // namespace
+
+void TestPersistentChatController::reportsActiveMessageChanges() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	QList< PersistentChatMessageChange > changes;
+	connect(&controller, &PersistentChatController::activeMessagesChanged, &controller,
+			[&changes](const PersistentChatMessageChange &change) { changes << change; });
+
+	const PersistentChatScopeKey key = PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 90);
+	controller.setActiveScope(key, false);
+	QCOMPARE(changes.size(), 1);
+	QVERIFY(changes.last().kind == PersistentChatMessageChange::Kind::Reset);
+	QCOMPARE(changes.last().key.cacheKey(), key.cacheKey());
+
+	gateway.handleIncomingHistory(makeHistory(MumbleProto::TextChannel, 90,
+											  { makeMessage(1, 100, MumbleProto::TextChannel, 90),
+												makeMessage(2, 110, MumbleProto::TextChannel, 90) },
+											  0, 1, false));
+	QCOMPARE(changes.size(), 2);
+	QVERIFY(changes.last().kind == PersistentChatMessageChange::Kind::Messages);
+	QCOMPARE(changes.last().identities.size(), 2);
+
+	MumbleProto::ChatMessage live = makeMessage(3, 120, MumbleProto::TextChannel, 90);
+	gateway.handleIncomingMessage(live);
+	QCOMPARE(changes.size(), 3);
+	QCOMPARE(changes.last().identities, QVector< quint64 >{ PersistentChatMessageChange::identity(live) });
+
+	QVERIFY(controller.applyReactionState(
+		makeReactionState(MumbleProto::TextChannel, 90, 3, 3, { makeReaction(QStringLiteral("+1"), 1, true) })));
+	QCOMPARE(changes.size(), 4);
+	QVERIFY(changes.last().kind == PersistentChatMessageChange::Kind::Patched);
+	QVERIFY(controller.applyEmbedState(
+		makeEmbedState(MumbleProto::TextChannel, 90, 3, 3, QStringLiteral("https://example.com/"))));
+	QCOMPARE(changes.size(), 5);
+	QVERIFY(changes.last().kind == PersistentChatMessageChange::Kind::Patched);
+
+	MumbleProto::ChatMessage tombstone = live;
+	tombstone.set_deleted_at(130);
+	gateway.handleIncomingMessage(tombstone);
+	QCOMPARE(changes.size(), 6);
+	QCOMPARE(changes.last().identities, QVector< quint64 >{ PersistentChatMessageChange::identity(live) });
+
+	// Traffic for another scope updates its cache but is not an active-scope change.
+	gateway.handleIncomingMessage(makeMessage(4, 140, MumbleProto::TextChannel, 91));
+	QCOMPARE(changes.size(), 6);
+
+	controller.clearActiveScope();
+	QCOMPARE(changes.size(), 7);
+	QVERIFY(changes.last().kind == PersistentChatMessageChange::Kind::Reset);
+	QVERIFY(!changes.last().key.valid);
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::rowBuilderSplitsMarkdownIntoBlocks() {
+	const ChatRowBuilder::Body body = ChatRowBuilder::buildBody(
+		QStringLiteral("Intro **bold** and `code()`\nsecond line\n\n> quoted\n> reply\n## Release notes\n```\nlet x = 1;\n```"),
+		true);
+	QCOMPARE(body.blocks.size(), 4);
+
+	const QVariantMap intro = body.blocks.at(0).toMap();
+	QCOMPARE(intro.value(QStringLiteral("kind")).toString(), QStringLiteral("p"));
+	// Inline code needs RichText; StyledText has no monospace.
+	QCOMPARE(intro.value(QStringLiteral("format")).toString(), QStringLiteral("rich"));
+	QVERIFY(intro.value(QStringLiteral("text")).toString().contains(QStringLiteral("<b>bold</b>")));
+	QVERIFY(intro.value(QStringLiteral("text")).toString().contains(QStringLiteral("<code>code()</code>")));
+	// A single newline the user typed is kept.
+	QVERIFY(intro.value(QStringLiteral("text")).toString().contains(QStringLiteral("<br>second line")));
+
+	const QVariantMap quote = body.blocks.at(1).toMap();
+	QCOMPARE(quote.value(QStringLiteral("kind")).toString(), QStringLiteral("quote"));
+	QCOMPARE(quote.value(QStringLiteral("format")).toString(), QStringLiteral("plain"));
+	QCOMPARE(quote.value(QStringLiteral("text")).toString(), QStringLiteral("quoted\nreply"));
+
+	const QVariantMap heading = body.blocks.at(2).toMap();
+	QCOMPARE(heading.value(QStringLiteral("kind")).toString(), QStringLiteral("h"));
+	QCOMPARE(heading.value(QStringLiteral("level")).toInt(), 2);
+	QCOMPARE(heading.value(QStringLiteral("text")).toString(), QStringLiteral("Release notes"));
+
+	const QVariantMap code = body.blocks.at(3).toMap();
+	QCOMPARE(code.value(QStringLiteral("kind")).toString(), QStringLiteral("code"));
+	QCOMPARE(code.value(QStringLiteral("text")).toString(), QStringLiteral("let x = 1;"));
+
+	const ChatRowBuilder::Body plain = ChatRowBuilder::buildBody(QStringLiteral("just words"), true);
+	QCOMPARE(plain.blocks.size(), 1);
+	QCOMPARE(plain.blocks.first().toMap().value(QStringLiteral("format")).toString(), QStringLiteral("plain"));
+}
+
+void TestPersistentChatController::rowBuilderSanitizesLinks() {
+	const ChatRowBuilder::Body markdown =
+		ChatRowBuilder::buildBody(QStringLiteral("[bad](javascript:alert(1)) and [good](https://example.com/ok)"), true);
+	const QString markdownHtml = markdown.blocks.first().toMap().value(QStringLiteral("text")).toString();
+	// No link may carry a script scheme. (The Markdown converter prefixes scheme-less
+	// targets with http://, so "javascript" can survive as an http host name.)
+	static const QRegularExpression scriptLink(QStringLiteral("href\\s*=\\s*[\"']?\\s*javascript:"),
+											   QRegularExpression::CaseInsensitiveOption);
+	QVERIFY2(!scriptLink.match(markdownHtml).hasMatch(), qPrintable(markdownHtml));
+	QVERIFY(markdownHtml.contains(QStringLiteral("href=\"https://example.com/ok\"")));
+
+	const ChatRowBuilder::Body plain =
+		ChatRowBuilder::buildBody(QStringLiteral("see https://example.com/a?b=1&c=2 now"), false);
+	const QVariantMap plainBlock = plain.blocks.first().toMap();
+	QCOMPARE(plainBlock.value(QStringLiteral("format")).toString(), QStringLiteral("styled"));
+	QVERIFY(plainBlock.value(QStringLiteral("text")).toString().contains(
+		QStringLiteral("<a href=\"https://example.com/a?b=1&amp;c=2\">")));
+
+	const ChatRowBuilder::Body legacy = ChatRowBuilder::buildBody(
+		QStringLiteral("<p><a href=\"javascript:alert(1)\">bad</a> <a href=\"https://example.com/\">good</a>"
+					   "<script>alert(2)</script></p>"),
+		false);
+	const QString legacyHtml = legacy.blocks.first().toMap().value(QStringLiteral("text")).toString();
+	QVERIFY2(!legacyHtml.contains(QStringLiteral("javascript"), Qt::CaseInsensitive), qPrintable(legacyHtml));
+	QVERIFY(!legacyHtml.contains(QStringLiteral("<script"), Qt::CaseInsensitive));
+	QVERIFY(legacyHtml.contains(QStringLiteral("bad")));
+	QVERIFY(legacyHtml.contains(QStringLiteral("<a href=\"https://example.com/\">good</a>")));
+}
+
+void TestPersistentChatController::rowBuilderKeepsLegacyFormattingAndSplitsInlineImages() {
+	MumbleProto::ChatMessage message = makeMessage(
+		5, 500, MumbleProto::Channel, 1,
+		QStringLiteral("<p><b>bold</b> <span style=\" font-family:'Courier New';\">mono()</span>"
+					   "<img src=\"data:image/png;base64,iVBORw0KGgo=\" /></p>"));
+	message.set_body_format(MumbleProto::ChatBodyFormatPlainText);
+	const ChatTimelineRow row = ChatRowBuilder().build(message);
+
+	QCOMPARE(row.bodyBlocks.size(), 1);
+	const QVariantMap block = blockAt(row, 0);
+	QCOMPARE(block.value(QStringLiteral("format")).toString(), QStringLiteral("rich"));
+	QVERIFY(block.value(QStringLiteral("text")).toString().contains(QStringLiteral("<b>bold</b>")));
+	QVERIFY(block.value(QStringLiteral("text")).toString().contains(QStringLiteral("<code>mono()</code>")));
+	QVERIFY(!block.value(QStringLiteral("text")).toString().contains(QStringLiteral("data:image")));
+	// The pasted image becomes media with a fixed default box until it is decoded.
+	QCOMPARE(row.media.size(), 1);
+	QVERIFY(row.media.first().kind == ChatTimelineMedia::Kind::InlineImage);
+	QVERIFY(!row.media.first().geometryKnown);
+	QVERIFY(row.kind == ChatTimelineRowKind::Media);
+}
+
+void TestPersistentChatController::rowBuilderClassifiesMediaAndCards() {
+	const auto withAsset = [](MumbleProto::ChatMessage message, MumbleProto::ChatAssetKind kind, unsigned int width,
+							  unsigned int height) {
+		MumbleProto::ChatAssetRef *asset = message.add_attachments();
+		asset->set_asset_id(static_cast< unsigned int >(message.attachments_size()) + 100);
+		asset->set_kind(kind);
+		asset->set_width(width);
+		asset->set_height(height);
+		return message;
+	};
+	const ChatRowBuilder builder;
+	const MumbleProto::ChatMessage base = makeMessage(7, 700, MumbleProto::Channel, 1, QString());
+
+	const ChatTimelineRow image = builder.build(withAsset(base, MumbleProto::ChatAssetKindImage, 1920, 1080));
+	QVERIFY(image.kind == ChatTimelineRowKind::Media);
+	QVERIFY(image.media.first().geometryKnown);
+	QCOMPARE(image.media.first().width, 1920);
+
+	const ChatTimelineRow unknown = builder.build(withAsset(base, MumbleProto::ChatAssetKindImage, 0, 0));
+	QVERIFY(!unknown.media.first().geometryKnown);
+
+	const ChatTimelineRow gallery = builder.build(withAsset(
+		withAsset(base, MumbleProto::ChatAssetKindImage, 800, 600), MumbleProto::ChatAssetKindImage, 600, 800));
+	QVERIFY(gallery.kind == ChatTimelineRowKind::Gallery);
+
+	const ChatTimelineRow video = builder.build(withAsset(base, MumbleProto::ChatAssetKindVideo, 1280, 720));
+	QVERIFY(video.kind == ChatTimelineRowKind::Video);
+
+	const ChatTimelineRow file = builder.build(withAsset(base, MumbleProto::ChatAssetKindDocument, 0, 0));
+	QVERIFY(file.kind == ChatTimelineRowKind::File);
+
+	MumbleProto::ChatMessage linked = base;
+	linked.set_body_text("https://example.com/article");
+	MumbleProto::ChatEmbedRef *embed = linked.add_embeds();
+	embed->set_canonical_url("https://example.com/article");
+	embed->set_status(MumbleProto::ChatEmbedStatusReady);
+	embed->set_title("Article");
+	embed->set_preview_asset_id(55);
+	const ChatTimelineRow card = builder.build(linked);
+	QVERIFY(card.kind == ChatTimelineRowKind::LinkCard);
+	QVERIFY(card.card.status == ChatTimelineCard::Status::Ready);
+	QVERIFY(card.card.layout == ChatTimelineCard::Layout::SmallThumbnail);
+	QCOMPARE(card.card.title, QStringLiteral("Article"));
+
+	embed->set_status(MumbleProto::ChatEmbedStatusFailed);
+	QVERIFY(builder.build(linked).kind == ChatTimelineRowKind::Text);
+}
+
+void TestPersistentChatController::rowBuilderMarksSystemAndOwnMessages() {
+	ChatRowBuilder::Options options;
+	options.ownUserId = 42;
+	const ChatRowBuilder builder(options);
+
+	const ChatTimelineRow system =
+		builder.build(makeMessage(8, 800, MumbleProto::Channel, 1, QStringLiteral("[system] Alice joined")));
+	QVERIFY(system.kind == ChatTimelineRowKind::System);
+	QCOMPARE(system.plainText, QStringLiteral("Alice joined"));
+
+	MumbleProto::ChatMessage mine = makeMessage(9, 900, MumbleProto::Channel, 1);
+	mine.set_actor_user_id(42);
+	QVERIFY(builder.build(mine).own);
+	QVERIFY(!builder.build(makeMessage(10, 900, MumbleProto::Channel, 1)).own);
+}
+
+void TestPersistentChatController::rowBuilderDecoratesAcrossPageBoundaries() {
+	// Two authors, a five-minute gap and a day change, spread over page boundaries.
+	const quint64 day = 1784000000;
+	QVector< MumbleProto::ChatMessage > messages;
+	const quint64 offsets[]   = { 0, 30, 60, 400, 430, 460, 86400, 86430, 86460, 86490, 86520, 86900 };
+	const unsigned int authors[] = { 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 1, 1 };
+	for (int i = 0; i < 12; ++i) {
+		messages << makeMarkdownMessage(static_cast< unsigned int >(i + 1), day + offsets[i], authors[i],
+										QStringLiteral("message %1").arg(i));
+	}
+	const ChatRowBuilder builder;
+	const QVector< ChatTimelineRow > single = builder.buildRange(messages, 0, 11);
+	// The same messages in three-message pages, newest page first, as paging delivers them.
+	QVector< ChatTimelineRow > paged;
+	for (int first = 9; first >= 0; first -= 3) {
+		paged = builder.buildRange(messages, first, first + 2) + paged;
+	}
+	QCOMPARE(paged.size(), single.size());
+	for (int i = 0; i < single.size(); ++i) {
+		QCOMPARE(paged.at(i).groupStart, single.at(i).groupStart);
+		QCOMPARE(paged.at(i).dateLabel, single.at(i).dateLabel);
+	}
+	QVERIFY(single.at(0).groupStart);
+	QVERIFY(!single.at(1).groupStart);
+	QVERIFY(single.at(2).groupStart);     // other author
+	QVERIFY(single.at(3).groupStart);     // more than five minutes later
+	QVERIFY(!single.at(4).groupStart);
+	QVERIFY(!single.at(6).dateLabel.isEmpty()); // next day
+	QVERIFY(single.at(7).dateLabel.isEmpty());
+	QVERIFY(single.at(11).groupStart);    // 380 s after the previous message
+}
+
+void TestPersistentChatController::rowModelKeepsNewestFirstAndReportsExactRoles() {
+	ChatRowModel model;
+	model.resetScope(QStringLiteral("3:90"));
+	QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+
+	model.upsertRows({ rowWithKey(2, 200), rowWithKey(1, 100), rowWithKey(3, 300) });
+	QCOMPARE(modelMessageIDs(model), (QList< quint32 >{ 3, 2, 1 }));
+	QCOMPARE(inserted.size(), 1); // one contiguous run, one insertion
+
+	// An older page appends at the end in one insertion; a live message goes to row 0.
+	inserted.clear();
+	model.upsertRows({ rowWithKey(0, 50), rowWithKey(4, 400) });
+	QCOMPARE(modelMessageIDs(model), (QList< quint32 >{ 4, 3, 2, 1, 0 }));
+	QCOMPARE(inserted.size(), 2);
+	QCOMPARE(inserted.at(0).at(1).toInt(), 0);
+	QCOMPARE(inserted.at(1).at(1).toInt(), 4);
+
+	// Replacing with identical content signals nothing; a reaction change reports only reactions.
+	model.upsertRows({ rowWithKey(2, 200) });
+	QCOMPARE(changed.size(), 0);
+	ChatTimelineRow reacted = rowWithKey(2, 200);
+	reacted.reactions << ChatTimelineReaction{ QStringLiteral("+1"), 2, true, {} };
+	model.upsertRows({ reacted });
+	QCOMPARE(changed.size(), 1);
+	QCOMPARE(changed.first().at(0).toModelIndex().row(), 2);
+	QCOMPARE(qvariant_cast< QList< int > >(changed.first().at(2)), (QList< int >{ ChatRowModel::ReactionsRole }));
+
+	QCOMPARE(model.rowForMessage(1, 1), 3);
+	model.removeMessages({ rowWithKey(3, 300).key.identity() });
+	QCOMPARE(modelMessageIDs(model), (QList< quint32 >{ 4, 2, 1, 0 }));
+	QCOMPARE(model.rowForMessage(1, 1), 2);
+	QCOMPARE(model.rowsMatching(QStringLiteral("message 1")), (QVariantList{ 2 }));
+
+	model.resetScope(QStringLiteral("3:91"));
+	QCOMPARE(model.count(), 0);
+}
+
+void TestPersistentChatController::timelineFeedMirrorsActiveScope() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	ChatRowModel model;
+	ChatTimelineFeed feed(&controller, &model);
+	const auto settled = [&feed]() { return feed.pendingJobs() == 0; };
+
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 90), false);
+	MumbleProto::ChatHistoryResponse page;
+	page.set_scope(MumbleProto::TextChannel);
+	page.set_scope_id(90);
+	page.set_has_older(true);
+	for (unsigned int id = 101; id <= 220; ++id) {
+		*page.add_messages() = makeMarkdownMessage(id, 10000 + id * 20, id % 3, QStringLiteral("page %1").arg(id));
+	}
+	gateway.handleIncomingHistory(page);
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.count(), 120);
+	QCOMPARE(model.rowAt(0).key.messageId, 220U);
+	QCOMPARE(model.rowAt(119).key.messageId, 101U);
+
+	// Older history appends below the newest rows.
+	QVERIFY(controller.requestOlderForActiveScope());
+	MumbleProto::ChatHistoryResponse older;
+	older.set_scope(MumbleProto::TextChannel);
+	older.set_scope_id(90);
+	for (unsigned int id = 51; id <= 100; ++id) {
+		*older.add_messages() = makeMarkdownMessage(id, 10000 + id * 20, id % 3, QStringLiteral("older %1").arg(id));
+	}
+	gateway.handleIncomingHistory(older);
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.count(), 170);
+	QCOMPARE(model.rowAt(0).key.messageId, 220U);
+	QCOMPARE(model.rowAt(169).key.messageId, 51U);
+	// The oldest row of the newer page was decorated against its true older neighbour.
+	QCOMPARE(model.rowAt(119).groupStart, ChatRowBuilder().buildRange(controller.activeSnapshot().messages, 49, 50)
+											  .last()
+											  .groupStart);
+
+	// A live message lands at row 0.
+	gateway.handleIncomingMessage(makeMarkdownMessage(221, 10000 + 221 * 20, 1, QStringLiteral("live")));
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.rowAt(0).key.messageId, 221U);
+
+	// A reaction patch changes only that row's reactions.
+	QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+	QVERIFY(controller.applyReactionState(makeReactionState(MumbleProto::TextChannel, 90, 220, 220,
+															{ makeReaction(QStringLiteral("+1"), 3, false) })));
+	QTRY_VERIFY(settled());
+	QCOMPARE(changed.size(), 1);
+	QCOMPARE(qvariant_cast< QList< int > >(changed.first().at(2)), (QList< int >{ ChatRowModel::ReactionsRole }));
+	QCOMPARE(model.rowAt(1).reactions.first().count, 3U);
+
+	// Deleting a message removes its row and re-decorates the one after it.
+	MumbleProto::ChatMessage tombstone = makeMarkdownMessage(220, 10000 + 220 * 20, 220 % 3, QString());
+	tombstone.set_deleted_at(99999);
+	gateway.handleIncomingMessage(tombstone);
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.count(), 170);
+	QCOMPARE(model.rowAt(0).key.messageId, 221U);
+	QCOMPARE(model.rowAt(1).key.messageId, 219U);
+	QCOMPARE(model.rowForMessage(220, 220), -1);
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::timelineFeedDropsWorkForRetiredScope() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	ChatRowModel model;
+	ChatTimelineFeed feed(&controller, &model);
+
+	// Cache a large scope, then switch into it and straight out again.
+	const PersistentChatScopeKey large = PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 90);
+	controller.setActiveScope(large, false);
+	MumbleProto::ChatHistoryResponse page;
+	page.set_scope(MumbleProto::TextChannel);
+	page.set_scope_id(90);
+	for (unsigned int id = 1; id <= 2000; ++id) {
+		*page.add_messages() =
+			makeMarkdownMessage(id, 10000 + id * 20, id % 5, QStringLiteral("**bold** %1 `code`").arg(id));
+	}
+	gateway.handleIncomingHistory(page);
+	QTRY_VERIFY(feed.pendingJobs() == 0);
+	QCOMPARE(model.count(), 2000);
+
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 91), false);
+	controller.setActiveScope(large, false);
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 91), false);
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::TextChannel, 91, { makeMessage(5000, 90000, MumbleProto::TextChannel, 91) }, 0,
+					5000, false));
+	QTRY_VERIFY(feed.pendingJobs() == 0);
+	// Only the current scope's rows: none of the retired backfill was applied.
+	QCOMPARE(model.scopeToken(), PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 91).cacheKey());
+	QCOMPARE(model.count(), 1);
+	QCOMPARE(model.rowAt(0).key.messageId, 5000U);
+	resetGatewayRequestState();
 }
 
 QTEST_MAIN(TestPersistentChatController)

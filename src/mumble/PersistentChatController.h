@@ -43,6 +43,8 @@ public:
 
 signals:
 	void activeSnapshotChanged();
+	// Fine-grained companion of activeSnapshotChanged for the active scope's messages.
+	void activeMessagesChanged(const PersistentChatMessageChange &change);
 	void activeReadStateChanged(unsigned int lastReadMessageID, int unreadCount);
 	void unreadStateChanged();
 
@@ -59,6 +61,8 @@ private:
 	};
 
 	void setUnreadFromMessages(PersistentChatStore::ScopeState &state);
+	void emitActiveMessagesChanged(PersistentChatMessageChange::Kind kind, const PersistentChatScopeKey &key,
+								   QVector< quint64 > identities = {});
 	bool startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload);
 	void handleConnectionChanged(quint64 connectionGeneration);
 	bool canRequestHistory(PersistentChatStore::ScopeState &state);

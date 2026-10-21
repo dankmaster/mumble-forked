@@ -81,6 +81,7 @@ void PersistentChatController::reset() {
 	m_activeScope = PersistentChatScopeKey();
 	emit unreadStateChanged();
 	emit activeSnapshotChanged();
+	emitActiveMessagesChanged(PersistentChatMessageChange::Kind::Reset, m_activeScope);
 }
 
 void PersistentChatController::setActiveScope(const PersistentChatScopeKey &key, bool forceReload,
@@ -100,6 +101,7 @@ void PersistentChatController::setActiveScope(const PersistentChatScopeKey &key,
 		state.snapshot.loadingState = PersistentChatLoadingState::Idle;
 	}
 	emit activeSnapshotChanged();
+	emitActiveMessagesChanged(PersistentChatMessageChange::Kind::Reset, m_activeScope);
 }
 
 void PersistentChatController::clearActiveScope() {
@@ -109,6 +111,7 @@ void PersistentChatController::clearActiveScope() {
 
 	m_activeScope = PersistentChatScopeKey();
 	emit activeSnapshotChanged();
+	emitActiveMessagesChanged(PersistentChatMessageChange::Kind::Reset, m_activeScope);
 }
 
 void PersistentChatController::warmupScopes(const QList< PersistentChatScopeKey > &keys) {
@@ -264,6 +267,10 @@ bool PersistentChatController::applyEmbedState(const MumbleProto::ChatEmbedState
 		for (const MumbleProto::ChatEmbedRef &embed : state.embeds()) {
 			*message.add_embeds() = embed;
 		}
+		if (m_activeScope.cacheKey() == key.cacheKey()) {
+			emitActiveMessagesChanged(PersistentChatMessageChange::Kind::Patched, key,
+									  { PersistentChatMessageChange::identity(message) });
+		}
 		return true;
 	}
 
@@ -290,6 +297,10 @@ bool PersistentChatController::applyReactionState(const MumbleProto::ChatReactio
 		message.clear_reactions();
 		for (const MumbleProto::ChatReactionAggregate &reaction : state.reactions()) {
 			*message.add_reactions() = reaction;
+		}
+		if (m_activeScope.cacheKey() == key.cacheKey()) {
+			emitActiveMessagesChanged(PersistentChatMessageChange::Kind::Patched, key,
+									  { PersistentChatMessageChange::identity(message) });
 		}
 		return true;
 	}
@@ -366,6 +377,14 @@ void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHist
 
 	if (m_activeScope.cacheKey() == key.cacheKey()) {
 		emit activeSnapshotChanged();
+		if (mergeResult.changed) {
+			QVector< quint64 > identities;
+			identities.reserve(incomingMessages.size());
+			for (const MumbleProto::ChatMessage &message : incomingMessages) {
+				identities.push_back(PersistentChatMessageChange::identity(message));
+			}
+			emitActiveMessagesChanged(PersistentChatMessageChange::Kind::Messages, key, std::move(identities));
+		}
 	}
 	emit unreadStateChanged();
 }
@@ -387,6 +406,8 @@ void PersistentChatController::handleMessage(const MumbleProto::ChatMessage &mes
 
 	if (m_activeScope.cacheKey() == key.cacheKey()) {
 		emit activeSnapshotChanged();
+		emitActiveMessagesChanged(PersistentChatMessageChange::Kind::Messages, key,
+								  { PersistentChatMessageChange::identity(message) });
 	}
 	emit unreadStateChanged();
 }
@@ -401,6 +422,16 @@ void PersistentChatController::handleReadState(const MumbleProto::ChatReadStateU
 		emit activeReadStateChanged(state.snapshot.lastReadMessageId, state.snapshot.unreadCount);
 	}
 	emit unreadStateChanged();
+}
+
+void PersistentChatController::emitActiveMessagesChanged(PersistentChatMessageChange::Kind kind,
+														  const PersistentChatScopeKey &key,
+														  QVector< quint64 > identities) {
+	PersistentChatMessageChange change;
+	change.kind       = kind;
+	change.key        = key;
+	change.identities = std::move(identities);
+	emit activeMessagesChanged(change);
 }
 
 void PersistentChatController::setUnreadFromMessages(PersistentChatStore::ScopeState &state) {
