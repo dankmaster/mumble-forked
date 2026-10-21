@@ -9,6 +9,7 @@ Button {
 	id: root
 
 	property string sourceUrl: ""
+	property bool compactPresentation: false
 	property string providerLabel: ""
 	property color accent: Theme.accent
 	signal openRequested(string url)
@@ -20,7 +21,7 @@ Button {
 	// be allowed to widen the owning card. The parent layout supplies the real
 	// width and the URL grows vertically inside that bound.
 	implicitWidth: Math.min(520, sourceLayout.implicitWidth + Theme.space3 * 2)
-	implicitHeight: Math.max(Theme.controlHeight,
+	implicitHeight: compactPresentation ? 24 : Math.max(Theme.controlHeight,
 		sourceLayout.implicitHeight + Theme.space2 * 2)
 	clip: true
 	Accessible.role: Accessible.Link
@@ -31,9 +32,9 @@ Button {
 	background: Rectangle {
 		radius: Theme.innerRadius
 		color: root.down ? Theme.embedSelection
-			: root.hovered ? Theme.withAlpha(root.accent, 0.10) : Theme.embedSurface
+			: root.hovered ? Theme.withAlpha(root.accent, 0.10) : root.compactPresentation ? "transparent" : Theme.embedSurface
 		border.color: root.activeFocus ? Theme.focus : Theme.embedBorder
-		border.width: root.activeFocus ? Theme.focusRingWidth : 1
+		border.width: root.activeFocus ? Theme.focusRingWidth : root.compactPresentation ? 0 : 1
 	}
 
 	contentItem: RowLayout {
@@ -45,7 +46,7 @@ Button {
 			Layout.alignment: Qt.AlignTop
 			Layout.topMargin: 1
 			name: "link"
-			size: Theme.avatarSmall
+			size: root.compactPresentation ? 14 : Theme.avatarSmall
 			color: root.accent
 			Accessible.ignored: true
 		}
@@ -67,6 +68,7 @@ Button {
 
 			Label {
 				objectName: "embedSourceUrl"
+				visible: !root.compactPresentation
 				Layout.fillWidth: true
 				text: root.sourceUrl
 				textFormat: Text.PlainText
@@ -81,12 +83,14 @@ Button {
 			Layout.alignment: Qt.AlignTop
 			Layout.topMargin: 1
 			name: "external"
-			size: Theme.avatarSmall
+			size: root.compactPresentation ? 14 : Theme.avatarSmall
 			color: Theme.textMuted
 			Accessible.ignored: true
 		}
 	}
 
+	ToolTip.visible: hovered && compactPresentation
+	ToolTip.text: sourceUrl
 	onClicked: if (sourceUrl.length > 0) openRequested(sourceUrl)
 	Keys.onPressed: function(event) {
 		if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter

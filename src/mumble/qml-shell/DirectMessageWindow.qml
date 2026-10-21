@@ -323,13 +323,12 @@ Window {
 			for (const line of String(replyText || "").split(/\r\n|\r|\n/))
 				longestLine = Math.max(longestLine, line.length)
 		}
-		return longestLine * Theme.fontBody * 0.58
+		return longestLine * Theme.chatBodyFontSize * 0.58
 	}
 
 	function preferredMessageWidth(segments, replyActor, replySnippet, startsGroup, own,
 			deliveryVisible) {
-		const chromeWidth = own ? Theme.chatBubbleHorizontalPadding * 2
-			: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
+		const chromeWidth = Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
 		const textEstimate = estimatedMessageTextWidth(segments, replyActor, replySnippet)
 			+ chromeWidth
 		const minimum = own ? (deliveryVisible ? 300 : 176)
@@ -357,8 +356,7 @@ Window {
 		const image = kind === "image" || mime.indexOf("image/") === 0
 		const requestedWidth = Math.max(0, Number(attachment.width || 0))
 		const tileWidth = image ? Math.min(320, Math.max(180, requestedWidth || 240)) : 360
-		const chromeWidth = own ? Theme.chatBubbleHorizontalPadding * 2
-			: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
+		const chromeWidth = Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
 		return Math.min(Theme.chatRichMaximumWidth, tileWidth + chromeWidth)
 	}
 
@@ -770,11 +768,9 @@ Window {
 						readonly property bool hasInlineImageContent: root.messageContainsInlineImage(bodySegments)
 						readonly property real previewTargetWidth: hasPreviewContent && messagePreviewLoader.item
 							? messagePreviewLoader.item.targetCardWidth
-							: preview && preview.previewSize === "compact" ? 460
-							: preview && preview.previewSize === "large" ? 720 : 580
-						readonly property real richContentChromeWidth: own
-							? horizontalPadding * 2
-							: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
+							: preview && preview.previewSize === "compact" ? 400
+							: preview && preview.previewSize === "large" ? 720 : 480
+						readonly property real richContentChromeWidth: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
 						preferredOwnWidth: root.preferredMessageWidth(bodySegments, replyActor,
 							replySnippet, startsGroup, true, deliveryVisible)
 						preferredIncomingWidth: root.preferredMessageWidth(bodySegments, replyActor,
@@ -873,10 +869,10 @@ Window {
 							spacing: Theme.space2
 
 							Rectangle {
-								Layout.preferredWidth: messageDelegate.own ? 0 : Theme.avatarMedium
+								Layout.preferredWidth: Theme.avatarMedium
 								Layout.preferredHeight: Layout.preferredWidth
 								Layout.alignment: Qt.AlignTop
-								visible: !messageDelegate.own
+								visible: true
 								radius: width / 2
 								color: Theme.strip
 								clip: true
@@ -910,15 +906,16 @@ Window {
 
 								RowLayout {
 									Layout.fillWidth: true
+									Layout.leftMargin: Theme.chatBubbleHorizontalPadding
 									visible: messageDelegate.startsGroup
 									spacing: Theme.chatMetadataSpacing
 
 									Label {
-										Layout.fillWidth: true
+										Layout.maximumWidth: Math.max(80, parent.width * 0.62)
 										textFormat: Text.PlainText
 										text: messageDelegate.own ? qsTr("You") : messageDelegate.title
-										color: messageDelegate.own ? Theme.textStrong : Theme.accent
-										font.pixelSize: Theme.fontCaption
+										color: messageDelegate.own ? Theme.accent : Theme.textStrong
+										font.pixelSize: Theme.chatAuthorFontSize
 										font.weight: Font.DemiBold
 										elide: Text.ElideRight
 									}
@@ -930,21 +927,19 @@ Window {
 										color: Theme.textMuted
 										font.pixelSize: Theme.fontCaption
 									}
+									Item { Layout.fillWidth: true }
 								}
 
 								Rectangle {
 									id: messageBubble
 									objectName: "directMessageBubble_" + messageDelegate.stableId
-									readonly property real bubbleHorizontalInset: messageDelegate.own
-										? 0 : Theme.chatBubbleHorizontalPadding
-									readonly property real bubbleVerticalInset: messageDelegate.own
-										? 0 : Theme.chatBubbleVerticalPadding
+									readonly property real bubbleHorizontalInset: Theme.chatBubbleHorizontalPadding
+									readonly property real bubbleVerticalInset: Theme.chatBubbleVerticalPadding
 									Layout.fillWidth: true
 									Layout.preferredHeight: bubbleColumn.implicitHeight + bubbleVerticalInset * 2
 									radius: Theme.innerRadius
-									color: messageDelegate.own ? "transparent" : Theme.chatIncomingSurface
-									border.color: messageDelegate.own ? "transparent" : Theme.chatIncomingBorder
-									border.width: messageDelegate.own ? 0 : 1
+									color: "transparent"
+									border.width: 0
 
 									ColumnLayout {
 										id: bubbleColumn
@@ -1013,7 +1008,7 @@ Window {
 											hoverEffectsEnabled: !root.visualFixtureMode
 											accessibilitySuppressed: !messageDelegate.itemIntersectsViewport(messageBody)
 											textColor: Theme.textMain
-											pixelSize: Theme.fontBody
+											pixelSize: Theme.chatBodyFontSize
 											onLinkRequested: link => Qt.openUrlExternally(link)
 										}
 
@@ -1024,7 +1019,7 @@ Window {
 											textFormat: Text.PlainText
 											text: qsTr("Message deleted")
 											color: Theme.textMuted
-											font.pixelSize: Theme.fontBody
+											font.pixelSize: Theme.chatBodyFontSize
 											font.italic: true
 										}
 
@@ -1478,7 +1473,7 @@ Window {
 							: controller && controller.historyLoading ? qsTr("Retrieving your conversation…")
 							: controller ? controller.emptyCopy : qsTr("Messages will appear here.")
 						color: root.historyErrorText.length > 0 ? Theme.warning : Theme.textMuted
-						font.pixelSize: Theme.fontBody
+						font.pixelSize: Theme.chatBodyFontSize
 						horizontalAlignment: Text.AlignHCenter
 						wrapMode: Text.Wrap
 						Accessible.ignored: true

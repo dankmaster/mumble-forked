@@ -1889,6 +1889,31 @@ TestCase {
 		tryCompare(button, "visible", false)
 	}
 
+	function test_voice_restrictions_stay_visible_ahead_of_identity_badges() {
+		const rail = loader.item
+		const states = rail.visibleParticipantStatuses([
+			{kind: "authenticated"}, {kind: "recording"}, {kind: "selfDeafened"},
+			{kind: "localMuted"}, {kind: "talking"}
+		])
+		compare(states.length, 3)
+		compare(states[0].kind, "selfDeafened")
+		compare(states[1].kind, "localMuted")
+		compare(rail.statusIcon(states[0].kind), "deafen-off")
+		compare(rail.statusIcon(states[1].kind), "volume-off")
+		compare(rail.statusIcon("serverMuted"), "mute")
+		const mute = findChild(rail, "selfMuteButton")
+		const deafen = findChild(rail, "selfDeafenButton")
+		session.selfMuted = true
+		session.selfDeafened = true
+		compare(mute.iconName, "mute")
+		compare(deafen.iconName, "deafen-off")
+		compare(deafen.Accessible.name, "Undeafen")
+		session.selfMuted = false
+		session.selfDeafened = false
+		compare(mute.iconName, "microphone")
+		compare(deafen.iconName, "deafen")
+	}
+
 	function test_self_controls_expose_mute_and_deafen_without_opening_profile_menu() {
 		const muteButton = findChild(loader.item, "selfMuteButton")
 		const deafenButton = findChild(loader.item, "selfDeafenButton")

@@ -562,6 +562,33 @@ Rectangle {
 		return (compact.slice(0, 1) + compact.slice(-1)).toUpperCase()
 	}
 
+	function statusIcon(kind) {
+		switch (String(kind || "").toLowerCase()) {
+		case "serverdeafened":
+		case "selfdeafened": return "deafen-off"
+		case "servermuted":
+		case "selfmuted":
+		case "mutedtalking": return "mute"
+		case "localmuted": return "volume-off"
+		case "suppressed": return "microphone"
+		case "listener": return "deafen"
+		case "recording": return "record"
+		case "authenticated": return "shield"
+		default: return ""
+		}
+	}
+
+	function visibleParticipantStatuses(statuses) {
+		// Voice restrictions must not disappear behind recording or identity badges.
+		const restrictions = ["serverdeafened", "selfdeafened", "servermuted", "selfmuted", "localmuted", "suppressed"]
+		const values = statuses.filter(function(item) {
+			return ["talking", "whispering", "shouting", "mutedtalking"]
+				.indexOf(String((item && item.kind) || "").toLowerCase()) < 0
+		})
+		return values.filter(item => restrictions.indexOf(String(item.kind || "").toLowerCase()) >= 0)
+			.concat(values.filter(item => restrictions.indexOf(String(item.kind || "").toLowerCase()) < 0)).slice(0, 3)
+	}
+
 	function statusGlyph(kind) {
 		switch (String(kind || "").toLowerCase()) {
 		case "serverdeafened":
@@ -2075,10 +2102,7 @@ Rectangle {
 				readonly property var statuses: payload.statuses || sourceState.statuses || []
 				// Talk activity already has a high-salience avatar ring. Do not repeat it
 				// as a status chip; reserve the compact lane for mute/deafen/listener state.
-				readonly property var visibleStatuses: statuses.filter(function(item) {
-					return ["talking", "whispering", "shouting", "mutedtalking"]
-						.indexOf(String((item && item.kind) || "").toLowerCase()) < 0
-				}).slice(0, 2)
+				readonly property var visibleStatuses: navigationRail.visibleParticipantStatuses(statuses)
 				readonly property var badges: payload.badges || sourceState.badges || []
 				readonly property var localVolume: payload.localVolume || sourceState.localVolume || ({})
 				readonly property bool localVolumeVisible: localVolume.visible !== false
@@ -2287,15 +2311,22 @@ Rectangle {
 								objectName: "navigationParticipantStatus_"
 									+ participantDelegate.participantObjectKey + "_"
 									+ String(modelData.kind || "status")
-								Layout.preferredWidth: 16
-								Layout.preferredHeight: 16
+								Layout.preferredWidth: 18
+								Layout.preferredHeight: 18
 								radius: 8
-								color: Qt.rgba(statusColor.r, statusColor.g, statusColor.b, 0.14)
+								color: "transparent"
 								border.width: 1
-								border.color: Qt.rgba(statusColor.r, statusColor.g, statusColor.b, 0.28)
+								border.color: "transparent"
+								ModernIcon {
+									anchors.centerIn: parent
+									name: navigationRail.statusIcon(modelData.kind)
+									size: 16
+									color: parent.statusColor
+								}
 								Label {
 									anchors.centerIn: parent
 									textFormat: Text.PlainText
+									visible: navigationRail.statusIcon(modelData.kind).length === 0
 									text: navigationRail.statusGlyph(modelData.kind)
 									color: parent.statusColor
 									font.pixelSize: 8
@@ -2634,7 +2665,7 @@ Rectangle {
 					focusPolicy: Qt.StrongFocus
 					KeyNavigation.tab: stonksButton.visible ? stonksButton : settingsButton
 					KeyNavigation.backtab: selfMuteButton
-					iconName: "deafen"
+					iconName: clientSession.selfDeafened ? "deafen-off" : "deafen"
 					dense: true
 					selected: !!clientSession.selfDeafened
 					tone: clientSession.selfDeafened ? "danger" : "neutral"

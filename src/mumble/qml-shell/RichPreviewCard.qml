@@ -198,9 +198,9 @@ Rectangle {
 	readonly property real responsiveViewportWidth: root.Window.window
 		? Math.max(1, root.Window.window.width) : Math.max(1, width)
 	readonly property int responsiveCompactCardWidth: Math.round(Math.max(300,
-		Math.min(460, responsiveViewportWidth * 0.48)))
+		Math.min(400, responsiveViewportWidth * 0.48)))
 	readonly property int responsiveDefaultCardWidth: Math.round(Math.max(340,
-		Math.min(580, responsiveViewportWidth * 0.62)))
+		Math.min(480, responsiveViewportWidth * 0.62)))
 	readonly property int responsiveLargeCardWidth: Math.round(Math.max(400,
 		Math.min(720, responsiveViewportWidth * 0.74)))
 	readonly property int targetCardWidth: normalizedEmbedAspect === "short"
@@ -1386,6 +1386,7 @@ Rectangle {
 
 		EmbedSourceLink {
 			objectName: "previewSourceLink"
+			compactPresentation: true
 			Layout.fillWidth: true
 			sourceUrl: root.originalProviderUrl
 			providerLabel: root.typedDocumentActive && root.embedDocument.provider
@@ -2101,8 +2102,8 @@ Rectangle {
 					Layout.preferredWidth: Math.min(implicitWidth,
 						Math.max(1, parent.width))
 					Layout.maximumWidth: Math.max(1, parent.width)
-					visible: root.providerLabel.length > 0 && !root.hasEmbedPreview
-						&& !providerDetails.ownsHeader
+					visible: root.originalProviderUrl.length === 0 && root.providerLabel.length > 0
+						&& !root.hasEmbedPreview && !providerDetails.ownsHeader
 					providerToken: providerDetails.providerToken
 					badgeText: root.providerLabel
 					presentation: "inline"

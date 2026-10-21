@@ -45,8 +45,8 @@ Item {
 	readonly property bool hovered: hoverEffectsEnabled && messageHover.hovered
 
 	// The conversation lane is centered independently of the message surface.
-	// Regular incoming messages occupy the lane without looking like bubbles,
-	// while short outgoing messages can hug their content at the trailing edge.
+	// All authors share a reading edge. Identity belongs to the author header,
+	// rather than a separate bubble or alignment for each message.
 	property real laneAvailableWidth: 0
 	property real laneMaximumWidth: Theme.chatLaneMaximumWidth
 	property real systemMaximumWidth: 680
@@ -56,7 +56,7 @@ Item {
 	// through wideContent/preferredWideContentWidth.
 	property real preferredIncomingWidth: 520
 	property real preferredWideContentWidth: Theme.chatRichMaximumWidth
-	property real minimumOwnWidth: 176
+	property real minimumOwnWidth: 220
 	property real minimumIncomingWidth: 220
 	property bool wideContent: false
 	// Conversation search highlights one stable message without changing the
@@ -83,8 +83,6 @@ Item {
 		const laneStart = Math.max(0, (root.laneAvailableWidth - root.laneWidth) / 2)
 		if (root.logEntry)
 			return laneStart
-		if (root.own)
-			return laneStart + root.laneWidth - root.messageWidth
 		if (root.systemMessage)
 			return laneStart + (root.laneWidth - root.messageWidth) / 2
 		return laneStart
@@ -98,13 +96,13 @@ Item {
 	readonly property real dateSeparatorHeight: root.hasDateSeparator
 		? Theme.space5 + Theme.fontCaption : 0
 	property real horizontalPadding: root.logEntry ? Theme.space3
-		: root.systemMessage || root.own
+		: root.systemMessage
 		? Theme.chatBubbleHorizontalPadding : 0
 	property real verticalPadding: root.logEntry ? Theme.space2
-		: root.systemMessage || root.own
+		: root.systemMessage
 		? Theme.chatBubbleVerticalPadding : 0
-	property real compactMinimumHeight: root.own ? 32 : 28
-	property real groupMinimumHeight: root.own ? 40 : Theme.avatarMedium
+	property real compactMinimumHeight: 28
+	property real groupMinimumHeight: Theme.avatarMedium
 	property real logMinimumHeight: Theme.densityMetric(30, 34, 40)
 	readonly property real surfaceHeight: Math.max(
 		root.logEntry ? root.logMinimumHeight
@@ -121,12 +119,12 @@ Item {
 	readonly property color surfaceColor: root.logEntry
 		? (root.hovered ? Theme.withAlpha(Theme.surfaceHover, 0.78)
 			: root.logAlternating ? Theme.withAlpha(Theme.surfaceRaised, 0.52) : "transparent")
-		: root.own || root.systemMessage ? root.bubbleColor : "transparent"
+		: root.systemMessage ? root.bubbleColor : "transparent"
 	readonly property color surfaceBorderColor: root.logEntry ? "transparent"
-		: root.own || root.systemMessage
+		: root.systemMessage
 		? root.bubbleBorderColor : "transparent"
 	readonly property int surfaceBorderWidth: root.logEntry ? 0
-		: root.own || root.systemMessage ? root.bubbleBorderWidth : 0
+		: root.systemMessage ? root.bubbleBorderWidth : 0
 	readonly property alias dateSeparatorItem: dateSeparator
 	readonly property alias surfaceX: messageSurface.x
 	readonly property alias surfaceWidth: messageSurface.width
@@ -238,7 +236,7 @@ Item {
 		y: root.dateSeparatorHeight + root.topGap
 		width: root.messageWidth
 		height: root.surfaceHeight
-		radius: root.logEntry ? 0 : root.systemMessage || root.own ? Theme.innerRadius : 0
+		radius: root.logEntry ? 0 : root.systemMessage ? Theme.innerRadius : 0
 		color: root.surfaceColor
 		border.color: root.surfaceBorderColor
 		border.width: root.surfaceBorderWidth

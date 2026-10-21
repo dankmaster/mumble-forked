@@ -513,7 +513,7 @@ ApplicationWindow {
 			for (const line of String(replyText || "").split(/\r\n|\r|\n/))
 				longestLine = Math.max(longestLine, line.length)
 		}
-		return longestLine * Theme.fontBody * 0.58
+		return longestLine * Theme.chatBodyFontSize * 0.58
 	}
 
 	function messageContainsInlineImage(segments) {
@@ -580,9 +580,9 @@ ApplicationWindow {
 		// This only chooses a comfortable bubble width. RichMessageBody remains
 		// responsible for exact text measurement and wrapping.
 		const textEstimate = estimatedMessageTextWidth(segments, replyActor, replySnippet)
-			+ Theme.chatBubbleHorizontalPadding * 2
+			+ Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
 			+ Math.max(0, Number(actionTextInset || 0))
-		const metadataFloor = deliveryVisible ? 300 : 176
+		const metadataFloor = deliveryVisible ? 320 : startsGroup ? 260 : 220
 		return Math.max(metadataFloor, Math.min(Theme.chatPlainMaximumWidth, textEstimate))
 	}
 
@@ -9179,7 +9179,7 @@ ApplicationWindow {
 									textFormat: Text.PlainText
 									text: deferredHistoryRow.summaryText
 									color: Theme.textMain
-									font.pixelSize: Theme.fontBody
+									font.pixelSize: Theme.chatBodyFontSize
 									elide: Text.ElideRight
 									maximumLineCount: 1
 								}
@@ -9281,7 +9281,7 @@ ApplicationWindow {
 										textFormat: Text.PlainText
 										text: deferredInlineMessageDelegate.subtitle
 										color: Theme.textMain
-										font.pixelSize: Theme.fontBody
+										font.pixelSize: Theme.chatBodyFontSize
 										elide: Text.ElideRight
 										maximumLineCount: 1
 									}
@@ -9658,7 +9658,7 @@ ApplicationWindow {
 								readonly property real cachedStaticHandoffLaneWidth: Math.max(1, Math.min(
 									root.conversationLaneMaximumWidth, cachedStaticHandoffLaneAvailableWidth))
 								readonly property real cachedStaticHandoffRichChromeWidth:
-									own || cachedStaticHandoffSystemMessage
+									cachedStaticHandoffSystemMessage
 										? Theme.chatBubbleHorizontalPadding * 2
 										: Theme.avatarMedium + Theme.space2
 											+ Theme.chatBubbleHorizontalPadding * 2
@@ -9727,10 +9727,10 @@ ApplicationWindow {
 										? (cachedStaticHandoffSize === "large" ? 620
 											: cachedStaticHandoffSize === "compact" ? 420 : 520)
 									: cachedStaticHandoffSize === "compact"
-										? Math.round(Math.max(300, Math.min(460, root.width * 0.48)))
+										? Math.round(Math.max(300, Math.min(400, root.width * 0.48)))
 									: cachedStaticHandoffSize === "large"
 										? Math.round(Math.max(400, Math.min(720, root.width * 0.74)))
-										: Math.round(Math.max(340, Math.min(580, root.width * 0.62)))
+										: Math.round(Math.max(340, Math.min(480, root.width * 0.62)))
 								readonly property real cachedStaticHandoffCardWidth: Math.min(
 									cachedStaticHandoffTargetWidth, Math.max(220,
 										cachedStaticHandoffLaneAvailableWidth
@@ -9746,10 +9746,9 @@ ApplicationWindow {
 									cachedStaticHandoffSystemMessage
 										? cachedStaticHandoffLaneStart + (cachedStaticHandoffLaneWidth
 											- cachedStaticHandoffMessageWidth) / 2
-									: own ? cachedStaticHandoffLaneStart + cachedStaticHandoffLaneWidth
-										- cachedStaticHandoffMessageWidth : cachedStaticHandoffLaneStart
+									: cachedStaticHandoffLaneStart
 								readonly property real cachedStaticHandoffCardX:
-									cachedStaticHandoffMessageX + (own || cachedStaticHandoffSystemMessage
+									cachedStaticHandoffMessageX + (cachedStaticHandoffSystemMessage
 										? Theme.chatBubbleHorizontalPadding
 										: Theme.avatarMedium + Theme.space2
 											+ Theme.chatBubbleHorizontalPadding)
@@ -9767,10 +9766,10 @@ ApplicationWindow {
 								readonly property real cachedStaticHandoffTopInset:
 									(dateBoundary ? Theme.space5 + Theme.fontCaption : 0)
 									+ (modelStartsGroup ? Theme.space3 : Theme.chatMetadataSpacing)
-									+ ((!own && modelStartsGroup) || cachedStaticHandoffSystemMessage
+									+ (modelStartsGroup || cachedStaticHandoffSystemMessage
 										? Theme.fontCaption + Theme.chatMetadataSpacing : 0)
 									+ cachedStaticHandoffBodyLineCount
-										* Math.ceil(Theme.fontBody * Theme.chatBodyLineHeight)
+										* Math.ceil(Theme.chatBodyFontSize * Theme.chatBodyLineHeight)
 									+ (cachedStaticHandoffBodyLineCount > 0 ? Theme.chatContentSpacing : 0)
 								readonly property real cachedStaticHandoffActionWidth: Math.max(1,
 									cachedStaticHandoffCardWidth - Theme.space4 * 2)
@@ -10251,7 +10250,7 @@ ApplicationWindow {
 											textFormat: Text.PlainText
 											text: asyncMessageDelegate.subtitle
 											color: Theme.textMain
-											font.pixelSize: Theme.fontBody
+											font.pixelSize: Theme.chatBodyFontSize
 											elide: Text.ElideRight
 											maximumLineCount: 1
 											Accessible.ignored: true
@@ -10271,7 +10270,7 @@ ApplicationWindow {
 										objectName: "coldMessageLinkHandoff"
 										x: asyncMessageDelegate.cachedStaticHandoffCardX
 										y: 58
-										width: Math.min(460, Math.max(1, parent.width - x - Theme.space4))
+										width: Math.min(400, Math.max(1, parent.width - x - Theme.space4))
 										height: Math.min(108, Math.max(0, parent.height - y - Theme.space2))
 										visible: height > 0 && !asyncMessageDelegate.accessibilityPooled
 											&& asyncMessageDelegate.presentationHeightCommittedHeight <= 0
@@ -12054,10 +12053,6 @@ ApplicationWindow {
 						// hover reveals the controls.
 						readonly property bool hasEmbeddedFooterContent: hasReactions
 							|| hasReplyContent || hasDeliveryStatus
-							|| (own && !systemMessage && timestamp.length > 0)
-						readonly property bool plainTimestampOnlyFooterContent: own
-							&& !systemMessage && timestamp.length > 0
-							&& !hasReactions && !hasReplyContent && !hasDeliveryStatus
 						readonly property real richPresentationMetadataHeight:
 							(hasReplyContent ? 44 : 0)
 							+ (hasEmbeddedFooterContent ? 34 : 0)
@@ -12081,8 +12076,8 @@ ApplicationWindow {
 							&& messageRowLoader.item
 							&& messageRowLoader.item.previewLoader.item
 							? messageRowLoader.item.previewLoader.item.targetCardWidth
-							: preview && preview.previewSize === "compact" ? 460
-							: preview && preview.previewSize === "large" ? 720 : 580
+							: preview && preview.previewSize === "compact" ? 400
+							: preview && preview.previewSize === "large" ? 720 : 480
 						readonly property real previewPlaceholderWidth: Math.min(previewTargetWidth,
 							Math.max(220, laneAvailableWidth - richContentChromeWidth))
 						readonly property string previewPlaceholderAspect:
@@ -12128,19 +12123,18 @@ ApplicationWindow {
 							: Math.max(48, Math.min(180,
 								48 + (bodySegments || []).length * 22
 									+ (hasReplyContent ? 44 : 0)
-									+ (hasEmbeddedFooterContent
-										&& !plainTimestampOnlyFooterContent ? 34 : 0)))
+									+ (hasEmbeddedFooterContent ? 34 : 0)))
 						// Reactions are compact metadata and wrap naturally in their Flow. Treating
 						// one reaction like a media card makes an otherwise short message expand
 						// across the complete conversation lane.
-						readonly property real richContentChromeWidth: own || systemMessage
+						readonly property real richContentChromeWidth: systemMessage
 							? horizontalPadding * 2
 							: Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2
 						// Replies and delivery metadata are compact text. Only media opts into
 						// the wider lane, so sending/failed messages never become broad panels.
 						wideContent: hasPreviewContent || hasAttachmentContent || hasInlineImageContent
 						readonly property real attachmentTargetWidth: hasAttachmentContent
-							? root.preferredAttachmentMessageWidth(attachments, own || systemMessage) : 0
+							? root.preferredAttachmentMessageWidth(attachments, systemMessage) : 0
 						readonly property real previewMessageWidth: hasPreviewContent
 							? previewTargetWidth + richContentChromeWidth : 0
 						preferredWideContentWidth: hasInlineImageContent
@@ -12232,7 +12226,7 @@ ApplicationWindow {
 										animationsEnabled: !root.visualFixtureOverrideActive
 										hoverEffectsEnabled: !root.visualFixtureOverrideActive
 										textColor: Theme.textMain
-										pixelSize: Theme.fontBody
+										pixelSize: Theme.chatBodyFontSize
 										onLinkRequested: link => Qt.openUrlExternally(link)
 									}
 								}
@@ -12322,10 +12316,10 @@ ApplicationWindow {
 									anchors.fill: parent
 									spacing: Theme.space2
                             Rectangle {
-								Layout.preferredWidth: messageDelegate.own || messageDelegate.systemMessage ? 0 : Theme.avatarMedium
+								Layout.preferredWidth: messageDelegate.systemMessage ? 0 : Theme.avatarMedium
 								Layout.preferredHeight: Layout.preferredWidth
                                 Layout.alignment: Qt.AlignTop
-								visible: !messageDelegate.own && !messageDelegate.systemMessage
+								visible: !messageDelegate.systemMessage
 								radius: width / 2
                                 color: Theme.strip
                                 clip: true
@@ -12358,17 +12352,19 @@ ApplicationWindow {
                                 RowLayout {
                                     Layout.fillWidth: true
 									spacing: Theme.chatMetadataSpacing
-									visible: (messageDelegate.startsGroup && !messageDelegate.own)
+									Layout.leftMargin: messageDelegate.systemMessage ? 0 : Theme.chatBubbleHorizontalPadding
+									visible: messageDelegate.startsGroup
 										|| messageDelegate.systemMessage
 									opacity: messageDelegate.previewOnlyPaintPending ? 0 : 1
 									Label {
 										id: messageSenderLabel
-										Layout.fillWidth: true
+										Layout.maximumWidth: Math.max(80, parent.width * 0.62)
 										textFormat: Text.PlainText
-										text: title || qsTr("System")
-										color: messageDelegate.systemMessage ? Theme.textMuted : Theme.accent
+										text: messageDelegate.own ? qsTr("You") : title || qsTr("System")
+										color: messageDelegate.systemMessage ? Theme.textMuted
+											: messageDelegate.own ? Theme.accent : Theme.textStrong
 										font.bold: true
-										font.pixelSize: Theme.fontCaption
+										font.pixelSize: Theme.chatAuthorFontSize
 										elide: Text.ElideRight
 										Accessible.ignored: root.backgroundAccessibilitySuppressed
 											|| messageDelegate.previewOnlyPaintPending
@@ -12398,26 +12394,18 @@ ApplicationWindow {
 											|| messageDelegate.previewOnlyPaintPending
 											|| !messageDelegate.itemContainedInViewport(messageStatusLabel)
 									}
+									Item { Layout.fillWidth: true }
                                 }
 								Rectangle {
 									id: messageBubble
 									objectName: "chatMessageBubble"
-									readonly property real bubbleHorizontalInset: messageDelegate.own
-										|| messageDelegate.systemMessage ? 0 : Theme.chatBubbleHorizontalPadding
-									readonly property real bubbleVerticalInset: messageDelegate.own
-										|| messageDelegate.systemMessage ? 0 : Theme.chatBubbleVerticalPadding
+									readonly property real bubbleHorizontalInset: messageDelegate.systemMessage ? 0 : Theme.chatBubbleHorizontalPadding
+									readonly property real bubbleVerticalInset: messageDelegate.systemMessage ? 0 : Theme.chatBubbleVerticalPadding
 									Layout.fillWidth: true
 									Layout.preferredHeight: bubbleContent.implicitHeight + bubbleVerticalInset * 2
 									radius: Theme.innerRadius
-									color: messageDelegate.own || messageDelegate.systemMessage
-										|| messageDelegate.previewOnlyPaintPending
-										? "transparent" : messageDelegate.bubbleColor
-									border.color: messageDelegate.own || messageDelegate.systemMessage
-										|| messageDelegate.previewOnlyPaintPending
-										? "transparent" : messageDelegate.bubbleBorderColor
-									border.width: messageDelegate.own || messageDelegate.systemMessage
-										|| messageDelegate.previewOnlyPaintPending
-										? 0 : messageDelegate.bubbleBorderWidth
+									color: "transparent"
+									border.width: 0
 
 									ColumnLayout {
 										id: bubbleContent
@@ -12471,7 +12459,7 @@ ApplicationWindow {
 									animationsEnabled: !root.visualFixtureOverrideActive
 									hoverEffectsEnabled: !root.visualFixtureOverrideActive
                                     textColor: Theme.textMain
-                                    pixelSize: Theme.fontBody
+                                    pixelSize: Theme.chatBodyFontSize
 									onLinkRequested: link => Qt.openUrlExternally(link)
 								}
 								RowLayout {
@@ -12505,7 +12493,7 @@ ApplicationWindow {
                                     text: qsTr("Message deleted")
                                     color: Theme.textMuted
                                     wrapMode: Text.Wrap
-                                    font.pixelSize: Theme.fontBody
+                                    font.pixelSize: Theme.chatBodyFontSize
                                     font.italic: true
                                 }
 								Item {
@@ -13292,7 +13280,7 @@ ApplicationWindow {
 									: activeScope.canSend ? qsTr("Be the first to write in %1.").arg(activeScope.label)
 									: qsTr("Select a text room, voice room, or direct message to get started.")
 								color: Theme.textMuted
-								font.pixelSize: Theme.fontBody
+								font.pixelSize: Theme.chatBodyFontSize
 								horizontalAlignment: Text.AlignHCenter
 								wrapMode: Text.Wrap
 							}
@@ -13378,7 +13366,8 @@ ApplicationWindow {
 					// intervening layout gap so compact combinations never overflow the
 					// composer's semantic or visual bounds.
 					readonly property int outerMargin: root.narrowShell ? Theme.space2 : 14
-					readonly property int targetRowHeight: 16
+					readonly property bool showTargetContext: String(activeScope.scopeToken || "").indexOf("dm:") === 0
+					readonly property int targetRowHeight: showTargetContext ? 16 : 0
 					readonly property int inputRowMinimumHeight: 30
 					readonly property int baseHeight: Math.max(
 						outerMargin * 2 + Theme.space2 * 2 + targetRowHeight
@@ -13445,7 +13434,7 @@ ApplicationWindow {
 									text: activeScope.canAttachFiles
 										? qsTr("Drop files to attach") : qsTr("Drop images to attach")
 									color: Theme.textStrong
-									font.pixelSize: Theme.fontBody
+									font.pixelSize: Theme.chatBodyFontSize
 									font.weight: Font.DemiBold
 					}
 				}
@@ -13496,6 +13485,7 @@ ApplicationWindow {
 								RowLayout {
 									id: composerTargetRow
 									objectName: "composerTargetRow"
+									visible: composerSurface.showTargetContext
 									Layout.fillWidth: true
 									Layout.preferredHeight: composerSurface.targetRowHeight
 									spacing: Theme.chatMetadataSpacing

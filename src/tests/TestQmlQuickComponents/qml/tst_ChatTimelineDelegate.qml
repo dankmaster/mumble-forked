@@ -215,9 +215,9 @@ TestCase {
 		const status = timeline.itemAtIndex(2)
 		verify(compact !== null)
 		verify(status !== null)
-		compare(compact.height, 40)
-		compare(compact.contentItem.height, 20)
-		compare(status.height, 58)
+		compare(compact.height, compact.topGap + compact.compactMinimumHeight)
+		compare(compact.contentItem.height, compact.compactMinimumHeight)
+		compare(status.height, status.topGap + 38)
 		compare(status.contentItem.height, 38)
 		verify(status.y >= compact.y + compact.height)
 		verify(timeline.itemAtIndex(0).topGap > compact.topGap)
@@ -253,7 +253,7 @@ TestCase {
 		tryCompare(following, "y", originalFollowingY)
 	}
 
-	function test_semantic_bubble_roles_keep_incoming_frame_transparent() {
+	function test_authored_rows_share_a_reading_edge_and_transparent_surface() {
 		const incoming = timeline.itemAtIndex(0)
 		const outgoing = timeline.itemAtIndex(1)
 		verify(incoming !== null)
@@ -266,17 +266,17 @@ TestCase {
 		compare(incoming.surfaceBorderWidth, 0)
 		compare(outgoing.bubbleColor, Theme.chatOwnSurface)
 		compare(outgoing.bubbleBorderColor, Theme.chatOwnBorder)
-		compare(outgoing.surfaceColor, Theme.chatOwnSurface)
-		compare(outgoing.surfaceBorderWidth, 1)
+		compare(outgoing.surfaceColor.a, 0)
+		compare(outgoing.surfaceBorderWidth, 0)
 		compare(incoming.horizontalPadding, 0)
 		compare(incoming.verticalPadding, 0)
-		compare(outgoing.horizontalPadding, Theme.chatBubbleHorizontalPadding)
-		compare(outgoing.verticalPadding, Theme.chatBubbleVerticalPadding)
+		compare(outgoing.horizontalPadding, 0)
+		compare(outgoing.verticalPadding, 0)
 
 		incoming.preferredIncomingWidth = 300
 		compare(incoming.messageWidth, 300)
 		outgoing.preferredOwnWidth = 190
-		compare(outgoing.messageWidth, 190)
+		compare(outgoing.messageWidth, 220)
 		incoming.preferredIncomingWidth = 520
 		outgoing.preferredOwnWidth = 260
 	}
@@ -317,11 +317,11 @@ TestCase {
 		compare(incoming.messageWidth, 420)
 		compare(incoming.surfaceX, 0)
 		compare(outgoing.messageWidth, 260)
-		compare(outgoing.surfaceX, 160)
+		compare(outgoing.surfaceX, incoming.surfaceX)
 		verify(outgoing.surfaceX + outgoing.surfaceWidth <= timeline.width)
 		compare(incoming.surfaceBorderWidth, 0)
 		compare(incoming.surfaceColor.a, 0)
-		verify(outgoing.surfaceColor.a > 0)
+		compare(outgoing.surfaceColor.a, 0)
 	}
 
 	function test_wide_lane_keeps_plain_messages_compact_and_rich_content_adapts() {
@@ -336,7 +336,7 @@ TestCase {
 		compare(incoming.messageWidth, 520)
 		compare(incoming.surfaceX, 120)
 		compare(outgoing.messageWidth, 260)
-		compare(outgoing.surfaceX, 700)
+		compare(outgoing.surfaceX, incoming.surfaceX)
 
 		incoming.wideContent = true
 		compare(incoming.messageWidth, Theme.chatRichMaximumWidth)
@@ -348,10 +348,10 @@ TestCase {
 
 		outgoing.wideContent = true
 		compare(outgoing.messageWidth, Theme.chatRichMaximumWidth)
-		compare(outgoing.surfaceX, 200)
+		compare(outgoing.surfaceX, incoming.surfaceX)
 		outgoing.preferredWideContentWidth = 596
 		compare(outgoing.messageWidth, 596)
-		compare(outgoing.surfaceX, 364)
+		compare(outgoing.surfaceX, incoming.surfaceX)
 		verify(outgoing.surfaceX + outgoing.surfaceWidth <= 960)
 		outgoing.wideContent = false
 	}
@@ -359,14 +359,14 @@ TestCase {
 	function test_hover_area_matches_the_message_surface_not_the_complete_row() {
 		const outgoing = timeline.itemAtIndex(1)
 		verify(outgoing !== null)
-		verify(outgoing.surfaceX > 0)
+		compare(outgoing.surfaceX, timeline.itemAtIndex(0).surfaceX)
 		const hoverArea = findChild(outgoing, "chatMessageHoverArea")
 		verify(hoverArea !== null)
 		compare(hoverArea.parent.width, outgoing.surfaceWidth)
 		compare(hoverArea.parent.height, outgoing.contentItem.height
 			+ outgoing.verticalPadding * 2)
 		verify(hoverArea.parent.width < outgoing.width)
-		const outsidePoint = outgoing.mapToItem(hoverArea.parent, 1, outgoing.height / 2)
-		verify(outsidePoint.x < 0)
+		const outsidePoint = outgoing.mapToItem(hoverArea.parent, outgoing.width - 1, outgoing.height / 2)
+		verify(outsidePoint.x > hoverArea.parent.width)
 	}
 }

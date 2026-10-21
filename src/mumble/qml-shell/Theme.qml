@@ -99,7 +99,7 @@ QtObject {
 	readonly property int roomRowHeight: densityMetric(40, 40, 46)
 	readonly property int roomRowHeightDetailed: densityMetric(48, 48, 56)
 	readonly property int participantRowHeight: densityMetric(31, 36, 42)
-	readonly property int railHeaderHeight: densityMetric(72, 80, 88)
+	readonly property int railHeaderHeight: densityMetric(64, 68, 76)
 	readonly property int railHeaderTopInset: densityMetric(8, 10, 12)
 	readonly property int railHeaderSpacing: densityMetric(2, 3, 4)
 	readonly property int railBadgeSize: densityMetric(32, 34, 38)
@@ -111,13 +111,15 @@ QtObject {
 	// messages. Plain text should remain easy to scan instead of stretching to
 	// the complete shell, while previews and attachments get a wider media lane.
 	readonly property int chatLaneMaximumWidth: 840
+	readonly property int chatBodyFontSize: densityMetric(13, 14, 15)
+	readonly property int chatAuthorFontSize: densityMetric(12, 13, 14)
 	readonly property int chatPlainMaximumWidth: 620
 	readonly property int chatRichMaximumWidth: 760
 	readonly property int chatBubbleHorizontalPadding: densityMetric(10, 12, 14)
 	readonly property int chatBubbleVerticalPadding: densityMetric(7, 8, 10)
 	readonly property int chatContentSpacing: densityMetric(4, 6, 8)
 	readonly property int chatMetadataSpacing: densityMetric(3, 4, 6)
-	readonly property real chatBodyLineHeight: compact ? 1.16 : spacious ? 1.26 : 1.21
+	readonly property real chatBodyLineHeight: compact ? 1.22 : spacious ? 1.32 : 1.28
 	readonly property int fontCaption: densityMetric(11, 11, 12)
 	readonly property int fontBody: densityMetric(13, 13, 14)
 	readonly property int fontLabel: densityMetric(12, 12, 13)

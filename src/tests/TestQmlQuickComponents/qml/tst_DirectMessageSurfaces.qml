@@ -465,7 +465,7 @@ TestCase {
 		verify(firstMessage.messageWidth <= Theme.chatRichMaximumWidth)
 		compare(directWindow.preferredAttachmentMessageWidth([
 			{ "kind": "image", "width": 240 }
-		], true), 240 + Theme.chatBubbleHorizontalPadding * 2)
+		], true), 240 + Theme.avatarMedium + Theme.space2 + Theme.chatBubbleHorizontalPadding * 2)
 		compare(directWindow.preferredAttachmentMessageWidth([
 			{ "kind": "image" }, { "kind": "image" }
 		], true), Theme.chatRichMaximumWidth)

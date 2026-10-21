@@ -915,8 +915,7 @@ TestCase {
 		verify(/function\s+resumeNextRichLoader\(\)[\s\S]*resumeRichContentAfterScroll\([\s\S]*scopePresentationFinalizing[\s\S]*finishRichContentRecoveryIfIdle\(\)[\s\S]*id:\s*richLoaderResumeTimer[\s\S]*interval:\s*16/.test(mainSource))
 		verify(/function\s+resumeNextRichLoader\(\)[\s\S]*resumeRichContentAfterScroll\(\s*timeline\.scopePresentationFinalizing,\s*true\)/.test(mainSource))
 		verify(/readonly property int plainScopeResumeAdmissionsPerFrame:\s*2/.test(mainSource))
-		verify(/readonly property bool plainTimestampOnlyFooterContent:[\s\S]*own[\s\S]*timestamp\.length\s*>\s*0[\s\S]*!hasReactions[\s\S]*!hasReplyContent[\s\S]*!hasDeliveryStatus[\s\S]*hasEmbeddedFooterContent[\s\S]*!plainTimestampOnlyFooterContent\s*\?\s*34\s*:\s*0/.test(
-			mainSource))
+		verify(/readonly property bool hasEmbeddedFooterContent:\s*hasReactions\s*\|\| hasReplyContent\s*\|\| hasDeliveryStatus\s*readonly/.test(mainSource))
 		verify(/readonly property bool plainScopeResumeEligible:\s*!logEntry[\s\S]*!contentNeedsHydration[\s\S]*!hasPreviewContent[\s\S]*!hasAttachmentContent[\s\S]*!hasInlineImageContent/.test(mainSource))
 		const plainResumeStart = mainSource.indexOf("const plainScopeResume =")
 		const plainResumeEnd = mainSource.indexOf(

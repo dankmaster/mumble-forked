@@ -2984,7 +2984,7 @@ TestCase {
 			"Shared card state keeps scrolling stable.")
 	}
 
-	function test_typed_embed_document_keeps_full_source_and_reply_context_visible() {
+	function test_typed_embed_document_keeps_compact_source_accessible_and_reply_context_visible() {
 		const card = previewLoader.item
 		const sourceUrl = "https://x.com/historyinmemes/status/2058971862265151767"
 			+ "?utm_source=mumble-rich-preview&utm_campaign=full-source-url-remains-visible"
@@ -3046,7 +3046,9 @@ TestCase {
 		const detailsLoader = findChild(card, "richPreviewProviderDetailsLoader")
 		verify(sourceLink !== null && sourceLink.visible)
 		verify(detailsLoader !== null)
-		verify(sourceLabel !== null && sourceLabel.visible)
+		verify(sourceLabel !== null && !sourceLabel.visible)
+		verify(sourceLink.compactPresentation)
+		compare(sourceLink.implicitHeight, 24)
 		compare(sourceLabel.text, sourceUrl)
 		compare(sourceLabel.elide, Text.ElideNone)
 		compare(sourceLink.Accessible.description, sourceUrl)
