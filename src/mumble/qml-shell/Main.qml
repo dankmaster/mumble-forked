@@ -2049,6 +2049,7 @@ ApplicationWindow {
 			"previewMaterializationAdmitted":
 				item.previewMaterializationAdmitted === true,
 			"previewLoaderStatus": Number(item.previewLoaderStatus),
+								"nativeThumbnailReady": item.nativeThumbnailReady === true,
 			"previewLoaderSurfaceState":
 				String(item.previewLoaderSurfaceState || "blank"),
 			"previewLoaderIncubationWatchdogRunning":
@@ -5650,6 +5651,7 @@ ApplicationWindow {
 								"previewMaterializationAdmitted":
 									item.previewMaterializationAdmitted === true,
 								"previewLoaderStatus": Number(item.previewLoaderStatus),
+								"nativeThumbnailReady": item.nativeThumbnailReady === true,
 								"previewLoaderIncubationSuppressed":
 									item.previewLoaderIncubationSuppressed === true,
 								"previewLoaderIncubationWatchdogRunning":
@@ -10000,6 +10002,7 @@ ApplicationWindow {
 									? item.richResourceActivationPending : false
 								readonly property bool previewMaterializationAdmitted: item
 									? item.previewMaterializationAdmitted : false
+								readonly property bool nativeThumbnailReady: item ? item.nativeThumbnailReady : false
 								readonly property bool previewLoaderIncubationSuppressed: item
 									? outerLoaderIncubationSuppressed
 										|| item.previewLoaderIncubationSuppressed
@@ -12034,7 +12037,7 @@ ApplicationWindow {
 							return ""
 						}
 						readonly property string previewProviderLabel: String(preview
-							? (preview.host || preview.providerName || preview.provider || "") : "")
+							? (preview.host || preview.providerName || preview.provider || preview.embedKind || "") : "")
 							.trim() || qsTr("Link preview")
 						readonly property string previewTitleLabel: String(preview
 							? (preview.title || previewProviderLabel || previewOpenUrl) : "")
@@ -12107,7 +12110,15 @@ ApplicationWindow {
 						// Terminal provider/Loader failure is a native link row, not a
 						// media-sized error card. Loading still keeps its reserved estimate
 						// so admission and scroll anchors remain stable without painting it.
-						readonly property real previewStagingHeight: 64
+						// Metadata and a local poster remain useful even when the optional
+						// provider tree exhausts its incubation budget.
+						readonly property bool previewNativeSummary: previewTerminalUnavailable
+							&& !previewNeedsHydration && !previewBackendError
+						readonly property string previewFallbackThumbnail: timeline.staticPreviewSourceFor(preview)
+						readonly property real previewStagingHeight: previewFallbackThumbnail.length > 0 ? 96 : 64
+						readonly property bool nativeThumbnailReady: !!messageRowLoader.item
+							&& !!messageRowLoader.item.previewHydrationPlaceholderLoader.item
+							&& messageRowLoader.item.previewHydrationPlaceholderLoader.item.nativeThumbnailReady
 						readonly property real previewReservedHeight:
 							previewNeedsHydration || previewTerminalUnavailable
 								? previewStagingHeight
@@ -12640,6 +12651,7 @@ ApplicationWindow {
 									sourceComponent: Component {
 										Rectangle {
 											objectName: "previewHydrationPlaceholder"
+											readonly property bool nativeThumbnailReady: fallbackThumbnail.status === Image.Ready
 											implicitWidth: messagePreviewHydrationPlaceholderLoader.Layout.preferredWidth
 											implicitHeight: messagePreviewHydrationPlaceholderLoader.Layout.preferredHeight
 											radius: Theme.innerRadius
@@ -12648,7 +12660,9 @@ ApplicationWindow {
 										border.width: 1
 										Accessible.role: Accessible.Grouping
 										Accessible.name: messageDelegate.previewTitleLabel
-										Accessible.description: messageDelegate.previewTerminalUnavailable
+										Accessible.description: messageDelegate.previewNativeSummary
+											? messageDelegate.previewProviderLabel
+											: messageDelegate.previewTerminalUnavailable
 											? qsTr("Link preview unavailable")
 											: qsTr("Loading link preview")
 
@@ -12663,8 +12677,23 @@ ApplicationWindow {
 													- Theme.space2 * 2)
 												spacing: Theme.space2
 
+												Image {
+													id: fallbackThumbnail
+													objectName: "previewNativeThumbnail"
+													Layout.preferredWidth: Math.min(128, previewHydrationCompactRow.width * 0.32)
+													Layout.preferredHeight: 72
+													visible: messageDelegate.previewFallbackThumbnail.length > 0
+													source: messageDelegate.previewFallbackThumbnail
+													asynchronous: true
+													cache: true
+													fillMode: Image.PreserveAspectFit
+													sourceSize: Qt.size(256, 144)
+													Accessible.ignored: true
+												}
+
 												ProviderIdentityBadge {
 													id: previewHydrationProviderBadge
+													visible: messageDelegate.previewFallbackThumbnail.length === 0 && !messageDelegate.previewNativeSummary
 													objectName: "previewHydrationProviderBadge"
 													Layout.maximumWidth: Math.max(1,
 														previewHydrationCompactRow.width * 0.30)
@@ -12687,7 +12716,9 @@ ApplicationWindow {
 														objectName: "previewHydrationStateLabel"
 														Layout.fillWidth: true
 														textFormat: Text.PlainText
-														text: messageDelegate.previewTerminalUnavailable
+														text: messageDelegate.previewNativeSummary
+															? messageDelegate.previewProviderLabel
+															: messageDelegate.previewTerminalUnavailable
 															? qsTr("Preview unavailable")
 															: qsTr("Loading link preview")
 														color: Theme.textMuted
@@ -12721,6 +12752,7 @@ ApplicationWindow {
 
 												ModernIcon {
 													objectName: "previewHydrationStateIcon"
+													visible: !messageDelegate.previewNativeSummary
 													name: messageDelegate.previewTerminalUnavailable
 														? "warning" : "link"
 													size: 18
