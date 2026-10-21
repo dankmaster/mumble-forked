@@ -229,10 +229,14 @@ def generateTestBody(settingsFields, settingsClassName, excludeFields = []):
     contents += "\tQ_OBJECT\n"
     contents += "\t" + settingsClassName + " createSettingsInstance() const {\n"
     contents += "\t\t" + settingsClassName + " settings;\n"
+    # Voice thresholds must be valid and ordered to test a round trip, not input sanitization.
+    fieldValues = {"fVADmin": "0.2f", "fVADmax": "0.6f"}
     for fieldName in settingsFields:
         if fieldName in excludeFields:
             continue
-        if settingsFields[fieldName] == "bool":
+        if fieldName in fieldValues:
+            contents += "\t\tsettings." + fieldName + " = " + fieldValues[fieldName] + ";\n"
+        elif settingsFields[fieldName] == "bool":
             # For boolean values, we simply use the inverse of whatever the default is
             contents += "\t\tsettings." + fieldName + " = !settings." + fieldName + ";\n"
         else:
