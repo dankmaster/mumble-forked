@@ -252,6 +252,34 @@ TestCase {
 		probe.destroy()
 	}
 
+	function test_reading_anchor_uses_visible_header_after_partial_cold_card() {
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				id: probe
+				property var timeline: probe
+				property real height: 600
+				property var contentItem: ({children: []})
+				function firstVisibleMessageDelegate() { return contentItem.children[0] }
+				${productFunction("readingAnchorDelegate")}
+			}`, testCase)
+		function row(id, y, ready) {
+			return {stableId: id, visible: true, performanceTimelineDelegate: true,
+				messageRowReady: ready, presentationHeightCommittedHeight: ready ? 500 : 0,
+				mapToItem: function() { return {y: y} }}
+		}
+		const cold = row("partial-cold", -390, false)
+		const header = row("visible-header", 150, false)
+		probe.contentItem = {children: [cold, row("later", 400, true), header]}
+		compare(probe.readingAnchorDelegate().stableId, "visible-header")
+		cold.messageRowReady = true
+		cold.presentationHeightCommittedHeight = 500
+		compare(probe.readingAnchorDelegate().stableId, "partial-cold")
+		cold.messageRowReady = false
+		probe.contentItem = {children: [cold]}
+		compare(probe.readingAnchorDelegate().stableId, "partial-cold")
+		probe.destroy()
+	}
+
 	function test_prefetch_skips_retained_stills_and_selects_next_cold_card() {
 		const probe = Qt.createQmlObject(`import QtQuick
 			QtObject {

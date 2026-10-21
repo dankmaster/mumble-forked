@@ -6039,7 +6039,7 @@ ApplicationWindow {
 							beginTopAnchor()
 							return true
 						}
-						const item = firstVisibleMessageDelegate()
+						const item = readingAnchorDelegate()
 						if (!item)
 							return false
 						const nextViewportAnchorId = String(item.stableId || "")
@@ -6056,6 +6056,32 @@ ApplicationWindow {
 						viewportAnchorReleasePending = false
 						viewportAnchorActive = true
 						return true
+					}
+
+					function readingAnchorDelegate() {
+						const first = firstVisibleMessageDelegate()
+						if (!first || first.mapToItem(timeline, 0, 0).y >= 0
+								|| (first.messageRowReady === true
+									&& first.presentationHeightCommittedHeight > 0))
+							return first
+						// The visible tail of an unbuilt card can be empty reservation
+						// space. Anchor the next row's visible header instead, so resolving
+						// that reservation cannot push the text the reader actually sees.
+						let candidate = first
+						let candidateY = height
+						const children = contentItem ? contentItem.children : []
+						for (let index = 0; index < children.length; ++index) {
+							const item = children[index]
+							if (!item || item.performanceTimelineDelegate !== true
+									|| item.accessibilityPooled === true || !item.visible)
+								continue
+							const point = item.mapToItem(timeline, 0, 0)
+							if (point.y >= 0 && point.y < candidateY) {
+								candidate = item
+								candidateY = point.y
+							}
+						}
+						return candidate
 					}
 
 					function clearViewportAnchorQuietRelease() {

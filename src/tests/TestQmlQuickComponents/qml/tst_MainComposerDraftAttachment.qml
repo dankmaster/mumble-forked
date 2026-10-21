@@ -215,7 +215,7 @@ TestCase {
 
 	function test_delayed_rich_card_height_changes_preserve_the_visible_message() {
 		verify(/property string viewportAnchorId:\s*""[\s\S]*property bool viewportAnchorActive:\s*false[\s\S]*property bool viewportAnchorReleasePending:\s*false/.test(mainSource))
-		verify(/function\s+captureViewportAnchor\(allowDuringInput\)[\s\S]*firstVisibleMessageDelegate\(\)[\s\S]*viewportAnchorOffset\s*=\s*item\.mapToItem\(timeline,\s*0,\s*0\)\.y/.test(mainSource))
+		verify(/function\s+captureViewportAnchor\(allowDuringInput\)[\s\S]*readingAnchorDelegate\(\)[\s\S]*viewportAnchorOffset\s*=\s*item\.mapToItem\(timeline,\s*0,\s*0\)\.y/.test(mainSource))
 		verify(/function\s+timelineDelegateForStableId\(stableId\)[\s\S]*contentItem\.children[\s\S]*headerItem[\s\S]*deferredRepeater\.itemAt\(childIndex\)[\s\S]*String\(item\.stableId\s*\|\|\s*""\)\s*===\s*key/.test(mainSource))
 		verify(/function\s+restoreViewportAnchor\(releaseWhenRestored\)[\s\S]*releaseWhenRestored\s*===\s*true[\s\S]*viewportAnchorReleasePending\s*=\s*true[\s\S]*timelineDelegateForStableId\(viewportAnchorId\)[\s\S]*viewportAnchorRetries\s*<=\s*8[\s\S]*currentOffset\s*=\s*item\.mapToItem\(timeline,\s*0,\s*0\)\.y[\s\S]*contentY\s*\+\s*currentOffset\s*-\s*viewportAnchorOffset[\s\S]*contentY\s*=\s*desiredY[\s\S]*viewportAnchorReleasePending[\s\S]*releaseViewportAnchor\(\)/.test(mainSource))
 		verify(/onContentHeightChanged:[\s\S]*viewportAnchorActive[\s\S]*Qt\.callLater\(function\(\)\s*\{\s*timeline\.restoreViewportAnchor\(\)/.test(mainSource))
