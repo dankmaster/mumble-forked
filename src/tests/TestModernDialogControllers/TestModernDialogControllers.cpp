@@ -3179,7 +3179,7 @@ void TestModernDialogControllers::visualFixturePresentationWaitIsBoundedAndDestr
 	QVERIFY(fixtureSource.contains(QStringLiteral("positionVisualFixtureTimelineAt")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("visualFixtureTimelineState")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("anchorAfterRow == anchorBeforeRow + VisualHistoryPrependMessageCount")));
-	QVERIFY(fixtureSource.contains(QStringLiteral("qAbs(afterOffset - anchorBeforeOffset) <= 1.0")));
+	QVERIFY(fixtureSource.contains(QStringLiteral("qAbs(anchorAfterOffset - anchorBeforeOffset) <= 0.5")));
 	QVERIFY(fixtureSource.contains(QStringLiteral("chat_fixture_state")));
 	for (const QString &field : {
 			 QStringLiteral("reply_message_count"), QStringLiteral("reaction_message_count"),
@@ -3195,7 +3195,7 @@ void TestModernDialogControllers::visualFixturePresentationWaitIsBoundedAndDestr
 	const qsizetype positionHistoryAnchor = fixtureSource.indexOf(
 		QStringLiteral("positionVisualFixtureTimelineAt"), firstFrameWait);
 	const qsizetype applyHistoryPrepend = fixtureSource.indexOf(
-		QStringLiteral("m_host->chatModel()->replaceMessages(prependedMessages)"), positionHistoryAnchor);
+		QStringLiteral("publishPersistentChatPrependVisualFixture"), positionHistoryAnchor);
 	QVERIFY(positionHistoryAnchor > firstFrameWait);
 	QVERIFY(applyHistoryPrepend > positionHistoryAnchor);
 
