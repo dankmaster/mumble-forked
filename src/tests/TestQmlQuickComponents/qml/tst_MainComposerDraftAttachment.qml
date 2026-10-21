@@ -614,7 +614,7 @@ TestCase {
 			"function presentationHeightCommitValue", prepareStart)
 		verify(prepareStart >= 0 && prepareEnd > prepareStart)
 		const prepareSource = asyncSource.slice(prepareStart, prepareEnd)
-		verify(/presentationHeightTailIntent\s*=\s*false[\s\S]*const exactTailAtPrepare\s*=\s*timeline\.isAtBottom\(\)[\s\S]*timeline\.stickToBottom\s*\|\|\s*exactTailAtPrepare[\s\S]*presentationHeightTailIntent\s*=\s*true/.test(prepareSource))
+		verify(/presentationHeightTailIntent\s*=\s*false[\s\S]*if\s*\(timeline\.stickToBottom\)[\s\S]*presentationHeightTailIntent\s*=\s*true/.test(prepareSource))
 		verify(/timeline\.restoringViewportAnchor[\s\S]*timeline\.viewportAnchorReleasePending[\s\S]*return false/.test(prepareSource))
 		verify(/if\s*\(timeline\.viewportAnchorActive\)[\s\S]*return true[\s\S]*return timeline\.captureViewportAnchor\(\)/.test(prepareSource))
 		const commitStart = asyncSource.indexOf("function commitPresentationHeight")
@@ -822,7 +822,7 @@ TestCase {
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*0\.75[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*256[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*scopePresentationPending[\s\S]*maximumRichScrollRetentionBuffer[\s\S]*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*2[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*baseCacheBuffer[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*scopePresentationPending[\s\S]*maximumRichScrollRetentionBuffer[\s\S]*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\(maximumRichScrollRetentionBuffer,[\s\S]*contentHeight\s*\+\s*height[\s\S]*richScrollRetentionRampTimer\.start\(\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0[\s\S]*richScrollRetentionTarget\s*=\s*0/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]{0,900}chatModel\.presentationBusy\s*=\s*true/.test(mainSource))
@@ -1054,7 +1054,7 @@ TestCase {
 		verify(/chatModel\.presentationBusy\s*=\s*false[\s\S]*scheduleNearViewportPrefetch\(\)[\s\S]*scheduleStaticPreviewSweep\(\)/.test(
 			finishRecoverySource))
 		verify(/id:\s*richContentResumeTimer[\s\S]*captureViewportAnchor\(\)[\s\S]*queueRichLoaderResumes\(\)[\s\S]*queueVisibleDeferredMaterialization\(\)[\s\S]*queueVisiblePreviewHydration\(\)/.test(mainSource))
-		verify(/richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*256[\s\S]*property string nearViewportPrefetchActiveId:\s*""[\s\S]*property string nearViewportWarmId:\s*""[\s\S]*property string nearViewportPrefetchReadyId:\s*""/.test(mainSource))
+		verify(/richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*baseCacheBuffer[\s\S]*property string nearViewportPrefetchActiveId:\s*""[\s\S]*property string nearViewportWarmId:\s*""[\s\S]*property string nearViewportPrefetchReadyId:\s*""/.test(mainSource))
 		verify(/staticPreviewLookaheadDistance:[\s\S]{0,160}Math\.min\(baseCacheBuffer,\s*height \* 1\.35\)[\s\S]*staticPreviewPreheatActiveSource:\s*""[\s\S]*staticPreviewPreheatQueue:\s*\[\]/.test(mainSource))
 		verify(/function\s+safeStaticPreviewSource\(value\)[\s\S]*image:\\\/\\\/mumble[\s\S]*qrc:[\s\S]*function\s+staticPreviewSourceFor\(preview\)[\s\S]*mediaAnimated[\s\S]*animated-image[\s\S]*preview\.thumbnailUrl[\s\S]*preview\.posterUrl/.test(mainSource))
 		const staticMediaSourceStart =
@@ -1139,11 +1139,11 @@ TestCase {
 			mainSource.slice(prefetchCandidateStart, prefetchCandidateEnd)
 		verify(/if\s*\(item\.nearViewportPrefetchTerminal\s*===\s*true\)\s*return candidate/.test(
 			prefetchCandidateSource))
-		verify(/const needsWarmRecovery\s*=\s*!deferred\s*&&\s*item\.richResourcesRequired\s*===\s*true\s*&&\s*item\.previewLoaderIncubationSuppressed\s*!==\s*true\s*&&\s*item\.previewLoaderFailed\s*!==\s*true\s*&&\s*\(item\.richResourcesActive\s*!==\s*true/.test(
+		verify(/const needsWarmRecovery\s*=\s*!deferred\s*&&\s*item\.staticPreviewPresentationReady\s*!==\s*true\s*&&\s*item\.richResourcesRequired\s*===\s*true\s*&&\s*item\.previewLoaderIncubationSuppressed\s*!==\s*true\s*&&\s*item\.previewLoaderFailed\s*!==\s*true\s*&&\s*\(item\.richResourcesActive\s*!==\s*true/.test(
 			prefetchCandidateSource))
 		verify(/const deferredRich\s*=\s*deferred[\s\S]*Number\(item\.deferredPresentationHeight\s*\|\|\s*0\)\s*>\s*180[\s\S]*!deferredRich\s*&&\s*!needsWarmRecovery[\s\S]*const above[\s\S]*const below[\s\S]*distance\s*>\s*nearViewportPrefetchDistance\s*\+\s*0\.5[\s\S]*"deferred":\s*deferredRich/.test(
 			prefetchCandidateSource))
-		verify(/function\s+nearViewportPrefetchAllowed\(\)[\s\S]*!stickToBottom[\s\S]*!scopePresentationObservationActive[\s\S]*!prependAnchorActive[\s\S]*!chatModel\.appendPending[\s\S]*!chatModel\.prependPending[\s\S]*pendingVisibleHydrationCount\(\)\s*===\s*0[\s\S]*pendingVisibleRichRecoveryCount\(\)\s*===\s*0/.test(mainSource))
+		verify(/function\s+nearViewportPrefetchAllowed\(\)[\s\S]*!richScrollInProgress[\s\S]*!scopePresentationObservationActive[\s\S]*!prependAnchorActive[\s\S]*!chatModel\.appendPending[\s\S]*!chatModel\.prependPending[\s\S]*pendingVisibleHydrationCount\(\)\s*===\s*0[\s\S]*pendingVisibleRichRecoveryCount\(\)\s*===\s*0/.test(mainSource))
 		const nearestCandidateStart =
 			mainSource.indexOf("function nearestDeferredPrefetchCandidate")
 		const nearestCandidateEnd =
@@ -1587,7 +1587,7 @@ TestCase {
 			&& viewportMembershipUpdateEnd > viewportMembershipUpdateStart)
 		const viewportMembershipUpdateSource = asyncDelegateSource.slice(
 			viewportMembershipUpdateStart, viewportMembershipUpdateEnd)
-		verify(/const rowTop\s*=\s*Number\(y\s*\|\|\s*0\)[\s\S]*const extent\s*=\s*Math\.max\(0,[\s\S]*Number\(effectiveViewportProbeHeight\s*\|\|\s*0\)[\s\S]*const viewportTop\s*=\s*Number\(timeline\.contentY\s*\|\|\s*0\)[\s\S]*const viewportBottom\s*=\s*viewportTop[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)[\s\S]*const warmDistance\s*=\s*Math\.min\([\s\S]*timeline\.baseCacheBuffer[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)\s*\*\s*1\.5/.test(
+		verify(/const rowTop\s*=\s*Number\(y\s*\|\|\s*0\)[\s\S]*const extent\s*=\s*Math\.max\(0,[\s\S]*Number\(effectiveViewportProbeHeight\s*\|\|\s*0\)[\s\S]*const viewportTop\s*=\s*Number\(timeline\.contentY\s*\|\|\s*0\)[\s\S]*const viewportBottom\s*=\s*viewportTop[\s\S]*Number\(timeline\.height\s*\|\|\s*0\)[\s\S]*const warmDistance\s*=\s*timeline\.baseCacheBuffer/.test(
 			viewportMembershipUpdateSource))
 		verify(!/Number\(viewportProbeHeight\s*\|\|\s*0\)/.test(
 			viewportMembershipUpdateSource))

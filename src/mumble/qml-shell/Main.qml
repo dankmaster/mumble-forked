@@ -3867,11 +3867,10 @@ ApplicationWindow {
 						repeat: false
 						onTriggered: timeline.reconcileStationaryThumbWarmPins()
 					}
-					// Keep less than one extra viewport of delegates warm. Rich preview
-					// loaders incubate asynchronously, so a multi-viewport cache only makes
-					// scope entry and history insertion construct invisible card trees.
+					// Keep a bounded two-viewport lookahead. Cold entries remain lightweight;
+					// the idle queue prepares one nearby card at a time before it is exposed.
 					readonly property real baseCacheBuffer:
-						Math.max(480, Math.min(1200, height * 0.75))
+						Math.max(640, Math.min(1600, height * 2))
 					// Once a real gesture begins, retain the bounded loaded page behind
 					// it. New delegates remain lightweight scroll placeholders, while the
 					// already visible rich trees never enter the reuse pool mid-gesture.
@@ -3884,10 +3883,9 @@ ApplicationWindow {
 					// in one GUI turn, while 128 px still prevents rows behind the gesture
 					// from falling out of the retained range.
 					readonly property real richScrollRetentionRampStep: 128
-					// Full RichPreviewCard materialization stays deliberately narrow and
-					// single-flight. A separate static-only preheater below looks farther
-					// ahead without constructing provider/player trees.
-					readonly property real nearViewportPrefetchDistance: 256
+					// Full card preparation remains single-flight and yields to user input.
+					// Completed stills remain in the existing delegate cache for reversal.
+					readonly property real nearViewportPrefetchDistance: baseCacheBuffer
 					readonly property real staticPreviewLookaheadDistance:
 						Math.max(320, Math.min(baseCacheBuffer, height * 1.35))
 					readonly property real maximumRichScrollRetentionBuffer: 18000
@@ -4420,12 +4418,12 @@ ApplicationWindow {
 					property int serializedDeferredSourceAdmissionCount: 0
 					readonly property real deferredMessageRowHeight: 58
 					function coldMessageRowHeight(estimate) {
-						// A provider estimate is not a painted card. Keep never-presented
-						// rows compact until the quiet, anchored height commit owns expansion.
-						if (activeScope.activity)
-							return Math.max(deferredMessageRowHeight, Number(estimate || 0))
-						return Math.max(deferredMessageRowHeight, Math.min(180,
-							Number(estimate || deferredMessageRowHeight)))
+						// Reserve provider space before the card enters the viewport. A
+						// compact summary that later becomes a portrait card changes the
+						// scroll range by hundreds of pixels after the gesture has ended.
+						const height = Number(estimate || deferredMessageRowHeight)
+						return isFinite(height) ? Math.max(deferredMessageRowHeight, height)
+							: deferredMessageRowHeight
 					}
 					// The queued tail itself is the supersede window: no full row is
 					// admitted until the final append has completed. Yield one event turn
@@ -7056,6 +7054,7 @@ ApplicationWindow {
 						const deferredRich = deferred
 							&& Number(item.deferredPresentationHeight || 0) > 180
 						const needsWarmRecovery = !deferred
+							&& item.staticPreviewPresentationReady !== true
 							&& item.richResourcesRequired === true
 							&& item.previewLoaderIncubationSuppressed !== true
 							&& item.previewLoaderFailed !== true
@@ -7104,7 +7103,7 @@ ApplicationWindow {
 					}
 
 					function nearViewportPrefetchAllowed() {
-						return !stickToBottom && !richScrollInProgress
+						return !richScrollInProgress
 							&& !scopePresentationPending && !scopePresentationFinalizing
 							&& !scopeResetPending && !scopePresentationObservationActive
 							&& !prependAnchorActive && !topAnchorActive && !activeScope.loading
@@ -7157,7 +7156,7 @@ ApplicationWindow {
 						nearViewportPrefetchReadyId = ""
 						nearViewportPrefetchOwnsViewportAnchor = false
 						nearViewportPrefetchDeadlineTimer.restart()
-						if (candidate.above && !viewportAnchorActive) {
+						if (candidate.above && !stickToBottom && !viewportAnchorActive) {
 							if (!captureViewportAnchor()) {
 								nearViewportPrefetchDeadlineTimer.stop()
 								nearViewportPrefetchActiveId = ""
@@ -7331,6 +7330,11 @@ ApplicationWindow {
 						// that cheap visual is ready or its bounded native fallback is final.
 						if (item.previewPrewarmVisualReady !== true)
 							return false
+						// Keep the warm slot until its outer height is committed. Only then
+						// can the completed static card survive losing offscreen admission.
+						if (!(item.presentationHeightCommittedHeight > 0)
+								|| item.richGeometrySettling === true)
+							return false
 						nearViewportPrefetchDeadlineTimer.stop()
 						nearViewportPrefetchActiveId = ""
 						nearViewportPrefetchReadyId = key
@@ -7339,7 +7343,11 @@ ApplicationWindow {
 							scheduleViewportAnchorQuietRelease()
 						}
 						nearViewportPrefetchOwnsViewportAnchor = false
-						Qt.callLater(function() { timeline.scheduleStaticPreviewSweep() })
+						nearViewportPrefetchViewportSignature = ""
+						Qt.callLater(function() {
+							timeline.scheduleNearViewportPrefetch()
+							timeline.scheduleStaticPreviewSweep()
+						})
 						return true
 					}
 
@@ -8486,11 +8494,9 @@ ApplicationWindow {
 								} else if (viewportAnchorActive) {
 									restoreViewportAnchor()
 								} else {
-									// Explicit programmatic jumps release their previous
-									// anchors before changing contentY. Re-establish tail
-									// intent when such a jump lands on the latest row;
-									// otherwise protect the newly revealed message.
-									stickToBottom = isAtBottom()
+									// Geometry can temporarily clamp a reading viewport to the
+									// end. Only user navigation may establish follow-latest
+									// intent; an automatic layout must preserve reading mode.
 									if (stickToBottom)
 										requestBottomFollow()
 									else
@@ -9503,8 +9509,7 @@ ApplicationWindow {
 					// The existing tail path owns bottom correction. It must not
 					// acquire a viewport anchor merely because a card settled.
 					presentationHeightTailIntent = false
-					const exactTailAtPrepare = timeline.isAtBottom()
-					if (timeline.stickToBottom || exactTailAtPrepare) {
+					if (timeline.stickToBottom) {
 						presentationHeightTailIntent = true
 						return true
 					}
@@ -9571,7 +9576,7 @@ ApplicationWindow {
 						timeline.scheduleViewportAnchorQuietRelease()
 						timeline.scheduleViewportMembershipUpdate()
 					root.update()
-					if ((commitsDeadlineRecovery || plainDeferredSourceOwned) && item)
+					if (item)
 						item.completeRichLoaderResumeWhenReady()
 					return true
 								}
@@ -9931,9 +9936,7 @@ ApplicationWindow {
 									const viewportTop = Number(timeline.contentY || 0)
 									const viewportBottom = viewportTop
 										+ Number(timeline.height || 0)
-									const warmDistance = Math.min(
-										timeline.baseCacheBuffer,
-										Number(timeline.height || 0) * 1.5)
+									const warmDistance = timeline.baseCacheBuffer
 									const nextVisible = !accessibilityPooled
 										&& rowTop <= viewportBottom
 										&& rowTop + extent >= viewportTop
@@ -10032,6 +10035,8 @@ ApplicationWindow {
 									? item.previewPresentationReady : false
 								readonly property bool previewPrewarmVisualReady: item
 									? item.previewPrewarmVisualReady : false
+								readonly property bool staticPreviewPresentationReady: item
+									? item.staticPreviewPresentationReady : false
 								readonly property int previewPrewarmProgressRevision: item
 									? Number(item.previewPrewarmProgressRevision || 0) : 0
 								readonly property bool richResourcesRequired: item

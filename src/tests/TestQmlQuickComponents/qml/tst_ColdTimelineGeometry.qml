@@ -198,13 +198,15 @@ TestCase {
 			}`, testCase, "coldTimelineGeometryProbe")
 	}
 
-	function test_cold_rich_rows_are_bounded_and_plain_rows_keep_their_height() {
+	function test_cold_rich_rows_reserve_provider_geometry_before_scroll() {
 		const probe = geometryProbe()
 		for (const estimate of [320, 370, 741, 838, 1200])
-			compare(probe.coldMessageRowHeight(estimate), 180)
+			compare(probe.coldMessageRowHeight(estimate), estimate)
 		compare(probe.coldMessageRowHeight(58), 58)
 		compare(probe.coldMessageRowHeight(120), 120)
 		compare(probe.coldMessageRowHeight(0), 58)
+		compare(probe.coldMessageRowHeight(NaN), 58)
+		compare(probe.coldMessageRowHeight(Infinity), 58)
 		probe.activeScope = {activity: true}
 		compare(probe.coldMessageRowHeight(741), 741)
 		probe.destroy()
@@ -212,7 +214,7 @@ TestCase {
 
 	function test_metadata_revision_invalidates_content_but_holds_same_scope_geometry() {
 		const probe = geometryProbe()
-		compare(probe.viewportProbeBaseHeight(), 180)
+		compare(probe.viewportProbeBaseHeight(), 741)
 		probe.presentationHeightSettledIdentity = "message-a|preview-1"
 		probe.presentationHeightSettledHeight = 741
 		probe.retainedPresentationHeight = 741
@@ -224,12 +226,52 @@ TestCase {
 		compare(probe.presentationHeightCommittedHeight, 0)
 		compare(probe.viewportProbeBaseHeight(), 741)
 		probe.scopePresentationGeneration = 8
-		compare(probe.viewportProbeBaseHeight(), 180)
+		probe.deferredPresentationHeight = 370
+		compare(probe.viewportProbeBaseHeight(), 370)
 		probe.scopePresentationGeneration = 7
 		probe.stableId = "message-b"
 		verify(probe.reevaluatePresentationHeightIdentity())
 		compare(probe.retainedPresentationHeight, 0)
-		compare(probe.viewportProbeBaseHeight(), 180)
+		compare(probe.viewportProbeBaseHeight(), 370)
+		probe.destroy()
+	}
+
+	function test_height_commit_cannot_steal_reading_intent_at_transient_tail() {
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				property bool presentationHeightTailIntent: false
+				property var timeline: ({stickToBottom: false, viewportAnchorActive: true,
+					isAtBottom: function() { return true }, captureViewportAnchor: function() { return true }})
+				${productFunction("preparePresentationHeightCommit")}
+			}`, testCase)
+		verify(probe.preparePresentationHeightCommit())
+		verify(!probe.presentationHeightTailIntent)
+		probe.timeline = {stickToBottom: true}
+		verify(probe.preparePresentationHeightCommit())
+		verify(probe.presentationHeightTailIntent)
+		probe.destroy()
+	}
+
+	function test_prefetch_skips_retained_stills_and_selects_next_cold_card() {
+		const probe = Qt.createQmlObject(`import QtQuick
+			QtObject {
+				property real height: 600
+				property real contentY: 2000
+				property real originY: 0
+				property real nearViewportPrefetchDistance: 1200
+				property var timeline: this
+				${productFunction("nearViewportPrefetchCandidateFromItem")}
+			}`, testCase)
+		const warm = {stableId: "warm", visible: true, height: 400,
+			staticPreviewPresentationReady: true, richResourcesRequired: true,
+			richResourcesActive: false, mapToItem: function() { return {y: -500} }}
+		const cold = {stableId: "cold", visible: true, height: 700,
+			lightweightDeferredPresentation: true, deferredPresentationHeight: 700,
+			mapToItem: function() { return {y: -1200} }}
+		compare(probe.nearViewportPrefetchCandidateFromItem(warm, null), null)
+		compare(probe.nearViewportPrefetchCandidateFromItem(cold, null).id, "cold")
+		cold.mapToItem = function() { return {y: -2000} }
+		compare(probe.nearViewportPrefetchCandidateFromItem(cold, null), null)
 		probe.destroy()
 	}
 
@@ -351,7 +393,7 @@ TestCase {
 		compare(card.paintedSurface, true)
 		compare(card.staticPreviewCacheActive, false)
 		const source = String(mainQmlSource)
-		const start = source.indexOf("readonly property bool staticPreviewPresentationReady:")
+		const start = source.lastIndexOf("readonly property bool staticPreviewPresentationReady:")
 		const end = source.indexOf("onStaticPreviewPresentationReadyChanged:", start)
 		verify(start >= 0 && end > start)
 		const probe = Qt.createQmlObject(`import QtQuick
