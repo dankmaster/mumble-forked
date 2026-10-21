@@ -601,6 +601,7 @@ TestCase {
 			asyncSource))
 		verify(!eligibilitySource.includes("!timeline.scopePresentationPending"))
 		verify(!eligibilitySource.includes("!timeline.scopePresentationFinalizing"))
+		verify(eligibilitySource.includes("!contentNeedsHydration"))
 		// A stable existing anchor is ownership, not a reason to recapture and
 		// overwrite the selected message/offset. Only its restore/release phases
 		// remain ineligible.

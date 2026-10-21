@@ -10131,6 +10131,10 @@ ApplicationWindow {
 									!accessibilityPooled && !!item
 									&& currentPresentationHeightIdentity().length > 0
 									&& messageRowReady
+									// A loading summary is not the card's measured height. Keep
+									// the reservation until hydration resolves or fails; otherwise
+									// portrait cards collapse to a link row and then grow again.
+									&& !contentNeedsHydration
 									// Hidden finalization may latch its bounded fallback surface. Once
 									// presented, wait for provider activation to settle so a temporary
 									// rich height cannot rewrite the steady-state ListView coordinate map.
