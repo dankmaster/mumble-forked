@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtTest
 import Mumble.Theme 1.0
@@ -1162,6 +1163,9 @@ TestCase {
     }
 
 	function test_loading_embed_keeps_geometry_invisible_and_ready_static_cache_avoids_player() {
+		controlledImageProvider.reset()
+		const posterId = "controlled-steam-static-cache-" + Date.now()
+		const posterSource = "image://mumble/" + posterId
 		const card = previewLoader.item
 		card.preview = {
 			"state": "loading", "loading": true,
@@ -1195,34 +1199,33 @@ TestCase {
 			"url": "https://www.youtube.com/watch?v=static-cache",
 			"embedUrl": "https://www.youtube.com/embed/static-cache",
 			"embedKind": "youtube", "embedAspect": "wide",
-			"thumbnailUrl": "image://mumble/static-cache-poster"
+			"thumbnailUrl": posterSource
 		}
 		const poster = findChild(card, "previewEmbedPoster")
 		verify(poster !== null)
-		// Let the new DTO's geometry bindings settle before measuring the reserved
-		// height. The static decode may remain asynchronous after this turn.
-		wait(0)
-		// The asynchronous static request may still be Null/Loading on this exact
-		// turn. Geometry stays fixed, but no ready-looking card may be painted.
+		// Hold decode completion until the new DTO's layout has actually settled.
+		// A zero-duration event turn can precede the ColumnLayout polish pass.
+		tryCompare(poster, "status", Image.Loading)
+		verify(waitForPolish(card.Window.window))
 		const readyHeight = card.implicitHeight
-		if (poster.status !== Image.Ready) {
-			verify(card.staticEmbedPosterRevealPending)
-			verify(card.visualPresentationPending)
-			compare(card.prewarmVisualReady, false)
-			compare(card.opacity, 1)
-			compare(panel.opacity, 1)
-			compare(card.performanceEmbedSurfaceState, "loading")
-		}
+		verify(card.staticEmbedPosterRevealPending)
+		verify(card.visualPresentationPending)
+		compare(card.prewarmVisualReady, false)
+		compare(card.opacity, 1)
+		compare(panel.opacity, 1)
+		compare(card.performanceEmbedSurfaceState, "loading")
 		compare(card.staticPreviewCacheActive, true)
 		compare(card.staticEmbedPosterCacheActive, true)
 		compare(card.staticCompactImageCacheActive, false)
 		compare(card.staticTypedMediaCacheActive, false)
-		verify(poster.source.toString().indexOf("image://mumble/static-cache-poster") === 0)
+		compare(poster.source.toString(), posterSource)
 		compare(poster.cache, true)
 		compare(poster.sourceSize.width, 1280)
 		compare(poster.sourceSize.height, 960)
+		compare(controlledImageProvider.release(posterId), 1)
 		tryCompare(poster, "status", Image.Ready)
 		tryCompare(card, "visualPresentationPending", false)
+		verify(waitForPolish(card.Window.window))
 		compare(card.prewarmVisualReady, true)
 		compare(card.opacity, 1)
 		compare(card.enabled, true)
@@ -4060,6 +4063,7 @@ TestCase {
 		verify(body.plainText.indexOf("Embedded release diagram") >= 0)
 
 		tryVerify(function() { return previewLoader.y >= bodyLoader.y + imageCard.height })
+		verify(waitForPolish(imageCard.Window.window))
 		// The previous test can leave the synthetic pointer at the same scene
 		// coordinate. Move outside first so a newly materialized MouseArea receives
 		// a deterministic hover-enter edge on every full-suite run.
