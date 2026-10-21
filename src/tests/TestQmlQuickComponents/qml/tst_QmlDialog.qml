@@ -399,6 +399,61 @@ TestCase {
 		}, 1000, "Expected the primary action to settle at the right edge after Row polish");
 	}
 
+	function test_confirmation_chrome_aligns_and_keeps_the_tone_on_its_action() {
+		dialogState.setSections([{ "title": "Confirmation", "fields": [
+			{ "type": "note", "text": "Quitting will disconnect from the current server and close Mumble." }
+		] }]);
+		dialogState.setActions([
+			{ "id": "cancel", "label": "Cancel", "enabled": true },
+			{ "id": "minimizeMumble", "label": "Minimize", "tone": "accent", "enabled": true },
+			{ "id": "confirmQuit", "label": "Quit Mumble", "tone": "danger", "enabled": true }
+		]);
+		dialogState.setSpecialState("generic", {
+			"id": "quit-chrome", "pages": [], "width": 560, "height": 320,
+			"tone": "danger", "primaryActionId": "confirmQuit"
+		});
+		tryCompare(loader.item, "width", 560);
+		const content = loader.item.contentItem;
+		const inset = loader.item.densityInset;
+		let section = null;
+		let cancel = null;
+		let minimize = null;
+		let quit = null;
+		tryVerify(function() {
+			section = findChild(content, "dialogSection_0");
+			cancel = findChild(content, "dialogAction_cancel");
+			minimize = findChild(content, "dialogAction_minimizeMumble");
+			quit = findChild(content, "dialogAction_confirmQuit");
+			return section !== null && cancel !== null && minimize !== null && quit !== null;
+		});
+		const surface = findChild(loader.item.background, "dialogSurface");
+		const headerDivider = findChild(content, "dialogHeaderDivider");
+		const footerDivider = findChild(content, "dialogFooterDivider");
+		const title = findChild(content, "dialogTitleLabel");
+		verify(surface !== null && headerDivider !== null && footerDivider !== null && title !== null);
+		verify(Qt.colorEqual(surface.border.color, Theme.modalBorder),
+			"A destructive dialog must not be framed in its tone colour");
+		verify(Qt.colorEqual(headerDivider.color, Theme.divider));
+		verify(Qt.colorEqual(footerDivider.color, Theme.divider));
+
+		compare(quit.tone, "danger");
+		verify(quit.highlighted);
+		compare(minimize.tone, "secondary");
+		compare(cancel.tone, "secondary");
+		verify(!minimize.highlighted && !cancel.highlighted);
+
+		function left(item) { return item.mapToItem(content, 0, 0).x; }
+		function right(item) { return item.mapToItem(content, item.width, 0).x; }
+		tryVerify(function() {
+			return left(cancel) < left(minimize) && left(minimize) < left(quit)
+				&& cancel.y === quit.y && Math.abs(right(quit) - (content.width - inset)) <= 1;
+		}, 1000, "Footer actions must form one right-aligned row with the primary action last");
+		compare(Math.round(left(title)), Math.round(left(section)));
+		compare(Math.round(left(section)), inset);
+		compare(Math.round(right(section)), Math.round(right(quit)));
+		compare(Math.round(section.mapToItem(content, 0, 0).y), loader.item.headerHeight + inset);
+	}
+
 	function test_settings_uses_icon_navigation_page_hierarchy_and_sticky_advanced_footer() {
 		dialogState.setSections([{ "title": "Input device", "fields": [
 			{ "id": "device", "type": "text", "label": "Device", "value": "Default" },

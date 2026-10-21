@@ -4630,6 +4630,7 @@ void TestModernDialogControllers::dialogControllerBuildsFailedConnectionReconnec
 	QVariantMap state = controller.openFailedConnection(context);
 	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("failedConnection"));
 	QCOMPARE(state.value(QStringLiteral("open")).toBool(), true);
+	QCOMPARE(state.value(QStringLiteral("width")).toInt(), 560);
 
 	controller.updateField(QStringLiteral("failedConnection"), QStringLiteral("username"), QStringLiteral("new-user"));
 	controller.updateField(QStringLiteral("failedConnection"), QStringLiteral("password"), QStringLiteral("new-password"));
@@ -4834,7 +4835,7 @@ void TestModernDialogControllers::dialogControllerBuildsQuitConfirmation() {
 	QCOMPARE(actions.size(), 3);
 	QCOMPARE(actions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("cancel"));
 	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("minimizeMumble"));
-	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("accent"));
+	QVERIFY(actions.at(1).toMap().value(QStringLiteral("tone")).toString().isEmpty());
 	QCOMPARE(actions.at(2).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("confirmQuit"));
 	QCOMPARE(actions.at(2).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
 

@@ -10,10 +10,17 @@ TestCase {
 	width: 900
 	height: 700
 	property var productWindow: null
+	// Workspace surfaces keep a stable, persisted viewport; page navigation is
+	// the simplest DTO shape that selects that presentation.
+	readonly property var stablePages: [ { "id": "general", "label": "General" } ]
 	QtObject {
 		id: geometryStoreDouble
 		property var calls: []
+		property int releases: 0
 		property bool restoreResult: false
+		function releaseWindow(window) {
+			releases += 1
+		}
 		function restoreWindow(window, key, minimumWidth, minimumHeight) {
 			calls = calls.concat([ key ])
 			if (restoreResult) {
@@ -38,10 +45,10 @@ TestCase {
 		return created
 	}
 
-	function openProduct(id, width, height) {
+	function openProduct(id, width, height, pages) {
 		dialogState.setSpecialState("generic", {
 			"id": id,
-			"pages": [],
+			"pages": pages || [],
 			"width": width,
 			"height": height,
 			"primaryActionId": "save"
@@ -56,6 +63,7 @@ TestCase {
 		dialogState.resetSections()
 		dialogState.setSpecialState("generic", {})
 		geometryStoreDouble.calls = []
+		geometryStoreDouble.releases = 0
 		geometryStoreDouble.restoreResult = false
 		productWindow = createProductWindow()
 	}
@@ -91,7 +99,7 @@ TestCase {
 	}
 
 	function test_preferred_geometry_is_committed_before_show_and_stays_stable() {
-		openProduct("first-frame-size", 720, 600)
+		openProduct("first-frame-size", 720, 600, stablePages)
 		const available = productWindow.availableGeometry()
 		const margin = Theme.space4
 		compare(productWindow.width,
@@ -106,7 +114,7 @@ TestCase {
 		// Hydration and validation updates for the same dialog may change content
 		// metrics, but must not resize the native window after its first frame.
 		dialogState.setSpecialState("generic", {
-			"id": "first-frame-size", "pages": [], "width": 1040, "height": 780
+			"id": "first-frame-size", "pages": stablePages, "width": 1040, "height": 780
 		})
 		wait(0)
 		compare(productWindow.width, committedWidth)
@@ -160,7 +168,7 @@ TestCase {
 
 	function test_each_logical_dialog_uses_its_own_persisted_geometry_key() {
 		geometryStoreDouble.restoreResult = true
-		openProduct("server-browser", 820, 640)
+		openProduct("server-browser", 820, 640, stablePages)
 		compare(geometryStoreDouble.calls[geometryStoreDouble.calls.length - 1],
 			"dialog:server-browser")
 		compare(productWindow.x, 211)
@@ -169,13 +177,65 @@ TestCase {
 		compare(productWindow.height, 470)
 
 		dialogState.setSpecialState("generic", {
-			"id": "stonks", "pages": [], "width": 1000, "height": 760
+			"id": "stonks", "pages": stablePages, "width": 1000, "height": 760
 		})
 		tryCompare(productWindow, "presentedDialogId", "stonks")
 		compare(geometryStoreDouble.calls[geometryStoreDouble.calls.length - 1],
 			"dialog:stonks")
 		compare(productWindow.width, 630)
 		compare(productWindow.height, 470)
+	}
+
+	function test_sparse_dialog_is_sized_to_content_before_its_first_frame() {
+		geometryStoreDouble.restoreResult = true
+		dialogState.setSections([{ "title": "Confirmation", "fields": [
+			{ "type": "note", "text": "Quitting will disconnect from the current server and close Mumble." },
+			{ "id": "remember", "type": "checkbox", "label": "Remember this setting", "value": false }
+		] }])
+		let shownHeight = -1
+		const recordShownHeight = function() {
+			if (productWindow.visible && shownHeight < 0)
+				shownHeight = productWindow.height
+		}
+		productWindow.visibleChanged.connect(recordShownHeight)
+		openProduct("quit-like", 560, 700)
+		productWindow.visibleChanged.disconnect(recordShownHeight)
+
+		verify(productWindow.contentFitPresentation)
+		verify(geometryStoreDouble.calls.indexOf("dialog:quit-like") < 0,
+			"A content-sized dialog must not restore a persisted size")
+		verify(geometryStoreDouble.releases > 0)
+		compare(productWindow.width, 560)
+		const dialog = productWindow.hostedDialog
+		tryCompare(dialog, "height", productWindow.height)
+		wait(50)
+		compare(productWindow.height, shownHeight,
+			"The pre-show measurement must already be the settled content height")
+		verify(productWindow.height < 400, "Sparse content must not inherit the nominal DTO height")
+		compare(productWindow.height, Math.max(dialog.minimumContentSizedHeight,
+			dialog.naturalContentSizedHeight))
+		const scroll = findChild(dialog.contentItem, "dialogContentScroll")
+		const footer = findChild(dialog.contentItem, "dialogFooter")
+		verify(scroll.contentHeight <= scroll.height + 1, "The complete body must be visible without scrolling")
+		verify(footer.mapToItem(null, 0, footer.height).y <= productWindow.height + 1)
+
+		const sparseHeight = productWindow.height
+		dialogState.setValidationError("remember", "Choose whether Mumble should remember this decision.")
+		tryVerify(function() { return productWindow.height > sparseHeight },
+			1000, "Live validation must grow a content-sized dialog instead of scrolling it")
+		dialogState.setValidationError("remember", "")
+		tryCompare(productWindow, "height", sparseHeight)
+	}
+
+	function test_workspace_dialog_keeps_its_persisted_viewport() {
+		dialogState.setSections([{ "title": "Records", "fields": [
+			{ "id": "records", "type": "resultList", "label": "Records", "items": [] }
+		] }])
+		openProduct("record-browser", 760, 620)
+		verify(!productWindow.contentFitPresentation)
+		compare(geometryStoreDouble.calls[geometryStoreDouble.calls.length - 1], "dialog:record-browser")
+		compare(productWindow.height, Math.min(620,
+			Math.max(productWindow.minimumHeight, productWindow.availableGeometry().height - Theme.space4 * 2)))
 	}
 
 	function test_system_close_uses_controller_owned_close_path() {

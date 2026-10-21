@@ -36,12 +36,20 @@ Window {
 	transientParent: parentWindow
 
 	function availableGeometry() {
-		// Some headless/offscreen platform plugins expose a QScreen before its
-		// availableGeometry value has been populated. Treat that transient state
-		// like an absent screen instead of poisoning all size bindings with NaN.
-		const geometry = screen ? screen.availableGeometry : null
-		if (geometry && Number(geometry.width) > 0 && Number(geometry.height) > 0)
-			return geometry
+		// Window.screen is a QQuickScreenInfo, which has no availableGeometry. Use
+		// its size and position, bounded by the desktop's available size so a
+		// single-monitor taskbar is still respected.
+		const info = screen
+		if (info && Number(info.width) > 0 && Number(info.height) > 0) {
+			const availableWidth = Number(info.desktopAvailableWidth) > 0
+				? Math.min(info.width, info.desktopAvailableWidth) : info.width
+			const availableHeight = Number(info.desktopAvailableHeight) > 0
+				? Math.min(info.height, info.desktopAvailableHeight) : info.height
+			return Qt.rect(Number(info.virtualX || 0), Number(info.virtualY || 0), availableWidth, availableHeight)
+		}
+		// Some headless/offscreen platform plugins expose a screen before its size
+		// has been populated. Treat that transient state like an absent screen
+		// instead of poisoning all size bindings with NaN.
 		return Qt.rect(0, 0, Math.max(width, 1280), Math.max(height, 720))
 	}
 

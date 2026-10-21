@@ -70,6 +70,10 @@ void QmlWindowStateStore::flushWindow(QObject *windowObject) {
 	}
 }
 
+void QmlWindowStateStore::releaseWindow(QObject *windowObject) {
+	if (QWindow *window = qobject_cast< QWindow * >(windowObject)) detachWindow(window, true);
+}
+
 void QmlWindowStateStore::flush() {
 	const QList< Attachment > attachments = m_attachments.values();
 	for (const Attachment &attachment : attachments) {

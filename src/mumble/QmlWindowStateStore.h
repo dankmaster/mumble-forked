@@ -29,6 +29,9 @@ public:
 	Q_INVOKABLE bool restoreWindow(QObject *windowObject, const QString &logicalKey,
 							   int minimumWidth = 320, int minimumHeight = 240);
 	Q_INVOKABLE void flushWindow(QObject *windowObject);
+	/// Flushes and stops recording the window's current logical entry, for a
+	/// surface whose geometry is derived from its content rather than persisted.
+	Q_INVOKABLE void releaseWindow(QObject *windowObject);
 	void flush();
 
 	QByteArray encodedStates() const;

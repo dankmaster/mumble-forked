@@ -14,6 +14,14 @@ Window {
 	property var geometryStore: typeof windowStateStore !== "undefined" ? windowStateStore : null
 	property bool visibilitySyncPending: false
 	property int restoreVisibility: Window.Windowed
+	// Decided whenever a dialog is presented: confirmations, notices and short
+	// forms follow their content instead of the controller's nominal size.
+	property bool contentFitPresentation: false
+	property bool contentFitPending: false
+	readonly property int contentFitMaximumHeight: 720
+	// The hosted dialog lays out at this width. Pre-show measurement assigns it
+	// synchronously because a hidden platform window may report its resize later.
+	property real layoutWidth: width
 	readonly property string surfaceId: "product-dialog.window"
 	readonly property var captureRect: Qt.rect(0, 0, width, height)
 	readonly property bool productOpen: controller && controller.open
@@ -32,8 +40,11 @@ Window {
 	height: 700
 	minimumWidth: Math.max(320,
 		Math.min(420, availableGeometry().width - Theme.space5 * 2))
-	minimumHeight: Math.max(240,
+	readonly property int standardMinimumHeight: Math.max(240,
 		Math.min(360, availableGeometry().height - Theme.space5 * 2))
+	minimumHeight: contentFitPresentation
+		? Math.min(standardMinimumHeight, hostedDialog.minimumContentSizedHeight)
+		: standardMinimumHeight
 	visible: false
 	color: Theme.shellBackground
 	flags: Qt.Window
@@ -41,9 +52,17 @@ Window {
 	transientParent: parentWindow
 
 	function availableGeometry() {
-		const geometry = screen ? screen.availableGeometry : null
-		if (geometry && Number(geometry.width) > 0 && Number(geometry.height) > 0)
-			return geometry
+		// Window.screen is a QQuickScreenInfo, which has no availableGeometry. Use
+		// its size and position, bounded by the desktop's available size so a
+		// single-monitor taskbar is still respected.
+		const info = screen
+		if (info && Number(info.width) > 0 && Number(info.height) > 0) {
+			const availableWidth = Number(info.desktopAvailableWidth) > 0
+				? Math.min(info.width, info.desktopAvailableWidth) : info.width
+			const availableHeight = Number(info.desktopAvailableHeight) > 0
+				? Math.min(info.height, info.desktopAvailableHeight) : info.height
+			return Qt.rect(Number(info.virtualX || 0), Number(info.virtualY || 0), availableWidth, availableHeight)
+		}
 		return Qt.rect(0, 0, Math.max(width, 1280), Math.max(height, 720))
 	}
 
@@ -54,23 +73,46 @@ Window {
 			|| controller.kind || "product-dialog")
 	}
 
+	function releaseGeometryStore() {
+		if (geometryStore && typeof geometryStore.releaseWindow === "function")
+			geometryStore.releaseWindow(productWindow)
+	}
+
+	function contentFitHeight(naturalHeight, maximumUsableHeight) {
+		const preferredHeight = Number(controller && controller.preferredHeight || 700)
+		const cap = Math.min(maximumUsableHeight, Math.max(preferredHeight, contentFitMaximumHeight))
+		return Math.max(minimumHeight, Math.min(Math.ceil(naturalHeight), cap))
+	}
+
 	function ensureUsableGeometry(usePreferredSize, centerWindow) {
 		const dialogId = currentDialogId()
-		if (geometryStore && dialogId.length > 0
+		if (centerWindow)
+			contentFitPresentation = !!hostedDialog.contentFitNativeSurface
+		if (contentFitPresentation) {
+			// A content-sized dialog is laid out afresh on every presentation. A
+			// persisted size would restore the empty band this sizing removes, and
+			// the previous dialog's key must not record this surface's geometry.
+			releaseGeometryStore()
+		} else if (geometryStore && dialogId.length > 0
 				&& geometryStore.restoreWindow(productWindow, "dialog:" + dialogId,
-					minimumWidth, minimumHeight))
+					minimumWidth, minimumHeight)) {
 			return true
+		}
 		const available = availableGeometry()
 		const margin = Theme.space4
 		const maximumUsableWidth = Math.max(minimumWidth, available.width - margin * 2)
 		const maximumUsableHeight = Math.max(minimumHeight, available.height - margin * 2)
-		if (usePreferredSize) {
+		if (usePreferredSize || (contentFitPresentation && centerWindow)) {
 			const preferredWidth = Math.max(minimumWidth,
 				Number(controller && controller.preferredWidth || 920))
 			const preferredHeight = Math.max(minimumHeight,
 				Number(controller && controller.preferredHeight || 700))
-			width = Math.min(preferredWidth, maximumUsableWidth)
-			height = Math.min(preferredHeight, maximumUsableHeight)
+			const nextWidth = Math.min(preferredWidth, maximumUsableWidth)
+			width = nextWidth
+			layoutWidth = nextWidth
+			height = contentFitPresentation
+				? contentFitHeight(hostedDialog.measureNativeContentHeight(), maximumUsableHeight)
+				: Math.min(preferredHeight, maximumUsableHeight)
 		} else {
 			width = Math.max(minimumWidth, Math.min(width, maximumUsableWidth))
 			height = Math.max(minimumHeight, Math.min(height, maximumUsableHeight))
@@ -123,9 +165,10 @@ Window {
 		if (!visible) {
 			if (beforeOpen && beforeOpen() === false)
 				return
-			// Resolve the native geometry before show(). QmlDialog may continue to
-			// measure or hydrate its body, but the first presented frame and every
-			// later frame retain this controller-owned viewport.
+			// Resolve the native geometry before show(). Workspace dialogs may
+			// continue to measure or hydrate their body, but the first presented
+			// frame and every later frame retain this controller-owned viewport.
+			// Content-sized dialogs are measured here, so their first frame is final.
 			ensureUsableGeometry(newSurface, true)
 			presentedDialogId = nextDialogId
 			show()
@@ -152,6 +195,33 @@ Window {
 		})
 	}
 
+	// Validation messages and other live edits can change a content-sized
+	// dialog after it opens. Follow them, keeping the window on screen.
+	function scheduleContentFit() {
+		if (!contentFitPresentation || contentFitPending)
+			return
+		contentFitPending = true
+		Qt.callLater(function() {
+			productWindow.contentFitPending = false
+			productWindow.applyContentFit()
+		})
+	}
+
+	function applyContentFit() {
+		if (!visible || !contentFitPresentation || visibility !== Window.Windowed
+				|| presentedDialogId !== currentDialogId())
+			return
+		const available = availableGeometry()
+		const margin = Theme.space4
+		const nextHeight = contentFitHeight(Math.max(hostedDialog.minimumContentSizedHeight,
+			hostedDialog.naturalContentSizedHeight), Math.max(minimumHeight, available.height - margin * 2))
+		if (nextHeight === height)
+			return
+		height = nextHeight
+		y = Math.max(available.y + margin,
+			Math.min(y, available.y + available.height - nextHeight - margin))
+	}
+
 	function applyInitialFocus() {
 		return hostedDialog.applyInitialFocus()
 	}
@@ -164,6 +234,7 @@ Window {
 	}
 
 	Component.onCompleted: scheduleVisibilitySync()
+	onWidthChanged: layoutWidth = width
 	onVisibilityChanged: {
 		if (visibility === Window.Windowed || visibility === Window.Maximized
 				|| visibility === Window.FullScreen)
@@ -191,9 +262,15 @@ Window {
 		function onStateChanged() { productWindow.scheduleVisibilitySync() }
 	}
 
+	Connections {
+		target: hostedDialog
+		function onNaturalContentSizedHeightChanged() { productWindow.scheduleContentFit() }
+	}
+
 	Item {
 		id: productWindowContent
-		anchors.fill: parent
+		width: productWindow.layoutWidth
+		height: productWindow.height
 	}
 
 	QmlDialog {

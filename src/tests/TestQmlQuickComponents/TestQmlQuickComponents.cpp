@@ -539,7 +539,7 @@ class FakeDialogState final : public QObject {
 	Q_PROPERTY(QString activePage READ activePage NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList pages READ pages NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList sections READ sections NOTIFY stateChanged)
-	Q_PROPERTY(QVariantList actions READ actions CONSTANT)
+	Q_PROPERTY(QVariantList actions READ actions NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList favorites READ favorites NOTIFY stateChanged)
 	Q_PROPERTY(int selectedFavoriteIndex READ selectedFavoriteIndex NOTIFY stateChanged)
 	Q_PROPERTY(bool editorOpen READ editorOpen NOTIFY stateChanged)
@@ -731,6 +731,11 @@ public:
 	Q_INVOKABLE void setSections(const QVariantList &sections) {
 		m_sections = sections;
 		clearPresentationFieldValues();
+		++m_revision;
+		emit stateChanged();
+	}
+	Q_INVOKABLE void setActions(const QVariantList &actions) {
+		m_actions = actions;
 		++m_revision;
 		emit stateChanged();
 	}

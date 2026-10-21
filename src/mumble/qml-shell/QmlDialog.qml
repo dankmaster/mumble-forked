@@ -43,7 +43,7 @@ Dialog {
 		: Theme.densityId === "spacious" ? 84 : 76
 	readonly property int footerHeight: Math.max(Theme.densityId === "compact" ? 56
 		: Theme.densityId === "spacious" ? 72 : 64,
-		footerActions.childrenRect.height + (Theme.spacing * 2),
+		footerActions.implicitHeight + (Theme.spacing * 2),
 		settingsAdvancedFooter.implicitHeight + (Theme.spacing * 2))
 	readonly property int statusHeight: String(dialogState.statusMessage || "").length > 0
 		? statusLabel.implicitHeight + (Theme.spacing * 2) : 0
@@ -74,6 +74,29 @@ Dialog {
 		+ compactPageBarHeight + settingsPageHeadingHeight + measuredContentHeight + footerHeight
 	readonly property int responsiveHeight: stablePageViewport ? requestedHeight
 		: Math.max(minimumContentSizedHeight, naturalContentSizedHeight)
+	// Confirmations, notices and short forms are sized by their content in the
+	// native product window too. Workspace surfaces hydrate after they open, so
+	// they keep the controller-owned and persisted viewport instead.
+	readonly property bool contentFitNativeSurface: {
+		dialogState.revision
+		if (stablePageViewport || dialogState.loading)
+			return false
+		if ([ "connect", "certificate", "recorder", "screenShare", "stonks", "serverAdmin", "settings",
+				"imageViewer" ].indexOf(String(dialogState.kind || "")) >= 0)
+			return false
+		const workspaceFieldTypes = [ "pluginEditor", "messageEventEditor", "shortcutEditor", "motdEditor",
+			"aclEditor", "serverAdminEditor", "resultList", "audioDebug", "inputEnhancementCalibration",
+			"devicePriorityList", "voiceMeter" ]
+		const sections = dialogState.sections || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const fields = (sections[sectionIndex] || {}).fields || []
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				if (workspaceFieldTypes.indexOf(String((fields[fieldIndex] || {}).type || "")) >= 0)
+					return false
+			}
+		}
+		return true
+	}
 	readonly property string dialogTone: String(dialogState.tone || "").toLowerCase()
 	readonly property color dialogToneColor: toneColor(dialogTone)
 	property bool showAdvanced: !!dialogState.state.showAdvanced
@@ -192,6 +215,16 @@ Dialog {
 			}
 		}
 		return false
+	}
+	// Only the primary footer action is filled. Other actions stay secondary
+	// unless their own tone warns about a destructive or retrying operation.
+	function footerActionTone(action, primaryAction) {
+		const tone = String((action || {}).tone || "").toLowerCase()
+		if (primaryAction)
+			return tone.length > 0 ? tone : "accent"
+		if (String(dialogState.primaryActionId || "").length === 0)
+			return tone.length > 0 ? tone : "secondary"
+		return [ "danger", "error", "warning", "retry" ].indexOf(tone) >= 0 ? tone : "secondary"
 	}
 	function toneColor(tone) {
 		const normalized = String(tone || "").toLowerCase()
@@ -847,6 +880,28 @@ Dialog {
 	function scheduleContentMeasurement() {
 		Qt.callLater(measureContentHeight)
 	}
+	function polishItemTree(item, childrenFirst) {
+		if (!item)
+			return
+		const polishable = typeof item.ensurePolished === "function"
+		if (polishable && !childrenFirst)
+			item.ensurePolished()
+		const children = item.children || []
+		for (let index = 0; index < children.length; ++index)
+			polishItemTree(children[index], childrenFirst)
+		if (polishable && childrenFirst)
+			item.ensurePolished()
+	}
+	// A hidden native host never runs a polish pass, so Layouts and positioners
+	// still hold stale geometry. Layouts hand widths down and implicit sizes up:
+	// polish parents first, then children first, and return the height the
+	// first presented frame should use.
+	function measureNativeContentHeight() {
+		polishItemTree(contentItem, false)
+		polishItemTree(contentItem, true)
+		measureContentHeight()
+		return Math.max(minimumContentSizedHeight, naturalContentSizedHeight)
+	}
 	function safeRenderImageSource(value) {
 		const source = String(value === undefined || value === null ? "" : value).trim()
 		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
@@ -1264,8 +1319,10 @@ Dialog {
 			objectName: "dialogSurface"
 			anchors.fill: parent
 			color: Theme.shellBackground
-			border.color: dialog.dialogTone.length > 0 ? dialog.dialogToneColor : Theme.modalBorder
-			border.width: dialog.nativeWindowHosted ? 0 : (dialog.dialogTone.length > 0 ? 2 : 1)
+			// The dialog tone belongs to its actions and status banner. Colouring the
+			// whole frame made destructive confirmations read as an error state.
+			border.color: Theme.modalBorder
+			border.width: dialog.nativeWindowHosted ? 0 : 1
 			radius: dialog.nativeWindowHosted ? 0 : Theme.shellRadius
 			Rectangle {
 				anchors.left: parent.left
@@ -1292,14 +1349,24 @@ Dialog {
             Layout.fillWidth: true
 			Layout.preferredHeight: dialog.headerHeight
             color: Theme.panel
-			border.color: dialog.dialogTone.length > 0 ? dialog.dialogToneColor : Theme.divider
+			Rectangle {
+				objectName: "dialogHeaderDivider"
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.bottom: parent.bottom
+				height: 1
+				color: Theme.divider
+			}
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: dialog.densityInset + 2
-                anchors.rightMargin: Theme.spacing
+				// Share the body inset so the title, section cards and footer actions
+				// align on the same vertical edges.
+				anchors.leftMargin: dialog.densityInset
+				anchors.rightMargin: dialog.nativeWindowHosted ? dialog.densityInset : Theme.spacing
+				spacing: Theme.space2
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 3
+					spacing: Theme.space1
 					Label {
 						objectName: "dialogProductEyebrow"
 						visible: dialogState.kind === "certificate" || dialogState.kind === "connect"
@@ -1314,20 +1381,23 @@ Dialog {
 					Label {
 						objectName: "dialogTitleLabel"
 						textFormat: Text.PlainText
+						Layout.fillWidth: true
 						text: dialogState.title
 						color: Theme.textStrong
-						font.pixelSize: 19
-						font.bold: true
+						font.pixelSize: Theme.fontHeading
+						font.weight: Font.DemiBold
+						elide: Text.ElideRight
 						Accessible.role: Accessible.Heading
 						Accessible.name: text
 					}
                     Label {
+						objectName: "dialogSubtitleLabel"
 						textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: dialogState.subtitle
                         visible: text.length > 0
-                        color: Theme.textMuted
-                        font.pixelSize: 11
+						color: Theme.secondaryText
+						font.pixelSize: Theme.fontLabel
                         elide: Text.ElideRight
                     }
                 }
@@ -1635,6 +1705,7 @@ Dialog {
 					Column {
 						id: dialogContentColumn
 						width: parent.width
+						topPadding: dialog.densityInset
 						spacing: Theme.spacing + 4
 						onImplicitHeightChanged: {
 							dialog.scheduleContentMeasurement()
@@ -2438,7 +2509,8 @@ Dialog {
 					Item {
 						objectName: "dialogContentEndPadding"
 						width: 1
-						height: dialog.densityInset
+						// Column spacing precedes this item; together they mirror the top inset.
+						height: Math.max(1, dialog.densityInset - dialogContentColumn.spacing)
 					}
                 }
             }
@@ -2450,14 +2522,20 @@ Dialog {
 			objectName: "dialogFooter"
             Layout.fillWidth: true
 			Layout.preferredHeight: dialog.footerHeight
-            color: Theme.strip
-            border.color: Theme.divider
-			border.width: 1
+			color: Theme.panel
+			Rectangle {
+				objectName: "dialogFooterDivider"
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.top: parent.top
+				height: 1
+				color: Theme.divider
+			}
 			Row {
 				id: settingsAdvancedFooter
 				objectName: "dialogSettingsAdvancedFooter"
 				anchors.left: parent.left
-				anchors.leftMargin: Theme.spacing
+				anchors.leftMargin: dialog.densityInset
 				anchors.verticalCenter: parent.verticalCenter
 				visible: dialogState.kind === "settings" && dialog.hasAdvancedContent
 					&& !dialog.compactDialogLayout
@@ -2501,7 +2579,7 @@ Dialog {
 					enabled: (!dialogState.loading || modelData.id === "close" || modelData.id === "cancel")
 						&& (modelData.enabled === undefined || modelData.enabled)
 					highlighted: primaryAction
-					tone: String(modelData.tone || (primaryAction ? "accent" : "secondary"))
+					tone: dialog.footerActionTone(modelData, primaryAction)
 					Accessible.description: primaryAction ? qsTr("Primary action") : ""
 					onClicked: {
 						const payload = dialogState.kind === "screenShare"
@@ -2518,40 +2596,33 @@ Dialog {
 					}
 				}
 			}
-			Component {
-				id: wideFooterActions
-				Row {
-					spacing: dialog.footerActionSpacing
-					layoutDirection: Qt.LeftToRight
-					Repeater {
-						model: dialog.presentedFooterActions
-						delegate: footerActionDelegate
-					}
-				}
-			}
-			Component {
-				id: compactFooterActions
-				Flow {
-					spacing: dialog.footerActionSpacing
-					layoutDirection: Qt.LeftToRight
-					Repeater {
-						model: dialog.presentedFooterActions
-						delegate: footerActionDelegate
-					}
-				}
-			}
-			Loader {
+			// One right-aligned row in reading order, primary action last. The Flow
+			// is only as wide as its buttons, so it wraps only when they cannot fit.
+			Flow {
 				id: footerActions
-				anchors.right: parent.right
-				anchors.rightMargin: Theme.spacing
-				anchors.verticalCenter: parent.verticalCenter
-				readonly property real availableWidth: Math.max(0, parent.width - (Theme.spacing * 2)
+				objectName: "dialogFooterActions"
+				readonly property real availableWidth: Math.max(0, parent.width - (dialog.densityInset * 2)
 					- (settingsAdvancedFooter.visible ? settingsAdvancedFooter.width + Theme.spacing : 0))
-				width: dialog.compactDialogLayout || (dialogState.kind === "connect"
-					&& !dialogState.editorOpen) ? availableWidth
-					: Math.min(availableWidth, item ? item.implicitWidth : availableWidth)
-				height: item ? item.implicitHeight : 0
-				sourceComponent: dialog.compactDialogLayout ? compactFooterActions : wideFooterActions
+				readonly property bool fillsFooter: dialogState.kind === "connect" && !dialogState.editorOpen
+				readonly property real naturalWidth: {
+					let total = 0
+					for (let index = 0; index < footerActionRepeater.count; ++index) {
+						const action = footerActionRepeater.itemAt(index)
+						if (action)
+							total += action.implicitWidth
+					}
+					return total + Math.max(0, footerActionRepeater.count - 1) * spacing
+				}
+				anchors.right: parent.right
+				anchors.rightMargin: dialog.densityInset
+				anchors.verticalCenter: parent.verticalCenter
+				width: fillsFooter ? availableWidth : Math.min(availableWidth, Math.ceil(naturalWidth))
+				spacing: dialog.footerActionSpacing
+				Repeater {
+					id: footerActionRepeater
+					model: dialog.presentedFooterActions
+					delegate: footerActionDelegate
+				}
 			}
         }
     }

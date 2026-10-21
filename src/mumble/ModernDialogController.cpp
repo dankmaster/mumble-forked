@@ -244,8 +244,9 @@ QVariantMap ModernDialogController::openQuitConfirmation(const bool connected, c
 
 	QVariantList actions { dialogActionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), QString(), true) };
 	if (allowMinimize) {
-		actions.push_back(dialogActionItem(QStringLiteral("minimizeMumble"), QObject::tr("Minimize"),
-										   QStringLiteral("accent"), true));
+		// Minimizing is the safe alternative, not the primary action; only Quit is filled.
+		actions.push_back(
+			dialogActionItem(QStringLiteral("minimizeMumble"), QObject::tr("Minimize"), QString(), true));
 	}
 	actions.push_back(dialogActionItem(QStringLiteral("confirmQuit"), QObject::tr("Quit Mumble"),
 									   QStringLiteral("danger"), true));
@@ -541,6 +542,9 @@ QVariantMap ModernDialogController::failedConnectionState() const {
 	dialog.insert(QStringLiteral("subtitle"), failedConnectionMessage(type));
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("reconnect"));
 	dialog.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+	// Two credential fields do not need the 920 px default product canvas.
+	dialog.insert(QStringLiteral("width"), 560);
+	dialog.insert(QStringLiteral("height"), 360);
 
 	QVariantList fields;
 	fields.push_back(fieldItem(QStringLiteral("username"), QObject::tr("Username"), QStringLiteral("text"),
