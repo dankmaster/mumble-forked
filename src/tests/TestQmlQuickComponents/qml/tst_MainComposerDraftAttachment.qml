@@ -21,6 +21,70 @@ TestCase {
 		compare(component.status, Component.Ready, component.errorString())
 	}
 
+	function test_native_preview_fallback_keeps_artwork_and_clears_reused_source() {
+		// Exercise the product fallback itself, without the expensive provider tree.
+		const marker = mainSource.indexOf('objectName: "previewHydrationPlaceholder"')
+		verify(marker >= 0)
+		const start = mainSource.lastIndexOf("Rectangle {", marker)
+		let end = mainSource.indexOf("{", start) + 1
+		let depth = 1
+		while (end < mainSource.length && depth > 0) {
+			if (mainSource[end] === "{") ++depth
+			if (mainSource[end] === "}") --depth
+			++end
+		}
+		compare(depth, 0)
+		const probe = Qt.createQmlObject(`import QtQuick
+			import QtQuick.Controls
+			import QtQuick.Layouts
+			import "qrc:/qml-shell"
+			Item {
+				id: messageDelegate
+				width: 480; height: 96
+				property bool previewNativeSummary: true
+				property bool previewTerminalUnavailable: true
+				property string previewFallbackThumbnail: ""
+				property string previewProviderLabel: "YouTube"
+				property string previewTitleLabel: "A native thumbnail"
+				property string previewOpenUrl: "https://www.youtube.com/watch?v=test"
+				property real previewStagingHeight: 96
+				property var preview: ({provider: "youtube"})
+				Item {
+					id: messagePreviewHydrationPlaceholderLoader
+					Layout.preferredWidth: 480
+					Layout.preferredHeight: 96
+				}
+				${mainSource.slice(start, end)}
+			}`, testCase, "nativePreviewFallbackProbe")
+		try {
+			const surface = findChild(probe, "previewHydrationPlaceholder")
+			const thumbnail = findChild(probe, "previewNativeThumbnail")
+			const label = findChild(probe, "previewHydrationStateLabel")
+			const warning = findChild(probe, "previewHydrationStateIcon")
+			verify(surface && thumbnail && label && warning)
+			probe.previewFallbackThumbnail = "data:image/svg+xml," + encodeURIComponent(
+				'<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90" fill="#5ec8b0"/></svg>')
+			tryCompare(surface, "nativeThumbnailReady", true)
+			verify(thumbnail.visible)
+			verify(thumbnail.paintedWidth > 0 && thumbnail.paintedHeight > 0)
+			compare(label.text, "YouTube")
+			compare(warning.visible, false)
+			verify(findChild(probe, "previewHydrationOpenButton").enabled)
+			// Delegate reuse must not leave the preceding message's artwork visible.
+			probe.previewFallbackThumbnail = ""
+			tryCompare(surface, "nativeThumbnailReady", false)
+			compare(thumbnail.visible, false)
+			compare(String(thumbnail.source), "")
+			probe.previewNativeSummary = false
+			compare(label.text, "Preview unavailable")
+			compare(warning.visible, true)
+			probe.previewTerminalUnavailable = false
+			compare(label.text, "Loading link preview")
+		} finally {
+			probe.destroy()
+		}
+	}
+
 	function test_failed_original_image_stays_terminal_until_explicit_retry() {
 		verify(/reportedOriginalState[\s\S]*reportedOriginalState !== "error"/.test(mainSource))
 		verify(/function\s+retryAttachmentOriginal\(attachment\)[\s\S]*originalState = "loading"[\s\S]*requestChat(?:Attachment|Inline)Image/.test(mainSource))
@@ -1670,7 +1734,7 @@ TestCase {
 		verify(!/id:\s*prependAnchorSettleTimer[\s\S]{0,900}pendingScopeHydrationCount\(\)/.test(mainSource))
 		verify(/function\s+onRowsAboutToChange\(first,\s*last\)[\s\S]*!chatModel\.presentationBusy[\s\S]*!timeline\.topAnchorActive[\s\S]*!timeline\.prependAnchorActive[\s\S]*!timeline\.viewportAnchorActive[\s\S]*capturePrependAnchor\(\)/.test(mainSource))
 		verify(/id:\s*messagePreviewHydrationPlaceholderLoader[\s\S]*active:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*messageDelegate\.previewTerminalUnavailable[\s\S]*visible:\s*messageDelegate\.hasPreviewContent[\s\S]*messageDelegate\.previewNeedsHydration[\s\S]*messageDelegate\.previewTerminalUnavailable[\s\S]*objectName:\s*"previewHydrationPlaceholder"/.test(mainSource))
-		verify(/readonly property bool previewPaintPending:[\s\S]*previewVisualPresentationPending[\s\S]*readonly property bool previewOnlyPaintPending:[\s\S]*previewSourceOnly[\s\S]*id:\s*messageBubble[\s\S]*color:[\s\S]*previewOnlyPaintPending[\s\S]*\?\s*"transparent"/.test(mainSource))
+		verify(/readonly property bool previewPaintPending:[\s\S]*previewVisualPresentationPending[\s\S]*readonly property bool previewOnlyPaintPending:[\s\S]*previewSourceOnly[\s\S]*id:\s*messageBubble[\s\S]*color:\s*"transparent"/.test(mainSource))
 		const outerPreviewGateStart = mainSource.indexOf(
 			"readonly property bool hasPreviewContent:")
 		const outerPreviewGateEnd = mainSource.indexOf(
@@ -1682,7 +1746,7 @@ TestCase {
 			outerPreviewGate))
 		verify(!/\bmessagePreviewLoader\.(status|item)\b/.test(outerPreviewGate))
 		verify(/Layout\.preferredWidth:[\s\S]*Theme\.avatarMedium[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending[\s\S]*\?\s*0[\s\S]*id:\s*messageSenderLabel/.test(mainSource))
-		verify(/visible:\s*\(messageDelegate\.startsGroup[\s\S]*messageDelegate\.systemMessage[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending\s*\?\s*0\s*:\s*1/.test(mainSource))
+		verify(/visible:\s*messageDelegate\.startsGroup[\s\S]*messageDelegate\.systemMessage[\s\S]*opacity:\s*messageDelegate\.previewOnlyPaintPending\s*\?\s*0\s*:\s*1/.test(mainSource))
 		const messageFrameStart = mainSource.lastIndexOf("ChatMessageFrame {",
 			innerDelegateStart)
 		const messageFrameGateEnd = mainSource.indexOf(
