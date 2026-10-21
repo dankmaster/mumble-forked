@@ -29,6 +29,8 @@ namespace {
 				return QStringLiteral("file");
 			case ChatTimelineRowKind::System:
 				return QStringLiteral("system");
+			case ChatTimelineRowKind::Log:
+				return QStringLiteral("log");
 		}
 		return QStringLiteral("text");
 	}
@@ -153,6 +155,12 @@ QVariant ChatRowModel::data(const QModelIndex &index, int role) const {
 			return row.replyActor;
 		case ReplySnippetRole:
 			return row.replySnippet;
+		case DeliveryStateRole:
+			return row.deliveryState;
+		case DeliveryLabelRole:
+			return row.deliveryLabel;
+		case DeliveryCanRetryRole:
+			return row.deliveryCanRetry;
 		default:
 			return {};
 	}
@@ -179,6 +187,9 @@ QHash< int, QByteArray > ChatRowModel::roleNames() const {
 		{ ReplyToMessageIdRole, "replyToMessageId" },
 		{ ReplyActorRole, "replyActor" },
 		{ ReplySnippetRole, "replySnippet" },
+		{ DeliveryStateRole, "deliveryState" },
+		{ DeliveryLabelRole, "deliveryLabel" },
+		{ DeliveryCanRetryRole, "deliveryCanRetry" },
 	};
 }
 
@@ -374,6 +385,15 @@ QList< int > ChatRowModel::changedRoles(const ChatTimelineRow &before, const Cha
 	}
 	if (before.replySnippet != after.replySnippet) {
 		roles << ReplySnippetRole;
+	}
+	if (before.deliveryState != after.deliveryState) {
+		roles << DeliveryStateRole;
+	}
+	if (before.deliveryLabel != after.deliveryLabel) {
+		roles << DeliveryLabelRole;
+	}
+	if (before.deliveryCanRetry != after.deliveryCanRetry) {
+		roles << DeliveryCanRetryRole;
 	}
 	return roles;
 }

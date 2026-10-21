@@ -27353,6 +27353,29 @@ QVariantMap modernEphemeralLogMessageState(const quint64 sequence, const QString
 	return message;
 }
 
+namespace {
+	// Log lines as the current timeline publishes them (already redacted).
+	QVector< ChatLocalEntry > chatTimelineV2LogEntries(const QVariantList &messages) {
+		QVector< ChatLocalEntry > entries;
+		entries.reserve(messages.size());
+		for (const QVariant &value : messages) {
+			const QVariantMap message = value.toMap();
+			ChatLocalEntry entry;
+			entry.sequence    = message.value(QStringLiteral("messageKey")).toString().section(QLatin1Char(':'), -1).toULongLong();
+			entry.createdAtMs = message.value(QStringLiteral("createdAtMs")).toLongLong();
+			entry.authorName  = message.value(QStringLiteral("actor")).toString();
+			entry.text        = message.value(QStringLiteral("bodyText")).toString();
+			entry.logLine     = true;
+			entries.push_back(entry);
+		}
+		return entries;
+	}
+
+	QString chatTimelineV2DirectToken(unsigned int session) {
+		return QStringLiteral("local:dm:%1").arg(session);
+	}
+} // namespace
+
 bool MainWindow::modernServerLogAvailable() const {
 	return m_modernServerLogAuthorized && modernShellServerLogStreamSupported();
 }
@@ -27369,6 +27392,7 @@ void MainWindow::publishModernShellServerLogUpdate(const PersistentChatTarget &t
 	m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
 	m_qmlShellHost->chatModel()->replaceMessages(
 		target.serverLog ? m_modernServerLogEntries : m_modernEphemeralLogEntries);
+	syncChatTimelineV2Log(target);
 	mumble::chatperf::recordValue(target.serverLog ? "modern.server_log.update" : "modern.session_log.update", 1);
 }
 
@@ -27384,6 +27408,7 @@ void MainWindow::publishModernShellServerLogReset(const PersistentChatTarget &ta
 	m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
 	m_qmlShellHost->chatModel()->replaceMessages(
 		target.serverLog ? m_modernServerLogEntries : m_modernEphemeralLogEntries);
+	syncChatTimelineV2Log(target);
 	mumble::chatperf::recordValue(target.serverLog ? "modern.server_log.reset" : "modern.session_log.reset", 1);
 }
 
@@ -27418,6 +27443,10 @@ void MainWindow::appendModernEphemeralLogEntry(const QString &html) {
 	m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
 	const int appended = m_qmlShellHost->chatModel()->appendMessages(QVariantList { message });
 	mumble::chatperf::recordValue("modern.session_log.append.entries", appended);
+	if (m_chatTimelineV2Feed) {
+		m_chatTimelineV2Feed->upsertLocal(QStringLiteral("local:sessionlog"),
+										  chatTimelineV2LogEntries(QVariantList { message }));
+	}
 }
 
 void MainWindow::clearModernServerLogState() {
@@ -27502,13 +27531,21 @@ void MainWindow::applyModernServerLogState(const MumbleProto::ServerLogState &st
 		m_qmlShellHost->activeScopeController()->applyState(buildModernShellServerLogActiveScopeState(target));
 		if (resetModel) {
 			m_qmlShellHost->chatModel()->replaceMessages(m_modernServerLogEntries);
+			syncChatTimelineV2Log(target);
 		} else if (!appendedMessages.isEmpty()) {
 			const int appended = m_qmlShellHost->chatModel()->appendMessages(appendedMessages);
 			mumble::chatperf::recordValue("modern.server_log.append.entries", appended);
+			if (m_chatTimelineV2Feed) {
+				m_chatTimelineV2Feed->upsertLocal(QStringLiteral("local:serverlog"),
+												  chatTimelineV2LogEntries(appendedMessages));
+			}
 		}
 	} else if (activitySelected && m_qmlShellHost) {
 		m_qmlShellHost->activeScopeController()->applyState(buildQmlActiveScopeState(target));
 		m_qmlShellHost->chatModel()->replaceMessages({});
+		if (m_chatTimelineV2Feed) {
+			m_chatTimelineV2Feed->syncLocal(QStringLiteral("local:serverlog"), {});
+		}
 	}
 }
 
@@ -27779,6 +27816,15 @@ void MainWindow::publishQmlDirectMessageEntryUpdate(const unsigned int session,
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	const unsigned int activeSession = target.user ? target.user->uiSession : 0;
 	if (target.directMessage && activeSession == session) m_qmlShellHost->chatModel()->applyMessage(state);
+	if (m_chatTimelineV2Feed) {
+		ModernDirectMessageConversation single;
+		single.messages.push_back(entry);
+		const QVector< ChatLocalEntry > entries = chatTimelineV2DirectEntries(single);
+		m_chatTimelineV2DirectFeed->upsertLocal(chatTimelineV2DirectToken(session), entries);
+		if (target.directMessage && activeSession == session) {
+			m_chatTimelineV2Feed->upsertLocal(chatTimelineV2DirectToken(session), entries);
+		}
+	}
 }
 
 void MainWindow::armModernDirectMessageDeliveryTimeout(const unsigned int session, const quint64 localID,
@@ -30817,7 +30863,8 @@ void MainWindow::initializeChatTimelineV2Feed() {
 	}
 	m_chatTimelineV2Feed =
 		new ChatTimelineFeed(m_persistentChatController, m_qmlShellHost->chatTimelineV2Model(), this);
-	m_chatTimelineV2Feed->setOptionsProvider([]() {
+	m_chatTimelineV2DirectFeed = new ChatTimelineFeed(nullptr, m_qmlShellHost->chatTimelineV2DirectModel(), this);
+	const auto ownOptions = []() {
 		ChatRowBuilder::Options options;
 		options.ownSession = Global::get().uiSession;
 		QReadLocker locker(&ClientUser::c_qrwlUsers);
@@ -30826,7 +30873,41 @@ void MainWindow::initializeChatTimelineV2Feed() {
 			options.ownUserId = static_cast< quint32 >(self->iId);
 		}
 		return options;
-	});
+	};
+	m_chatTimelineV2Feed->setOptionsProvider(ownOptions);
+	m_chatTimelineV2DirectFeed->setOptionsProvider(ownOptions);
+}
+
+
+void MainWindow::syncChatTimelineV2Log(const PersistentChatTarget &target) {
+	if (!m_chatTimelineV2Feed || (!target.serverLog && !target.ephemeralTextPath)) {
+		return;
+	}
+	m_chatTimelineV2Feed->syncLocal(
+		target.serverLog ? QStringLiteral("local:serverlog") : QStringLiteral("local:sessionlog"),
+		chatTimelineV2LogEntries(target.serverLog ? m_modernServerLogEntries : m_modernEphemeralLogEntries));
+}
+
+QVector< ChatLocalEntry >
+	MainWindow::chatTimelineV2DirectEntries(const ModernDirectMessageConversation &conversation) const {
+	QVector< ChatLocalEntry > entries;
+	entries.reserve(static_cast< qsizetype >(conversation.messages.size()));
+	for (const ModernDirectMessageEntry &message : conversation.messages) {
+		ChatLocalEntry entry;
+		entry.sequence         = message.localID;
+		entry.createdAtMs      = message.createdAtMs;
+		entry.authorName       = message.actorName;
+		entry.authorSession    = message.actorSession;
+		entry.own              = message.outgoing;
+		entry.html             = message.messageHtml;
+		entry.text             = message.plainText;
+		entry.persistent       = message.persistentMessage;
+		entry.deliveryState    = message.deliveryState;
+		entry.deliveryLabel    = message.deliveryLabel;
+		entry.deliveryCanRetry = message.deliveryCanRetry;
+		entries.push_back(std::move(entry));
+	}
+	return entries;
 }
 
 void MainWindow::publishPersistentChatSnapshot() {
@@ -31706,13 +31787,24 @@ void MainWindow::applyQmlDirectMessagesState(const QVariantMap &state) {
 			buildModernShellDirectMessageConversationState(conversationIt.value(), true));
 	}
 	m_qmlShellHost->directMessageController()->applyState(typedState);
+	const bool hasConversation = conversationIt != m_modernDirectMessageConversations.cend();
+	const QVector< ChatLocalEntry > v2Entries =
+		m_chatTimelineV2Feed && hasConversation ? chatTimelineV2DirectEntries(conversationIt.value())
+												: QVector< ChatLocalEntry >();
+	if (m_chatTimelineV2DirectFeed) {
+		m_chatTimelineV2DirectFeed->syncLocal(hasConversation ? chatTimelineV2DirectToken(activeSession) : QString(),
+											  v2Entries);
+	}
 
-	if (!target.directMessage || conversationIt == m_modernDirectMessageConversations.cend()) return;
+	if (!target.directMessage || !hasConversation) return;
 
 	const QVariantMap activeConversation =
 		buildModernShellDirectMessageConversationState(conversationIt.value(), true);
 	m_qmlShellHost->activeScopeController()->applyState(buildQmlActiveScopeState(target));
 	m_qmlShellHost->chatModel()->replaceMessages(activeConversation.value(QStringLiteral("messages")).toList());
+	if (m_chatTimelineV2Feed) {
+		m_chatTimelineV2Feed->syncLocal(chatTimelineV2DirectToken(activeSession), v2Entries);
+	}
 }
 
 void MainWindow::syncQmlShellState() {

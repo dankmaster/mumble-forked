@@ -25,6 +25,7 @@
 #include <QtCore/QObject>
 
 #include "ACL.h"
+#include "ChatTimelineRow.h"
 #include "ConnectionFailTypes.h"
 #include "Log.h"
 #include "ModernShellMenuSerializer.h"
@@ -545,6 +546,9 @@ public:
 	};
 
 	enum class ModernShellMessageBuildMode : unsigned char { Full, FastFirstPaint };
+
+	void syncChatTimelineV2Log(const PersistentChatTarget &target);
+	QVector< ChatLocalEntry > chatTimelineV2DirectEntries(const ModernDirectMessageConversation &conversation) const;
 
 	bool hasPersistentChatCapabilities() const;
 	PersistentChatTarget ephemeralChatTarget() const;
@@ -1099,6 +1103,7 @@ protected:
 	PersistentChatGateway *m_persistentChatGateway                 = nullptr;
 	PersistentChatController *m_persistentChatController           = nullptr;
 	ChatTimelineFeed *m_chatTimelineV2Feed                          = nullptr;
+	ChatTimelineFeed *m_chatTimelineV2DirectFeed                    = nullptr;
 	QString m_persistentChatWelcomeText;
 	QString m_modernPersistentChatWelcomeHtml;
 	QStringList m_modernPersistentChatWelcomeImageUrls;

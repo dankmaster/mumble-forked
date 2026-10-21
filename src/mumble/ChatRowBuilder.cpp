@@ -412,6 +412,42 @@ ChatTimelineRow ChatRowBuilder::build(const MumbleProto::ChatMessage &message) c
 	return row;
 }
 
+ChatTimelineRow ChatRowBuilder::buildLocal(const ChatLocalEntry &entry) const {
+	ChatTimelineRow row;
+	if (entry.persistent) {
+		row     = build(*entry.persistent);
+		row.own = row.own || entry.own;
+	} else {
+		row.key.createdAt = entry.createdAtMs > 0 ? static_cast< quint64 >(entry.createdAtMs / 1000) : 0;
+		row.key.threadId  = 0;
+		row.key.messageId = static_cast< quint32 >(entry.sequence);
+		row.authorName    = entry.authorName;
+		row.authorSession = entry.authorSession;
+		row.own           = entry.own;
+		if (entry.logLine) {
+			row.kind       = ChatTimelineRowKind::Log;
+			row.plainText  = entry.text;
+			row.bodyBlocks = { block(QStringLiteral("p"), QStringLiteral("plain"), entry.text) };
+		} else {
+			const Body body = buildBody(entry.html.isEmpty() ? entry.text.toHtmlEscaped() : entry.html, false);
+			row.bodyBlocks  = body.blocks;
+			row.plainText   = body.plainText;
+			for (int i = 0; i < body.inlineImages; ++i) {
+				ChatTimelineMedia media;
+				media.kind = ChatTimelineMedia::Kind::InlineImage;
+				row.media << media;
+			}
+			if (!row.media.isEmpty()) {
+				row.kind = ChatTimelineRowKind::Media;
+			}
+		}
+	}
+	row.deliveryState    = entry.deliveryState;
+	row.deliveryLabel    = entry.deliveryLabel;
+	row.deliveryCanRetry = entry.deliveryCanRetry;
+	return row;
+}
+
 void ChatRowBuilder::decorate(ChatTimelineRow &row, const ChatTimelineRow *older) const {
 	const qint64 createdAtMs = static_cast< qint64 >(row.key.createdAt) * 1000;
 	const QDateTime when     = QDateTime::fromMSecsSinceEpoch(createdAtMs).toLocalTime();
@@ -428,8 +464,11 @@ void ChatRowBuilder::decorate(ChatTimelineRow &row, const ChatTimelineRow *older
 	}
 	row.dateLabel = dateBoundary ? m_options.locale.toString(when.date(), QLocale::LongFormat) : QString();
 
-	row.groupStart = !older || dateBoundary || row.kind == ChatTimelineRowKind::System
-					 || older->kind == ChatTimelineRowKind::System || actorKey(row) != actorKey(*older)
+	const auto standalone = [](ChatTimelineRowKind kind) {
+		return kind == ChatTimelineRowKind::System || kind == ChatTimelineRowKind::Log;
+	};
+	row.groupStart = !older || dateBoundary || standalone(row.kind) || standalone(older->kind)
+					 || actorKey(row) != actorKey(*older)
 					 || row.own != older->own
 					 || (row.key.createdAt > 0 && older->key.createdAt > 0
 						 && (static_cast< qint64 >(row.key.createdAt) - static_cast< qint64 >(older->key.createdAt))

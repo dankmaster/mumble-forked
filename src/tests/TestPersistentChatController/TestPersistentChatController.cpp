@@ -237,6 +237,8 @@ private slots:
 	void rowModelKeepsNewestFirstAndReportsExactRoles();
 	void timelineFeedMirrorsActiveScope();
 	void timelineFeedDropsWorkForRetiredScope();
+	void rowBuilderBuildsLogLinesAndDirectMessages();
+	void timelineFeedSyncsLocalScopes();
 };
 
 void TestPersistentChatController::activeSnapshotChangedPublishesTwoHistoryMessages() {
@@ -1400,6 +1402,122 @@ void TestPersistentChatController::timelineFeedDropsWorkForRetiredScope() {
 	QCOMPARE(model.scopeToken(), PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 91).cacheKey());
 	QCOMPARE(model.count(), 1);
 	QCOMPARE(model.rowAt(0).key.messageId, 5000U);
+	resetGatewayRequestState();
+}
+
+namespace {
+	ChatLocalEntry logLine(quint64 sequence, qint64 createdAtMs, const QString &text) {
+		ChatLocalEntry entry;
+		entry.sequence    = sequence;
+		entry.createdAtMs = createdAtMs;
+		entry.authorName  = QStringLiteral("Server");
+		entry.text        = text;
+		entry.logLine     = true;
+		return entry;
+	}
+} // namespace
+
+void TestPersistentChatController::rowBuilderBuildsLogLinesAndDirectMessages() {
+	const ChatRowBuilder builder;
+
+	const ChatTimelineRow log = builder.buildLocal(logLine(7, 1784000000123, QStringLiteral("Alice <joined>")));
+	QVERIFY(log.kind == ChatTimelineRowKind::Log);
+	QCOMPARE(log.key.messageId, 7U);
+	QCOMPARE(log.key.threadId, 0U);
+	QCOMPARE(log.key.createdAt, quint64(1784000000));
+	QCOMPARE(blockAt(log, 0).value(QStringLiteral("format")).toString(), QStringLiteral("plain"));
+	QCOMPARE(blockAt(log, 0).value(QStringLiteral("text")).toString(), QStringLiteral("Alice <joined>"));
+
+	ChatLocalEntry transient;
+	transient.sequence      = 8;
+	transient.createdAtMs   = 1784000001000;
+	transient.authorName    = QStringLiteral("Bob");
+	transient.authorSession = 12;
+	transient.own           = true;
+	transient.html          = QStringLiteral("<b>hi</b> there");
+	transient.deliveryState = QStringLiteral("pending");
+	const ChatTimelineRow direct = builder.buildLocal(transient);
+	QVERIFY(direct.kind == ChatTimelineRowKind::Text);
+	QVERIFY(direct.own);
+	QCOMPARE(direct.deliveryState, QStringLiteral("pending"));
+	QVERIFY(blockAt(direct, 0).value(QStringLiteral("text")).toString().contains(QStringLiteral("<b>hi</b>")));
+
+	ChatLocalEntry persistent = transient;
+	persistent.persistent     = makeMarkdownMessage(900, 1784000002, 3, QStringLiteral("**saved**"));
+	persistent.deliveryState  = QStringLiteral("failed");
+	persistent.deliveryCanRetry = true;
+	const ChatTimelineRow saved = builder.buildLocal(persistent);
+	QCOMPARE(saved.key.messageId, 900U);
+	QCOMPARE(saved.key.threadId, 900U);
+	QVERIFY(blockAt(saved, 0).value(QStringLiteral("text")).toString().contains(QStringLiteral("<b>saved</b>")));
+	QCOMPARE(saved.deliveryState, QStringLiteral("failed"));
+	QVERIFY(saved.deliveryCanRetry);
+	QVERIFY(saved.own);
+}
+
+void TestPersistentChatController::timelineFeedSyncsLocalScopes() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	ChatRowModel model;
+	ChatTimelineFeed feed(&controller, &model);
+	const auto settled = [&feed]() { return feed.pendingJobs() == 0; };
+
+	const PersistentChatScopeKey room = PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 90);
+	controller.setActiveScope(room, false);
+	gateway.handleIncomingHistory(makeHistory(
+		MumbleProto::TextChannel, 90, { makeMarkdownMessage(1, 100, 1, QStringLiteral("room")) }, 0, 1, false));
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.count(), 1);
+
+	// The server log replaces the room.
+	feed.syncLocal(QStringLiteral("local:serverlog"),
+				   { logLine(1, 1784000000000, QStringLiteral("one")), logLine(2, 1784000001000, QStringLiteral("two")),
+					 logLine(3, 1784000002000, QStringLiteral("three")) });
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.scopeToken(), QStringLiteral("local:serverlog"));
+	QCOMPARE(modelMessageIDs(model), (QList< quint32 >{ 3, 2, 1 }));
+
+	// A new line inserts at the bottom only.
+	QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+	feed.upsertLocal(QStringLiteral("local:serverlog"), { logLine(4, 1784000003000, QStringLiteral("four")) });
+	QTRY_VERIFY(settled());
+	QCOMPARE(inserted.size(), 1);
+	QCOMPARE(inserted.first().at(1).toInt(), 0);
+	QCOMPARE(changed.size(), 0);
+	QCOMPARE(model.count(), 4);
+
+	// A changed entry reports only what changed.
+	ChatLocalEntry edited = logLine(2, 1784000001000, QStringLiteral("two (edited)"));
+	feed.upsertLocal(QStringLiteral("local:serverlog"), { edited });
+	QTRY_VERIFY(settled());
+	QCOMPARE(changed.size(), 1);
+	const QList< int > roles = qvariant_cast< QList< int > >(changed.first().at(2));
+	QVERIFY(roles.contains(ChatRowModel::BodyBlocksRole));
+	QVERIFY(!roles.contains(ChatRowModel::GroupStartRole));
+
+	// A full sync without an entry removes it.
+	feed.syncLocal(QStringLiteral("local:serverlog"),
+				   { logLine(1, 1784000000000, QStringLiteral("one")), edited,
+					 logLine(4, 1784000003000, QStringLiteral("four")) });
+	QTRY_VERIFY(settled());
+	QCOMPARE(modelMessageIDs(model), (QList< quint32 >{ 4, 2, 1 }));
+
+	// The controller letting go of its room, or room traffic, does not touch the log.
+	gateway.handleIncomingMessage(makeMarkdownMessage(2, 110, 1, QStringLiteral("room live")));
+	controller.clearActiveScope();
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.scopeToken(), QStringLiteral("local:serverlog"));
+	QCOMPARE(model.count(), 3);
+
+	// Activating a room takes over again.
+	controller.setActiveScope(room, false);
+	QTRY_VERIFY(settled());
+	QCOMPARE(model.scopeToken(), room.cacheKey());
+	QCOMPARE(modelMessageIDs(model), (QList< quint32 >{ 2, 1 }));
 	resetGatewayRequestState();
 }
 

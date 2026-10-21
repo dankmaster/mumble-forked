@@ -41,6 +41,9 @@ public:
 		ReplyToMessageIdRole,
 		ReplyActorRole,
 		ReplySnippetRole,
+		DeliveryStateRole,
+		DeliveryLabelRole,
+		DeliveryCanRetryRole,
 	};
 
 	explicit ChatRowModel(QObject *parent = nullptr);

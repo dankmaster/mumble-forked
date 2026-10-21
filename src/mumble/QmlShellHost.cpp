@@ -49,6 +49,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_participantModel(std::make_unique< ParticipantModel >(this)),
 	  m_chatModel(std::make_unique< ChatTimelineModel >(this)),
 	  m_chatTimelineV2Model(std::make_unique< ChatRowModel >(this)),
+	  m_chatTimelineV2DirectModel(std::make_unique< ChatRowModel >(this)),
 	  m_toastController(std::make_unique< ToastController >(this)),
 	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
 	  m_operationOverlayModel(std::make_unique< AsyncOperationOverlayProxyModel >(this)),
@@ -157,6 +158,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("participantModel"), m_participantModel.get());
 	context->setContextProperty(QStringLiteral("chatModel"), m_chatModel.get());
 	context->setContextProperty(QStringLiteral("chatTimelineV2"), m_chatTimelineV2Model.get());
+	context->setContextProperty(QStringLiteral("chatTimelineV2Direct"), m_chatTimelineV2DirectModel.get());
 	context->setContextProperty(QStringLiteral("composer"), m_composerController.get());
 	context->setContextProperty(QStringLiteral("toastState"), m_toastController.get());
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
@@ -299,6 +301,7 @@ void QmlShellHost::clearConnectionState() {
 
 ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 ChatRowModel *QmlShellHost::chatTimelineV2Model() const { return m_chatTimelineV2Model.get(); }
+ChatRowModel *QmlShellHost::chatTimelineV2DirectModel() const { return m_chatTimelineV2DirectModel.get(); }
 ComposerController *QmlShellHost::composerController() const { return m_composerController.get(); }
 ToastController *QmlShellHost::toastController() const { return m_toastController.get(); }
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }

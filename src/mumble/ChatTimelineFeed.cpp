@@ -26,6 +26,30 @@ namespace {
 	}
 } // namespace
 
+namespace {
+	quint64 localIdentity(const ChatLocalEntry &entry) {
+		return entry.persistent ? PersistentChatMessageChange::identity(*entry.persistent)
+								: static_cast< quint64 >(static_cast< quint32 >(entry.sequence));
+	}
+
+	quint64 localFingerprint(const ChatLocalEntry &entry) {
+		size_t seed = qHashMulti(0, entry.sequence, entry.createdAtMs, entry.authorName, entry.authorSession,
+								 entry.own, entry.logLine, entry.text, entry.html, entry.deliveryState,
+								 entry.deliveryLabel, entry.deliveryCanRetry);
+		if (entry.persistent) {
+			const std::string bytes = entry.persistent->SerializeAsString();
+			seed = qHashMulti(seed, QByteArray::fromRawData(bytes.data(), static_cast< qsizetype >(bytes.size())));
+		}
+		return static_cast< quint64 >(seed);
+	}
+} // namespace
+
+// Touched only by jobs on the single worker thread.
+struct ChatTimelineFeed::LocalState {
+	QVector< quint64 > order;
+	QHash< quint64, quint64 > fingerprints;
+};
+
 struct ChatTimelineFeed::Result {
 	QVector< ChatTimelineRow > rows;
 	QVector< quint64 > removed;
@@ -33,7 +57,7 @@ struct ChatTimelineFeed::Result {
 };
 
 ChatTimelineFeed::ChatTimelineFeed(PersistentChatController *controller, ChatRowModel *model, QObject *parent)
-	: QObject(parent), m_controller(controller), m_model(model),
+	: QObject(parent), m_controller(controller), m_model(model), m_localState(std::make_shared< LocalState >()),
 	  m_liveGeneration(std::make_shared< std::atomic< quint64 > >(0)) {
 	// One thread keeps jobs, and therefore their results, in submission order.
 	m_worker.setMaxThreadCount(1);
@@ -51,6 +75,119 @@ ChatTimelineFeed::~ChatTimelineFeed() {
 	m_worker.waitForDone();
 }
 
+void ChatTimelineFeed::enterScope(const QString &scopeToken, bool local) {
+	// Jobs for the previous scope stop as soon as they start.
+	m_generation = m_liveGeneration->fetch_add(1) + 1;
+	m_localScope = local;
+	m_localEntries.clear();
+	m_localState = std::make_shared< LocalState >();
+	m_lastMessages.clear();
+	if (m_model) {
+		m_model->resetScope(scopeToken);
+	}
+}
+
+void ChatTimelineFeed::syncLocal(const QString &scopeToken, QVector< ChatLocalEntry > entries) {
+	if (!m_model) {
+		return;
+	}
+	if (!m_localScope || scopeToken != m_model->scopeToken()) {
+		enterScope(scopeToken, true);
+	}
+	m_localEntries = std::move(entries);
+	scheduleLocalSync();
+}
+
+void ChatTimelineFeed::upsertLocal(const QString &scopeToken, const QVector< ChatLocalEntry > &entries) {
+	if (!m_model || !m_localScope || scopeToken != m_model->scopeToken() || entries.isEmpty()) {
+		return;
+	}
+	QHash< quint64, int > indexByIdentity;
+	indexByIdentity.reserve(m_localEntries.size());
+	for (int i = 0; i < m_localEntries.size(); ++i) {
+		indexByIdentity.insert(localIdentity(m_localEntries.at(i)), i);
+	}
+	for (const ChatLocalEntry &entry : entries) {
+		const int index = indexByIdentity.value(localIdentity(entry), -1);
+		if (index >= 0) {
+			m_localEntries[index] = entry;
+		} else {
+			indexByIdentity.insert(localIdentity(entry), static_cast< int >(m_localEntries.size()));
+			m_localEntries.push_back(entry);
+		}
+	}
+	scheduleLocalSync();
+}
+
+void ChatTimelineFeed::scheduleLocalSync() {
+	const ChatRowBuilder builder(currentOptions());
+	submit([builder, entries = m_localEntries, state = m_localState]() {
+		Result result;
+		QVector< quint64 > order;
+		QHash< quint64, quint64 > fingerprints;
+		order.reserve(entries.size());
+		fingerprints.reserve(entries.size());
+		QSet< int > indices;
+		for (int i = 0; i < entries.size(); ++i) {
+			const quint64 identity    = localIdentity(entries.at(i));
+			const quint64 fingerprint = localFingerprint(entries.at(i));
+			order.push_back(identity);
+			fingerprints.insert(identity, fingerprint);
+			const auto previous = state->fingerprints.constFind(identity);
+			if (previous == state->fingerprints.cend() || previous.value() != fingerprint) {
+				indices.insert(i);
+				// Its newer neighbour's grouping and date break are decided against it.
+				if (i + 1 < entries.size()) {
+					indices.insert(i + 1);
+				}
+			}
+		}
+		// An entry that disappeared leaves a gap: re-decorate what now follows it.
+		QHash< quint64, int > indexByIdentity;
+		for (int i = 0; i < order.size(); ++i) {
+			indexByIdentity.insert(order.at(i), i);
+		}
+		for (int i = 0; i < state->order.size(); ++i) {
+			const quint64 identity = state->order.at(i);
+			if (fingerprints.contains(identity)) {
+				continue;
+			}
+			result.removed.push_back(identity);
+			for (int next = i + 1; next < state->order.size(); ++next) {
+				const int index = indexByIdentity.value(state->order.at(next), -1);
+				if (index >= 0) {
+					indices.insert(index);
+					break;
+				}
+			}
+		}
+		state->order        = std::move(order);
+		state->fingerprints = std::move(fingerprints);
+
+		QList< int > sorted(indices.cbegin(), indices.cend());
+		std::sort(sorted.begin(), sorted.end());
+		QHash< int, ChatTimelineRow > built;
+		const auto rowAt = [&](int index) -> const ChatTimelineRow & {
+			auto it = built.find(index);
+			if (it == built.end()) {
+				it = built.insert(index, builder.buildLocal(entries.at(index)));
+			}
+			return it.value();
+		};
+		for (const int index : sorted) {
+			ChatTimelineRow row = rowAt(index);
+			if (index > 0) {
+				const ChatTimelineRow older = rowAt(index - 1);
+				builder.decorate(row, &older);
+			} else {
+				builder.decorate(row, nullptr);
+			}
+			result.rows.push_back(std::move(row));
+		}
+		return result;
+	});
+}
+
 void ChatTimelineFeed::setOptionsProvider(std::function< ChatRowBuilder::Options() > provider) {
 	m_optionsProvider = std::move(provider);
 }
@@ -66,9 +203,11 @@ void ChatTimelineFeed::handleChange(const PersistentChatMessageChange &change) {
 	const QVector< MumbleProto::ChatMessage > messages =
 		change.key.valid ? m_controller->activeSnapshot().messages : QVector< MumbleProto::ChatMessage >();
 	if (change.kind == PersistentChatMessageChange::Kind::Reset) {
-		// Jobs for the previous scope stop as soon as they start.
-		m_generation = m_liveGeneration->fetch_add(1) + 1;
-		m_model->resetScope(change.key.valid ? change.key.cacheKey() : QString());
+		if (!change.key.valid && m_localScope) {
+			// The controller let go of its room while a log or direct message is shown.
+			return;
+		}
+		enterScope(change.key.valid ? change.key.cacheKey() : QString(), false);
 		m_lastMessages = messages;
 		if (change.key.valid) {
 			scheduleFullBuild(messages);

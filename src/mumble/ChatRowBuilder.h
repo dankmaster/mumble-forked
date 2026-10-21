@@ -28,6 +28,8 @@ public:
 	explicit ChatRowBuilder(Options options = {});
 
 	ChatTimelineRow build(const MumbleProto::ChatMessage &message) const;
+	// Undecorated row for a log line or direct message.
+	ChatTimelineRow buildLocal(const ChatLocalEntry &entry) const;
 
 	// Rows for messages[first..last], oldest first, each decorated against its
 	// older neighbour. messages[first - 1], when it exists, is only read to

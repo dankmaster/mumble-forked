@@ -13,6 +13,9 @@
 #include <QtCore/QVector>
 #include <QtCore/QtGlobal>
 
+#include "Mumble.pb.h"
+
+#include <optional>
 #include <tuple>
 
 // One decorated, immutable timeline row as the v2 chat timeline presents it.
@@ -36,7 +39,7 @@ struct ChatTimelineRowKey {
 	quint64 identity() const { return (static_cast< quint64 >(threadId) << 32U) | messageId; }
 };
 
-enum class ChatTimelineRowKind { Text, Media, Gallery, Video, LinkCard, File, System };
+enum class ChatTimelineRowKind { Text, Media, Gallery, Video, LinkCard, File, System, Log };
 
 struct ChatTimelineMedia {
 	enum class Kind { Image, Video, Audio, Document, Binary, InlineImage };
@@ -122,10 +125,37 @@ struct ChatTimelineRow {
 	QString replyActor;
 	QString replySnippet;
 
+	// Outgoing messages that are not confirmed yet: "pending", "failed", ... ;
+	// empty once delivered.
+	QString deliveryState;
+	QString deliveryLabel;
+	bool deliveryCanRetry = false;
+
 	// Decoration against the older neighbour only, so newer rows never change it.
 	bool groupStart = true;
 	QString dateLabel;
 	QString timeText;
+};
+
+// An entry from a source that is not persistent room history: a server or
+// session log line, or a direct message. Persistent direct messages carry their
+// MumbleProto message and are built like room messages.
+struct ChatLocalEntry {
+	// Unique within its scope and increasing with arrival; becomes the row's
+	// message id (thread 0) unless the entry carries a persistent message.
+	quint64 sequence    = 0;
+	qint64 createdAtMs  = 0;
+	QString authorName;
+	quint32 authorSession = 0;
+	bool own              = false;
+	// Log lines are plain text; transient direct messages are (legacy) HTML.
+	bool logLine = false;
+	QString text;
+	QString html;
+	std::optional< MumbleProto::ChatMessage > persistent;
+	QString deliveryState;
+	QString deliveryLabel;
+	bool deliveryCanRetry = false;
 };
 
 #endif // MUMBLE_MUMBLE_CHATTIMELINEROW_H_
