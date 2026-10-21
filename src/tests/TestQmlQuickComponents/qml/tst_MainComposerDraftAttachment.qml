@@ -236,7 +236,10 @@ TestCase {
 	}
 
 	function test_jump_to_latest_does_not_overlay_a_message() {
-		verify(/id:\s*jumpToLatestButton[\s\S]*Layout\.alignment:\s*Qt\.AlignRight[\s\S]*Layout\.preferredHeight:\s*visible\s*\?\s*implicitHeight\s*:\s*0/.test(mainSource))
+		// Its own layout row, sized independently of the button's visibility so the
+		// timeline never resizes when the reader leaves or reaches the bottom.
+		verify(/id:\s*jumpToLatestRow[\s\S]{0,200}readonly property bool reserved:\s*timeline\.count\s*>\s*0[\s\S]{0,120}Layout\.preferredHeight:\s*reserved[\s\S]{0,400}id:\s*jumpToLatestButton/.test(mainSource))
+		verify(!/id:\s*jumpToLatestRow[\s\S]{0,400}Layout\.preferredHeight:\s*(jumpToLatestButton\.)?visible/.test(mainSource))
 		verify(!/id:\s*jumpToLatestButton[\s\S]{0,180}parent:\s*timeline/.test(mainSource))
 	}
 

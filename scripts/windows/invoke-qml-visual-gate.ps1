@@ -151,6 +151,12 @@ function Test-QmlTimelineViewportGeometry {
 		return $false
 	}
 	$layoutBoundary = $viewportBottom
+	# The jump-to-latest row keeps its height while the button is hidden, so the
+	# composer boundary sits below that row either way. Older payloads lack it.
+	$jumpRowHeight = 0.0
+	if ($Timeline.PSObject.Properties.Name -contains "jumpToLatestRowHeight") {
+		$jumpRowHeight = [double]$Timeline.jumpToLatestRowHeight
+	}
 	if ([bool]$Timeline.jumpToLatestVisible) {
 		$jumpTop = [double]$Timeline.jumpToLatestTop
 		$jumpHeight = [double]$Timeline.jumpToLatestHeight
@@ -163,6 +169,8 @@ function Test-QmlTimelineViewportGeometry {
 			return $false
 		}
 		$layoutBoundary = $jumpBottom + $jumpBottomMargin
+	} elseif ($jumpRowHeight -gt 0.0) {
+		$layoutBoundary = $viewportBottom + $jumpRowHeight
 	}
 	if ([bool]$Timeline.aboveComposerTickerVisible) {
 		$tickerTop = [double]$Timeline.aboveComposerTickerTop

@@ -2151,6 +2151,7 @@ ApplicationWindow {
 					+ Number(jumpToLatestButton.height || 0),
 				"jumpToLatestTopMargin": jumpToLatestButton.timelineTopMargin,
 				"jumpToLatestBottomMargin": jumpToLatestButton.timelineBottomMargin,
+				"jumpToLatestRowHeight": jumpToLatestRow.height,
 				"aboveComposerTickerVisible": aboveComposerStonksTickerLoader.height > 1,
 				"aboveComposerTickerTop": Number(aboveComposerTickerOrigin.y || 0),
 				"aboveComposerTickerHeight": aboveComposerStonksTickerLoader.height,
@@ -9362,7 +9363,10 @@ ApplicationWindow {
 					footerPositioning: ListView.InlineFooter
 					footer: Item {
 						width: timeline.width
-						height: activeScope.activity ? Theme.space3 : root.timelineVerticalMargin
+						// The reserved jump-to-latest row already separates the tail
+						// from the composer; only the remainder of the margin is needed.
+						height: activeScope.activity ? Theme.space3
+							: Math.max(0, root.timelineVerticalMargin - jumpToLatestRow.height)
 					}
 					delegate: DelegateChooser {
 						role: "deferredPresentation"
@@ -13517,34 +13521,45 @@ ApplicationWindow {
 
 				// Keep this navigation action in its own layout row. A floating pill on
 				// top of the viewport obscured the newest visible message, especially in
-				// compact layouts and immediately after history prepends.
-				ModernButton {
-					id: jumpToLatestButton
-					objectName: "jumpToLatestButton"
-					readonly property real timelineTopMargin: visible ? Theme.space1 : 0
-					readonly property real timelineBottomMargin: visible ? Theme.space1 : 0
-					Layout.alignment: Qt.AlignRight
-					Layout.rightMargin: Theme.space4
-					Layout.topMargin: timelineTopMargin
-					Layout.bottomMargin: timelineBottomMargin
-					Layout.preferredHeight: visible ? implicitHeight : 0
-					visible: timeline.count > 0 && !timeline.stickToBottom
-						&& !timeline.scopePresentationPending
-					dense: true
-					tone: timeline.pendingTailMessageCount > 0 ? "accent" : "neutral"
-					text: timeline.pendingTailMessageCount > 0
-						? qsTr("%n new message(s)", "", timeline.pendingTailMessageCount)
-						: qsTr("Jump to latest")
-					Accessible.description: timeline.pendingTailMessageCount > 0
-						? qsTr("Scroll to %n new message(s)", "", timeline.pendingTailMessageCount)
-						: qsTr("Scroll to the newest message")
-					onClicked: {
-						timeline.releasePrependAnchor()
-						timeline.releaseViewportAnchor()
-						timeline.releaseTopAnchor()
-						timeline.invalidateBottomFollow()
-						timeline.stickToBottom = true
-						timeline.requestBottomFollow()
+				// compact layouts and immediately after history prepends. The row keeps
+				// its height while the button is hidden: resizing the timeline each time
+				// the reader left or reached the bottom shifted the conversation.
+				Item {
+					id: jumpToLatestRow
+					objectName: "jumpToLatestRow"
+					readonly property bool reserved: timeline.count > 0
+					Layout.fillWidth: true
+					Layout.preferredHeight: reserved
+						? jumpToLatestButton.implicitHeight + jumpToLatestButton.timelineTopMargin
+							+ jumpToLatestButton.timelineBottomMargin
+						: 0
+
+					ModernButton {
+						id: jumpToLatestButton
+						objectName: "jumpToLatestButton"
+						readonly property real timelineTopMargin: Theme.space1
+						readonly property real timelineBottomMargin: Theme.space1
+						anchors.right: parent.right
+						anchors.rightMargin: Theme.space4
+						y: timelineTopMargin
+						visible: jumpToLatestRow.reserved && !timeline.stickToBottom
+							&& !timeline.scopePresentationPending
+						dense: true
+						tone: timeline.pendingTailMessageCount > 0 ? "accent" : "neutral"
+						text: timeline.pendingTailMessageCount > 0
+							? qsTr("%n new message(s)", "", timeline.pendingTailMessageCount)
+							: qsTr("Jump to latest")
+						Accessible.description: timeline.pendingTailMessageCount > 0
+							? qsTr("Scroll to %n new message(s)", "", timeline.pendingTailMessageCount)
+							: qsTr("Scroll to the newest message")
+						onClicked: {
+							timeline.releasePrependAnchor()
+							timeline.releaseViewportAnchor()
+							timeline.releaseTopAnchor()
+							timeline.invalidateBottomFollow()
+							timeline.stickToBottom = true
+							timeline.requestBottomFollow()
+						}
 					}
 				}
 
