@@ -337,7 +337,10 @@ MouseArea {
 		const nextY = clampedContentY(currentY
 			+ (wheelPendingDistance < 0 ? -frameDisplacement : frameDisplacement))
 		targetFlickable.contentY = nextY
-		const appliedDisplacement = targetFlickable.contentY - currentY
+		// Count the step this handler took, not where the view ended up: a list
+		// may move its own view in the same call (a row above the view changing
+		// height), and that is layout, not the end of the reader's step.
+		const appliedDisplacement = nextY - currentY
 		wheelPendingDistance -= appliedDisplacement
 		wheelTargetY = clampedContentY(targetFlickable.contentY + wheelPendingDistance)
 		if (Math.abs(appliedDisplacement) + 0.01 < frameDisplacement) {

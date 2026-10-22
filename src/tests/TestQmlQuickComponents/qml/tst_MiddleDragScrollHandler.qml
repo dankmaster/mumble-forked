@@ -30,6 +30,10 @@ TestCase {
 	property int simulatedScrollbarRecoveryCount: 0
 	property int flickableMovementEndedCount: 0
 	property real scrollBarReleaseY: 0
+	// Simulates a list that moves its own view once while the wheel scrolls (a row
+	// above the view changing height).
+	property real layoutShiftAtY: -1
+	property real layoutShift: 0
 	property double scrollBarReleaseTimestamp: 0
 	property int scrollBarReleaseSampleIndex: 0
 
@@ -46,6 +50,10 @@ TestCase {
 		boundsBehavior: Flickable.StopAtBounds
 		onContentYChanged: {
 			testCase.contentYChangeCount += 1
+			if (testCase.layoutShiftAtY >= 0 && contentY > testCase.layoutShiftAtY) {
+				testCase.layoutShiftAtY = -1
+				contentY -= testCase.layoutShift
+			}
 			if (testCase.recordingWheel) {
 				testCase.wheelYSamples = testCase.wheelYSamples.concat([contentY])
 				testCase.wheelYSampleTimestamps =
@@ -157,6 +165,7 @@ TestCase {
 	}
 
 	function init() {
+		layoutShiftAtY = -1
 		recordingWheel = false
 		recordingScrollBar = false
 		wheelYSamples = []
@@ -388,6 +397,18 @@ TestCase {
 		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
 		fuzzyCompare(flickable.contentY, expectedY, 0.5)
 		compare(scrollingEndedSpy.count, 1)
+	}
+
+	function test_layout_moving_the_view_does_not_cut_the_wheel_step_short() {
+		// Three notches at once; the list pulls the view back 30 px during the
+		// first frame, and the rest of the three steps still plays.
+		layoutShift = 30
+		layoutShiftAtY = 181
+		mouseWheel(middleDrag, middleDrag.width / 2, 100,
+			0, -360, Qt.NoButton, Qt.NoModifier, 20)
+		tryVerify(function() { return !middleDrag.wheelAnimationActive }, 1000)
+		layoutShiftAtY = -1
+		fuzzyCompare(flickable.contentY, 180 + middleDrag.wheelStep * 3 - 30, 1)
 	}
 
 	function test_rapid_wheel_pulses_preserve_three_ordinary_notches() {
