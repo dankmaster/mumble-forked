@@ -574,6 +574,7 @@ public:
 	std::optional< MumbleProto::ChatEmbedRef >
 		persistentChatPrimaryEmbed(const MumbleProto::ChatMessage &message) const;
 	QString persistentChatMessageIdentityKey(const MumbleProto::ChatMessage &message) const;
+	QString persistentChatMessageIdentityKeyForId(const QString &messageKey) const;
 	std::optional< QString > persistentChatPreviewKey(const MumbleProto::ChatMessage &message) const;
 	PersistentChatPreviewSpec persistentChatPreviewSpec(const QString &previewKey) const;
 	QString persistentChatScopeLabel(MumbleProto::ChatScope scope, unsigned int scopeID) const;
@@ -1305,6 +1306,7 @@ protected:
 	mutable QHash< QString, QString > m_persistentChatPreviewKeyCache;
 	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
 	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;
+	bool m_directMessageDraftPublishPending = false;
 	quint64 m_nextDirectHistoryRequestID = 0;
 	quint64 m_modernDirectMessageLocalID = 0;
 	bool m_modernDirectMessageTrayOpenProbe = false;

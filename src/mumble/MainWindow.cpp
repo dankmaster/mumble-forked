@@ -15298,12 +15298,29 @@ void MainWindow::applyShellLayout() {
 								tr("The attachment upload could not be started."));
 						}
 					});
-			connect(composer->attachments(), &DraftAttachmentModel::countChanged, this,
-					[this]() { publishQmlDirectMessagesState(); });
-			connect(composer->attachments(), &QAbstractItemModel::dataChanged, this,
-					[this](const QModelIndex &, const QModelIndex &, const QList< int > &) {
+			// Draft chips in a direct message window read the composer through the
+			// direct message state, which rebuilds every open conversation. Upload
+			// progress changes it per chunk, so publish at most every 100 ms, and
+			// only while a direct message conversation can show the draft.
+			const auto publishDirectMessageDraft = [this]() {
+				if (m_directMessageDraftPublishPending) {
+					return;
+				}
+				m_directMessageDraftPublishPending = true;
+				QTimer::singleShot(100, this, [this]() {
+					m_directMessageDraftPublishPending = false;
+					bool conversationOpen = currentPersistentChatTarget().directMessage;
+					for (auto it = m_modernDirectMessageConversations.cbegin();
+						 !conversationOpen && it != m_modernDirectMessageConversations.cend(); ++it) {
+						conversationOpen = it->open;
+					}
+					if (conversationOpen) {
 						publishQmlDirectMessagesState();
-					});
+					}
+				});
+			};
+			connect(composer->attachments(), &DraftAttachmentModel::countChanged, this, publishDirectMessageDraft);
+			connect(composer->attachments(), &QAbstractItemModel::dataChanged, this, publishDirectMessageDraft);
 			composer->setAttachmentLimits(static_cast< int >(Global::get().uiChatAttachmentLimit),
 									 Global::get().uiChatAssetMaxBytes);
 			connect(composer, &ComposerController::sendFailed, this,
@@ -33002,6 +33019,29 @@ QString MainWindow::persistentChatMessageIdentityKey(const MumbleProto::ChatMess
 	return QString::fromLatin1("%1:%2").arg(message.thread_id()).arg(message.message_id());
 }
 
+QString MainWindow::persistentChatMessageIdentityKeyForId(const QString &messageKey) const {
+	// The image viewer asks by bare message id; image updates are published by
+	// thread and message id.
+	bool numeric           = false;
+	const quint32 messageID = messageKey.toUInt(&numeric);
+	if (!numeric || messageID == 0) {
+		return messageKey;
+	}
+	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
+		if (message.message_id() == messageID) {
+			return persistentChatMessageIdentityKey(message);
+		}
+	}
+	for (const ModernDirectMessageConversation &conversation : m_modernDirectMessageConversations) {
+		for (const ModernDirectMessageEntry &entry : conversation.messages) {
+			if (entry.persistentMessage && entry.persistentMessage->message_id() == messageID) {
+				return persistentChatMessageIdentityKey(*entry.persistentMessage);
+			}
+		}
+	}
+	return messageKey;
+}
+
 std::optional< MumbleProto::ChatEmbedRef >
 	MainWindow::persistentChatPrimaryEmbed(const MumbleProto::ChatMessage &message) const {
 	for (int i = 0; i < message.embeds_size(); ++i) {
@@ -39041,10 +39081,14 @@ void MainWindow::ensurePersistentChatAttachmentImageDownload(const unsigned int 
 }
 
 void MainWindow::ensurePersistentChatAttachmentFullImageDownload(const unsigned int assetID,
-												  const QString &messageKey) {
-	if (assetID == 0 || messageKey.isEmpty()
-		|| m_persistentChatAttachmentFullImageProviderUrls.contains(assetID)
-		|| !Global::get().sh || !Global::get().sh->isRunning()) {
+												  const QString &requestedMessageKey) {
+	const QString messageKey = persistentChatMessageIdentityKeyForId(requestedMessageKey);
+	if (assetID != 0 && !messageKey.isEmpty() && m_persistentChatAttachmentFullImageProviderUrls.contains(assetID)) {
+		// Already downloaded: show it in this row too.
+		publishPersistentChatAttachmentImageUpdate({ messageKey });
+		return;
+	}
+	if (assetID == 0 || messageKey.isEmpty() || !Global::get().sh || !Global::get().sh->isRunning()) {
 		return;
 	}
 
@@ -40518,7 +40562,8 @@ QString MainWindow::registerPersistentChatInlineDataImageSource(const QString &s
 }
 
 void MainWindow::ensurePersistentChatInlineDataImageFullResolution(const QString &token,
-														const QString &messageKey) {
+														const QString &requestedMessageKey) {
+	const QString messageKey      = persistentChatMessageIdentityKeyForId(requestedMessageKey);
 	const QString normalizedToken = token.trimmed().toLower();
 	const auto sourceIt = m_persistentChatInlineDataImageSources.constFind(normalizedToken);
 	if (normalizedToken.isEmpty() || messageKey.isEmpty()
