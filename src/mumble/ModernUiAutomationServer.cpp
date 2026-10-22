@@ -6823,7 +6823,21 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			for (QQuickItem *childItem : item->childItems())
 				visit(childItem);
 		};
-		visit(window->contentItem());
+		// The root item also holds the popup overlay beside the content item.
+		visit(window->contentItem()->parentItem() ? window->contentItem()->parentItem() : window->contentItem());
+		// Animations declared on the window itself are not children of any item.
+		for (QObject *object : window->findChildren< QObject * >()) {
+			if (!object->inherits("QQuickAbstractAnimation") && !object->inherits("QQuickFrameAnimation")) continue;
+			if (!object->property("running").toBool() || qobject_cast< QQuickItem * >(object->parent())) continue;
+			const QQmlContext *context = qmlContext(object);
+			running.push_back(QVariantMap {
+				{ QStringLiteral("animation"), QString::fromLatin1(object->metaObject()->className()) },
+				{ QStringLiteral("file"), context ? context->baseUrl().toString() : QString() },
+				{ QStringLiteral("item"), object->parent() ? QString::fromLatin1(object->parent()->metaObject()->className())
+														   : QString() },
+				{ QStringLiteral("objectName"), object->objectName() }
+			});
+		}
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("running"), running);
 		response.insert(QStringLiteral("updating"), updating);
