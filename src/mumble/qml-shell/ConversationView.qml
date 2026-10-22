@@ -294,9 +294,25 @@ ListView {
 			"visualFixtureMode": host ? String(host.visualMediaFixtureMode || "") : ""
 		})
 		ownedSessionId = id
-		if (session.playbackControllable)
-			session.play()
+		// A provider's widget (SoundCloud, Spotify) becomes controllable only once
+		// it has loaded; start it then.
+		pendingPlaySessionId = id
+		playPendingSession()
 		return true
+	}
+	property string pendingPlaySessionId: ""
+	function playPendingSession() {
+		if (pendingPlaySessionId.length === 0 || !session)
+			return
+		if (!session.active || String(session.sessionId || "") !== pendingPlaySessionId
+				|| session.state === "playing") {
+			pendingPlaySessionId = ""
+			return
+		}
+		if (session.playbackControllable && (session.state === "ready" || session.state === "paused")) {
+			pendingPlaySessionId = ""
+			session.play()
+		}
 	}
 	// The player's height at a width: its picture plus its controls.
 	function playerHeightFor(width) {
@@ -786,6 +802,13 @@ ListView {
 			onImageOpenRequested: (source, title, stableId) => view.host
 				&& view.host.openManagedPreviewImage(source, title, stableId)
 		}
+	}
+
+	Connections {
+		target: view.session
+		enabled: view.pendingPlaySessionId.length > 0
+		function onStateChanged() { view.playPendingSession() }
+		function onSourceChanged() { view.playPendingSession() }
 	}
 
 	ModernMenu {
