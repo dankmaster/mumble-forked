@@ -4,9 +4,9 @@ import Mumble.Theme 1.0
 
 // One row of the v2 timeline (docs/chat-timeline-v2-plan.md). Its height follows
 // from the row data and the list width alone: text is laid out synchronously,
-// attachments size themselves from their metadata, and a link card keeps a fixed
-// placeholder until the card is ready. Anything that still resizes the row later
-// is reported to the view, which keeps the reading position in place.
+// attachments size themselves from their metadata, and a link card keeps a
+// placeholder of its expected height until the card is ready. When a row still
+// resizes later, the view keeps the row the reader is looking at in place.
 ChatMessageFrame {
 	id: row
 
@@ -92,11 +92,6 @@ ChatMessageFrame {
 		if (needsHydration && view)
 			view.queueHydration(stableId, row)
 	}
-	function settleBaseline() {
-		baseHeight = height
-		baseWidth = width
-		baselineValid = true
-	}
 	function openActions(item, x, y) {
 		if (view && hasActions)
 			view.openMessageActions(row, item, x, y)
@@ -109,10 +104,6 @@ ChatMessageFrame {
 		}))
 	}
 
-	property real baseHeight: 0
-	property real baseWidth: 0
-	property bool baselineValid: false
-
 	logEntry: logRow
 	systemMessage: systemRow
 	startsGroup: groupStart || systemRow
@@ -124,13 +115,11 @@ ChatMessageFrame {
 
 	Component.onCompleted: {
 		playArrival()
-		settleBaseline()
 		requestHydrationIfNeeded()
 	}
 	ListView.onReused: {
 		accessibilityPooled = false
 		playArrival()
-		settleBaseline()
 		requestHydrationIfNeeded()
 	}
 	ListView.onPooled: {
@@ -138,22 +127,9 @@ ChatMessageFrame {
 		arrival.stop()
 		body.opacity = 1
 		rise.y = 0
-		baselineValid = false
 		accessibilityPooled = true
 	}
 	onNeedsHydrationChanged: requestHydrationIfNeeded()
-	onHeightChanged: {
-		if (!baselineValid)
-			return
-		if (width !== baseWidth) {
-			settleBaseline()
-			return
-		}
-		const delta = height - baseHeight
-		baseHeight = height
-		if (Math.abs(delta) >= 0.5 && view)
-			view.compensateRowResize(index, delta)
-	}
 
 	TapHandler {
 		acceptedButtons: Qt.RightButton

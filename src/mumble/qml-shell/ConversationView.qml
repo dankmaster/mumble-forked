@@ -14,8 +14,12 @@ import Mumble.Theme 1.0
 //   intent changes through the reader's own scrolling or an explicit jump, never
 //   through layout the list does itself.
 // - While following, growth below eases the view down and ends with a snap.
-// - While reading history, a row at or below the reading point that changes
-//   height moves the view by the same amount in the same frame.
+// - While reading history, the row at the reading point stays where it is on
+//   screen: whenever layout moves it (a row resizing or arriving anywhere),
+//   the view moves by the same amount in the same layout pass. Qt moves rows
+//   differently depending on where the change is (a growing newest row inside
+//   the display margin shifts the rest by twice its growth), so the view
+//   measures the anchor instead of predicting the shift.
 ListView {
 	id: view
 	objectName: "conversationView"
@@ -35,7 +39,7 @@ ListView {
 	property var hydrationRequested: ({})
 	property var hydrationQueue: []
 	property bool hydrationHighPriority: false
-	readonly property bool atLatest: followTail || tailY() - contentY < 4
+	readonly property bool atLatest: followTail || nearTail()
 	// Dragging the scrollbar sets contentY directly and starts no movement, so
 	// it gets its own intent handling: it never follows, never pages and is
 	// never compensated while held.
@@ -48,10 +52,24 @@ ListView {
 	property int pendingRevealMessage: 0
 	property int pendingRevealPages: 0
 	property var previewHeights: ({})
+	// The next older page is requested this close to the top (in pixels or in
+	// rows), so a reader scrolling up does not stop against the edge while the
+	// page is on its way.
+	property real olderPrefetchDistance: Math.max(height * 3, 1500)
+	property int olderPrefetchRows: 25
+	// The row at the centre of the viewport while the reader is not following.
+	property Item anchorItem: null
+	property string anchorStableId: ""
+	property real anchorScreenY: 0
+	property bool holdingAnchor: false
 	property int previewHeightCount: 0
 
 	function tailY() {
 		return originY + contentHeight + bottomMargin - height
+	}
+	// The wheel stops at the content edge, inside the bottom margin.
+	function nearTail() {
+		return tailY() - contentY < bottomMargin + 4
 	}
 	function jumpToLatest() {
 		followTail = true
@@ -59,20 +77,36 @@ ListView {
 	function arrivalActive(rowIndex) {
 		return rowIndex <= liveInsertLast && Date.now() - liveInsertAt < 400
 	}
-	function compensateRowResize(rowIndex, delta) {
-		if (followTail || scrollbarDragging || delta === 0)
+	function pickAnchor() {
+		if (holdingAnchor)
 			return
-		const anchorIndex = indexAt(width / 2, contentY + height / 2)
-		if (anchorIndex < 0 || rowIndex > anchorIndex)
+		const index = followTail ? -1 : indexAt(width / 2, contentY + height / 2)
+		const item = index >= 0 ? itemAtIndex(index) : null
+		anchorItem = item
+		anchorStableId = item ? String(item.stableId || "") : ""
+		anchorScreenY = item ? item.y - contentY : 0
+	}
+	function holdAnchor() {
+		if (!anchorItem || followTail || holdingAnchor)
 			return
-		following = true
-		contentY -= delta
-		following = false
+		if (String(anchorItem.stableId || "") !== anchorStableId) {
+			// The delegate was pooled and reused for another row.
+			pickAnchor()
+			return
+		}
+		const shift = anchorItem.y - contentY - anchorScreenY
+		if (Math.abs(shift) < 0.5)
+			return
+		holdingAnchor = true
+		contentY += shift
+		holdingAnchor = false
 	}
 	function loadOlderIfNeeded() {
 		if (!visible || count === 0 || scrollbarDragging || !commands.canLoadOlder || commands.loadingOlder)
 			return
-		if (contentY - originY < height)
+		const nearTop = contentY - originY < olderPrefetchDistance
+			|| indexAt(width / 2, contentY + 1) >= count - olderPrefetchRows
+		if (nearTop)
 			commands.loadOlder()
 	}
 	function queueHydration(stableId, item, force) {
@@ -216,6 +250,8 @@ ListView {
 		hydrationHighPriority = false
 		pendingRevealThread = 0
 		flashStableId = ""
+		anchorItem = null
+		anchorStableId = ""
 		previewHeights = ({})
 		previewHeightCount = 0
 		messageActions.close()
@@ -224,7 +260,14 @@ ListView {
 	model: rowModel
 	verticalLayoutDirection: ListView.BottomToTop
 	reuseItems: true
-	cacheBuffer: Math.max(0, Math.round(height))
+	// Rows (and their cards) must exist before they scroll into view. With the
+	// list laid out bottom to top the cache buffer is only built behind the last
+	// movement, so a reader scrolling up met every row as it was created. The
+	// display margins lay rows out above (end) and below (beginning) the
+	// viewport as part of every layout, in both directions.
+	cacheBuffer: Math.max(1200, Math.round(height * 2))
+	displayMarginEnd: Math.max(600, Math.round(height))
+	displayMarginBeginning: Math.max(300, Math.round(height * 0.5))
 	boundsBehavior: Flickable.StopAtBounds
 	maximumFlickVelocity: 7000
 	flickDeceleration: 3500
@@ -274,25 +317,39 @@ ListView {
 		}
 	}
 
-	onContentYChanged: Qt.callLater(loadOlderIfNeeded)
+	onContentYChanged: {
+		pickAnchor()
+		Qt.callLater(loadOlderIfNeeded)
+	}
+	onHeightChanged: pickAnchor()
 	onCountChanged: {
 		Qt.callLater(loadOlderIfNeeded)
 		Qt.callLater(continuePendingReveal)
 	}
 	onMovementStarted: followTail = false
-	onMovementEnded: followTail = tailY() - contentY < 4
+	onMovementEnded: followTail = nearTail()
 	// Far jumps cut straight to the newest page; short distances ease in below.
-	onFollowTailChanged: if (followTail && tailY() - contentY > height * 2) positionViewAtBeginning()
+	onFollowTailChanged: {
+		if (followTail && tailY() - contentY > height * 2)
+			positionViewAtBeginning()
+		pickAnchor()
+	}
 	onAtLatestChanged: markReadTimer.restart()
 	onScrollbarDraggingChanged: {
 		if (scrollbarDragging) {
 			followTail = false
 		} else {
-			followTail = tailY() - contentY < 4
+			followTail = nearTail()
 			Qt.callLater(loadOlderIfNeeded)
 		}
 	}
 
+	Connections {
+		target: view.anchorItem
+		function onYChanged() {
+			view.holdAnchor()
+		}
+	}
 	Connections {
 		target: view.rowModel
 		function onModelReset() {
@@ -368,6 +425,24 @@ ListView {
 
 	ScrollBar.vertical: ModernScrollBar {
 		id: verticalScrollBar
+	}
+
+	// The shell's wheel and middle-button scrolling: a full step per wheel notch,
+	// eased. Like the scrollbar it writes contentY directly, so it carries the
+	// reader's intent itself.
+	MiddleDragScrollHandler {
+		id: scrollHandler
+		parent: view
+		targetFlickable: view
+		horizontalEnabled: false
+		navigationEnabled: view.interactive && !view.scrollbarDragging
+		smoothWheelEnabled: true
+		wheelStep: Math.max(80, Math.min(112, view.height * 0.14))
+		onScrollingStarted: view.followTail = false
+		onScrollingEnded: {
+			view.followTail = view.nearTail()
+			Qt.callLater(view.loadOlderIfNeeded)
+		}
 	}
 
 	ModernMenu {
