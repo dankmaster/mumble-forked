@@ -112,6 +112,11 @@ ChatMessageFrame {
 	bodyImplicitHeight: body.implicitHeight
 	wideContent: true
 	preferredWideContentWidth: laneMaximumWidth
+	// The frame's accessibility barrier walks the whole row subtree each time it
+	// switches, and a link card holds thousands of items: bound to scrolling
+	// (viewport membership, pooling) it cost most of each frame in #links. Pooled
+	// rows are hidden anyway, so the barrier only shields rows behind a modal.
+	accessibilityBarrierEnabled: accessibilitySuppressed
 	hoverEffectsEnabled: !!view && !view.moving
 
 	Component.onCompleted: {

@@ -332,7 +332,6 @@ ListView {
 		searchCurrent: stableId.length > 0 && (stableId === rowView.flashStableId
 			|| (!!rowView.host && rowView.host.conversationSearchOpen
 				&& stableId === String(rowView.rowModel.currentMatchStableId || "")))
-		accessibilityViewportVisible: y + height > rowView.contentY && y < rowView.contentY + rowView.height
 		accessibilitySuppressed: !!rowView.host && rowView.host.backgroundAccessibilitySuppressed === true
 	}
 
