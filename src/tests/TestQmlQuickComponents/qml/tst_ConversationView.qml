@@ -528,11 +528,11 @@ TestCase {
 		let unfinished = 0
 		let checked = 0
 		// Jump through history; after each jump, before any incubation time, every
-		// card on screen or just above or below it must be finished.
+		// card on screen must be finished.
 		for (let jump = 1; jump <= 6; ++jump) {
 			list.positionAt(list.tailY() - list.height * 4 * jump)
 			list.forceLayout()
-			for (let y = list.contentY - list.height * 0.5; y < list.contentY + list.height * 1.5; y += 20) {
+			for (let y = list.contentY; y < list.contentY + list.height; y += 20) {
 				const index = list.indexAt(list.width / 2, y)
 				const item = index >= 0 ? list.itemAtIndex(index) : null
 				if (!item || !item.showPreviewCard)
@@ -543,7 +543,7 @@ TestCase {
 			}
 		}
 		verify(checked > 10, "checked " + checked + " cards")
-		compare(unfinished, 0, unfinished + " of " + checked + " cards near the view were still loading")
+		compare(unfinished, 0, unfinished + " of " + checked + " cards on screen were still loading")
 	}
 
 	function test_rows_above_exist_before_they_scroll_in() {

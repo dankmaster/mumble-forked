@@ -141,16 +141,28 @@ ListView {
 		pickAnchor()
 	}
 	// Rows within three quarters of a screen of the view finish their link cards
-	// before they scroll in, so they arrive at their real height.
+	// before they scroll in, so they arrive at their real height. Cards on screen
+	// finish at once; of the others, only the nearest per call, so a burst of
+	// large cards spreads over several frames.
 	function finishCardsNearView() {
-		const top = contentY - height * 0.75
-		const bottom = contentY + height * 1.75
+		const margin = height * 0.75
 		const rows = contentItem.children
+		let nearest = null
+		let nearestGap = margin
 		for (let i = 0; i < rows.length; ++i) {
 			const row = rows[i]
-			if (row.finishPreview && row.y + row.height > top && row.y < bottom)
+			if (!row.previewPending || !row.previewPending())
+				continue
+			const gap = Math.max(contentY - (row.y + row.height), row.y - (contentY + height), 0)
+			if (gap === 0) {
 				row.finishPreview()
+			} else if (gap < nearestGap) {
+				nearest = row
+				nearestGap = gap
+			}
 		}
+		if (nearest)
+			nearest.finishPreview()
 	}
 	function resetAnchorHoldBudget() {
 		const exhausted = anchorHoldBudget <= 0

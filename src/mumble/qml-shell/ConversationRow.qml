@@ -81,8 +81,11 @@ ChatMessageFrame {
 	// Incubation gets little time while the reader scrolls, so a card could reach
 	// the screen at its estimated height and then grow against the scroll. Turning
 	// asynchronous off completes a running load now.
+	function previewPending() {
+		return previewLoader.active && previewLoader.status === Loader.Loading
+	}
 	function finishPreview() {
-		if (previewLoader.active && previewLoader.status === Loader.Loading)
+		if (previewPending())
 			previewLoader.asynchronous = false
 	}
 
