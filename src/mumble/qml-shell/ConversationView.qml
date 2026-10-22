@@ -59,6 +59,11 @@ ListView {
 	// One player for the conversation's link cards: it covers the playing card's
 	// media box while that is on screen and docks in the corner while it is not.
 	readonly property var session: typeof mediaSession !== "undefined" ? mediaSession : null
+	// WebEngine loads on demand: the player may only be created once the media
+	// profiles report the runtime ready, as the card's own player waits too.
+	readonly property var mediaProfileFactory: typeof mediaProfiles !== "undefined" ? mediaProfiles : null
+	readonly property bool mediaRuntimeReady: !mediaProfileFactory
+		|| typeof mediaProfileFactory.runtimeReady === "undefined" || !!mediaProfileFactory.runtimeReady
 	// The session this view started; another card's session is not its own.
 	property string ownedSessionId: ""
 	property var playbackInfo: ({})
@@ -285,7 +290,7 @@ ListView {
 			"presentationProvider": String(playbackInfo.provider || ""),
 			"presentationMode": String(playbackInfo.presentationMode || ""),
 			"animationAutoPlayEnabled": true,
-			"mediaProfileFactory": typeof mediaProfiles !== "undefined" ? mediaProfiles : null,
+			"mediaProfileFactory": mediaProfileFactory,
 			"visualFixtureMode": host ? String(host.visualMediaFixtureMode || "") : ""
 		})
 		ownedSessionId = id
@@ -872,7 +877,7 @@ ListView {
 			id: playerLoader
 			y: dockBar.height
 			width: parent.width
-			active: view.playingStableId.length > 0
+			active: view.playingStableId.length > 0 && view.mediaRuntimeReady
 			// Incubated like the card's own player: a WebEngineView created in one
 			// synchronous pass gets its profile after the default one and crashes
 			// in QQuickWebEngineView::setProfile.
