@@ -195,6 +195,17 @@ TestCase {
 		card.playing = true
 		verify(box.visible)
 		compare(box.height, 152)
+		// Spotify's player shows the cover, title and artist itself.
+		verify(!findChild(card, "embedCardAudio").visible)
+		verify(!findChild(card, "embedCardAudioPlay").visible)
+	}
+
+	function test_a_native_player_keeps_the_cards_text() {
+		const card = cardFor(samples().product)
+		card.playerHeight = 260
+		card.playing = true
+		verify(!card.playerShowsContent)
+		verify(findChild(card, "embedCardFacts").visible, "a Steam trailer has no text of its own")
 	}
 
 	// A store's pictures sit in a strip under its lead picture: a picture opens the

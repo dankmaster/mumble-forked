@@ -68,6 +68,10 @@ Rectangle {
 		&& (family === "video" || family === "audio" || family === "post"
 			|| (family === "product" && (firstMedia.kind === "video" || firstMedia.kind === "audio")))
 	// Further pictures as a row of thumbnails under the lead one.
+	// A provider's player (SoundCloud, Spotify, YouTube, a Facebook post) shows the
+	// cover, title and author itself: while it plays, the card is its header and
+	// the player. Native players (a Steam trailer, a file) keep the card's text.
+	readonly property bool playerShowsContent: playing && String(playback.mode || "") === "provider"
 	readonly property bool showStrip: (family === "product" || family === "image") && media.length > 1
 	readonly property int stripCount: Math.min(media.length, 5)
 	readonly property real stripThumbWidth: (contentWidth - Theme.space1 * (stripCount - 1)) / stripCount
@@ -238,7 +242,7 @@ Rectangle {
 
 		// Post: who wrote it, then what they wrote.
 		Row {
-			visible: root.family === "post"
+			visible: root.family === "post" && !root.playerShowsContent
 			width: parent.width
 			spacing: Theme.space2
 
@@ -297,7 +301,7 @@ Rectangle {
 
 		// Reply context or quoted post: one quiet inset line each.
 		Repeater {
-			model: root.family === "post" ? root.threadItems.slice(0, 2) : []
+			model: root.family === "post" && !root.playerShowsContent ? root.threadItems.slice(0, 2) : []
 
 			Row {
 				required property var modelData
@@ -383,7 +387,7 @@ Rectangle {
 		// player opens below.
 		Row {
 			objectName: "embedCardAudio"
-			visible: root.family === "audio"
+			visible: root.family === "audio" && !root.playerShowsContent
 			width: parent.width
 			spacing: Theme.space3
 
@@ -755,7 +759,8 @@ Rectangle {
 		// Title and text under the media.
 		Text {
 			width: parent.width
-			visible: root.family !== "link" && root.family !== "audio" && text.length > 0
+			visible: root.family !== "link" && root.family !== "audio" && !root.playerShowsContent
+				&& text.length > 0
 			text: root.family === "post" ? "" : root.title
 			textFormat: Text.PlainText
 			wrapMode: Text.Wrap
@@ -768,7 +773,7 @@ Rectangle {
 		Text {
 			width: parent.width
 			visible: root.family !== "link" && root.family !== "audio" && root.family !== "video"
-				&& text.length > 0
+				&& !root.playerShowsContent && text.length > 0
 			text: root.description
 			textFormat: Text.PlainText
 			wrapMode: Text.Wrap
@@ -782,7 +787,7 @@ Rectangle {
 		Text {
 			objectName: "embedCardFacts"
 			width: parent.width
-			visible: text.length > 0
+			visible: text.length > 0 && !root.playerShowsContent
 			text: root.facts.slice(0, 4).map(fact => fact.key === "price"
 				? root.factText(fact) : String(fact.label || "") + " " + root.factText(fact)).join("  ·  ")
 			textFormat: Text.PlainText
