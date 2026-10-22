@@ -72,6 +72,7 @@
 	<file alias="ChatBodyBlocks.qml">qml-shell/ChatBodyBlocks.qml</file>
 	<file alias="ConversationRow.qml">qml-shell/ConversationRow.qml</file>
 	<file alias="ConversationView.qml">qml-shell/ConversationView.qml</file>
+	<file alias="RoomConversationCommands.qml">qml-shell/RoomConversationCommands.qml</file>
 	<file alias="QuickReactionBar.qml">qml-shell/QuickReactionBar.qml</file>
 	<file alias="RichMessageBody.qml">qml-shell/RichMessageBody.qml</file>
 	<file alias="AttachmentGallery.qml">qml-shell/AttachmentGallery.qml</file>

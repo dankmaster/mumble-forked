@@ -78,7 +78,8 @@ public:
 	// Presentation state that still comes from the current message pipeline
 	// (avatar, attachment and preview image sources, permissions) until the
 	// v2 asset path replaces it. Takes that pipeline's message state; it may
-	// arrive before or after the row itself.
+	// arrive before or after the row itself. A "stableId" in the state replaces
+	// the row's stableId role (direct messages are addressed by their own ids).
 	void setExtras(const QVariantMap &messageState);
 
 	const ChatTimelineRow &rowAt(int row) const { return m_rows.at(row); }
@@ -115,6 +116,7 @@ private:
 	bool selectMatch(int index);
 
 	struct Extras {
+		QString stableId;
 		QString avatarUrl;
 		QVariantList attachments;
 		QVariantMap preview;

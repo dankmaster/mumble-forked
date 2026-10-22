@@ -148,6 +148,52 @@ TestCase {
 		verify(!list.revealMessage(1, 999))
 	}
 
+	QtObject {
+		id: recordingCommands
+		property var calls: []
+		property bool canLoadOlder: true
+		readonly property bool loadingOlder: false
+		readonly property real unreadCount: 0
+		readonly property bool sending: false
+		readonly property bool hydrationAvailable: true
+		function record(call) { calls = calls.concat([call]) }
+		function reply(stableId) { record("reply:" + stableId) }
+		function toggleReaction(stableId, emoji) { record("react:" + stableId + ":" + emoji) }
+		function retry(stableId) { record("retry:" + stableId) }
+		function remove(stableId) { record("remove:" + stableId) }
+		function retryAttachmentPreview(stableId, assetId) { record("retryPreview:" + stableId) }
+		function validHydrationId(stableId) { return String(stableId || "").length > 0 }
+		function hydrate(stableIds, highPriority) { record("hydrate:" + stableIds.join(",")) }
+		function loadOlder() { record("older") }
+		function markRead() { record("read") }
+	}
+
+	function test_custom_commands_drive_paging_hydration_and_inline_reactions() {
+		recordingCommands.calls = []
+		const list = view()
+		list.commands = recordingCommands
+		list.hostReactionPopup = false
+		settleAtNewest()
+		// A row whose attachment is still loading asks the commands for it by its own id.
+		const row = message(241, "With a loading attachment")
+		row.stableId = "dm:7:241"
+		row.attachments = [{ "id": "a", "kind": "file", "state": "loading", "name": "notes.txt" }]
+		chatTimelineV2.insertRows(0, [row])
+		tryVerify(() => recordingCommands.calls.indexOf("hydrate:dm:7:241") >= 0, 2000,
+			"calls: " + recordingCommands.calls.join(" "))
+		// Reaching the top pages older history through the commands.
+		list.followTail = false
+		list.positionViewAtEnd()
+		list.contentY = list.originY
+		tryVerify(() => recordingCommands.calls.indexOf("older") >= 0, 2000)
+		// Without the shell popup the reaction bar opens inside the row.
+		list.followTail = true
+		settleAtNewest()
+		const first = list.itemAtIndex(0)
+		first.inlineReactionsOpen = true
+		verify(first.actionsOpen)
+	}
+
 	function test_row_height_is_stable_across_reuse() {
 		const list = view()
 		settleAtNewest()

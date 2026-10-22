@@ -1342,6 +1342,12 @@ void TestPersistentChatController::rowModelAppliesExtrasBeforeAndAfterRows() {
 	QCOMPARE(changed.size(), 1);
 	QCOMPARE(changed.first().at(0).toModelIndex().row(), 0);
 	QCOMPARE(qvariant_cast< QList< int > >(changed.first().at(2)), (QList< int >{ ChatRowModel::CanReplyRole }));
+
+	// Direct messages keep their controller's id for actions.
+	QVariantMap direct = state(1, QString(), false);
+	direct.insert(QStringLiteral("stableId"), QStringLiteral("dm:7:1"));
+	model.setExtras(direct);
+	QCOMPARE(roleValue(1, ChatRowModel::StableIdRole).toString(), QStringLiteral("dm:7:1"));
 }
 
 void TestPersistentChatController::rowModelSearchesNewestFirstAndKeepsTheCurrentMatch() {

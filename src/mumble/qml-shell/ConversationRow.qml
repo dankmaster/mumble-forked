@@ -44,7 +44,9 @@ ChatMessageFrame {
 	readonly property bool logRow: kind === "log"
 	readonly property bool systemRow: kind === "system" || logRow
 	readonly property bool hasActions: canReply || canReact || canDelete || deliveryCanRetry
-	readonly property bool actionsOpen: !!host && host.quickReactionMessageId === stableId
+	property bool inlineReactionsOpen: false
+	readonly property bool actionsOpen: inlineReactionsOpen
+		|| (!!view && view.hostReactionPopup && !!host && host.quickReactionMessageId === stableId)
 	// Widths come from the frame's bindings, not from contentItem: its anchors
 	// resolve only after creation, and the first layout must already be final.
 	readonly property real innerWidth: Math.max(1, messageWidth - horizontalPadding * 2)
@@ -132,6 +134,7 @@ ChatMessageFrame {
 		requestHydrationIfNeeded()
 	}
 	ListView.onPooled: {
+		inlineReactionsOpen = false
 		arrival.stop()
 		body.opacity = 1
 		rise.y = 0
@@ -322,8 +325,8 @@ ChatMessageFrame {
 					hoverEffectsEnabled: row.hoverEffectsEnabled
 					onAttachmentRequested: attachment => row.host && row.host.requestAttachment(attachment, row.stableId)
 					onAttachmentDownloadRequested: attachment => row.host && row.host.downloadAttachment(attachment, false)
-					onAttachmentRetryRequested: attachment => uiCommands.retryChatAttachmentPreview(
-						activeScope.scopeToken, row.stableId, String(attachment.assetId || attachment.assetID || ""))
+					onAttachmentRetryRequested: attachment => row.view && row.view.commands.retryAttachmentPreview(
+						row.stableId, String(attachment.assetId || attachment.assetID || ""))
 					onAttachmentRefreshRequested: row.view && row.view.queueHydration(row.stableId, row, true)
 				}
 			}
@@ -487,7 +490,7 @@ ChatMessageFrame {
 								font.weight: Font.DemiBold
 							}
 						}
-						onClicked: uiCommands.toggleMessageReaction(row.stableId, modelData.emoji)
+						onClicked: row.view && row.view.commands.toggleReaction(row.stableId, modelData.emoji)
 					}
 				}
 			}
@@ -520,13 +523,23 @@ ChatMessageFrame {
 			id: actionButtons
 			anchors.centerIn: parent
 
+			QuickReactionBar {
+				visible: row.inlineReactionsOpen
+				anchors.verticalCenter: parent.verticalCenter
+				expanded: row.inlineReactionsOpen
+				activeReactions: row.reactionsForQuickBar()
+				onReactionRequested: emoji => {
+					row.view.commands.toggleReaction(row.stableId, emoji)
+					row.inlineReactionsOpen = false
+				}
+			}
 			ModernIconButton {
 				visible: row.canReply
 				dense: true
 				iconName: "reply"
 				text: qsTr("Reply")
 				Accessible.name: text
-				onClicked: uiCommands.replyToMessage(row.stableId)
+				onClicked: row.view.commands.reply(row.stableId)
 			}
 			ModernIconButton {
 				id: reactButton
@@ -536,8 +549,12 @@ ChatMessageFrame {
 				selected: row.actionsOpen
 				text: selected ? qsTr("Close reactions") : qsTr("Add reaction")
 				Accessible.name: text
-				onClicked: row.host && row.host.toggleQuickReactions(row.stableId, -1, reactButton,
-					row.reactionsForQuickBar())
+				onClicked: {
+					if (!row.view.hostReactionPopup)
+						row.inlineReactionsOpen = !row.inlineReactionsOpen
+					else if (row.host)
+						row.host.toggleQuickReactions(row.stableId, -1, reactButton, row.reactionsForQuickBar())
+				}
 			}
 			ModernIconButton {
 				visible: row.deliveryCanRetry
@@ -545,7 +562,7 @@ ChatMessageFrame {
 				iconName: "retry"
 				text: qsTr("Retry")
 				Accessible.name: text
-				onClicked: uiCommands.retryMessage(row.stableId)
+				onClicked: row.view.commands.retry(row.stableId)
 			}
 			ModernIconButton {
 				id: moreButton

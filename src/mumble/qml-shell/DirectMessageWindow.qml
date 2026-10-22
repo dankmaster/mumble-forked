@@ -14,6 +14,10 @@ Window {
 	property var mediaSessionController: typeof mediaSession !== "undefined" ? mediaSession : null
 	property var mediaProfileFactory: typeof mediaProfiles !== "undefined" ? mediaProfiles : null
 	property var savedPreviewSizePresets: ({})
+	// The v2 timeline (docs/chat-timeline-v2-plan.md) replaces this window's
+	// message list behind its development switch.
+	readonly property bool timelineV2: typeof chatTimelineV2Enabled !== "undefined" && chatTimelineV2Enabled
+		&& typeof chatTimelineV2Direct !== "undefined"
 	readonly property string surfaceId: "directMessage.window"
 	// A separate QQuickWindow is captured in its own window-local coordinate space.
 	readonly property var captureRect: Qt.rect(0, 0, width, height)
@@ -90,8 +94,11 @@ Window {
 	function sendCurrentDraft() {
 		const attachmentCount = normalizedSequence(controller ? controller.draftAttachments : []).length
 		if (controller && controller.canSend
-			&& (String(controller.draft || "").trim().length > 0 || attachmentCount > 0))
+			&& (String(controller.draft || "").trim().length > 0 || attachmentCount > 0)) {
 			controller.sendDraft()
+			if (conversationViewLoader.item)
+				conversationViewLoader.item.jumpToLatest()
+		}
 	}
 
 	function beginSystemResize(edges) {
@@ -695,12 +702,12 @@ Window {
 					anchors.margins: Theme.space3
 					anchors.topMargin: Theme.space3
 						+ (historyStatusOverlay.visible ? historyStatusOverlay.height + Theme.space2 : 0)
-					visible: root.timelineCount > 0
+					visible: !root.timelineV2 && root.timelineCount > 0
 					clip: true
 					// ChatMessageFrame owns group and continuation rhythm. Keeping the
 					// ListView spacing at zero prevents a second, DM-only vertical gap.
 					spacing: 0
-					model: controller ? controller.timelineModel : null
+					model: controller && !root.timelineV2 ? controller.timelineModel : null
 					reuseItems: true
 					// Keep DM prefetch bounded just like the main timeline. Two full
 					// viewports retained expensive rich-message and accessibility trees.
@@ -1346,6 +1353,47 @@ Window {
 								height: visible ? rowImplicitHeight : 0
 								onActionRequested: controller.deleteMessage(messageActions.targetId)
 							}
+						}
+					}
+				}
+
+				Loader {
+					id: conversationViewLoader
+					objectName: "directMessageConversationViewLoader"
+					anchors.fill: parent
+					anchors.margins: Theme.space3
+					anchors.topMargin: Theme.space3
+						+ (historyStatusOverlay.visible ? historyStatusOverlay.height + Theme.space2 : 0)
+					active: root.timelineV2
+					visible: active
+					sourceComponent: ConversationView {
+						objectName: "directMessageConversationView"
+						rowModel: chatTimelineV2Direct
+						host: root.parentWindow
+						hostReactionPopup: false
+						Accessible.name: qsTr("Messages with %1").arg(root.controller ? root.controller.activeLabel : "")
+						commands: QtObject {
+							readonly property bool canLoadOlder: false
+							readonly property bool loadingOlder: false
+							readonly property real unreadCount: root.controller
+								? Number(root.controller.activeUnreadCount || 0) : 0
+							readonly property bool sending: false
+							readonly property bool hydrationAvailable: !!root.controller
+
+							function reply(stableId) { root.controller.replyToMessage(stableId) }
+							function toggleReaction(stableId, emoji) { root.controller.toggleMessageReaction(stableId, emoji) }
+							function retry(stableId) { root.controller.retryMessage(stableId) }
+							function remove(stableId) { root.controller.deleteMessage(stableId) }
+							function retryAttachmentPreview(stableId, assetId) {
+								root.controller.retryAttachmentPreview(stableId, assetId)
+							}
+							function validHydrationId(stableId) { return String(stableId || "").length > 0 }
+							function hydrate(stableIds, highPriority) {
+								for (let index = 0; index < stableIds.length; ++index)
+									root.controller.requestContentHydration(stableIds[index], highPriority)
+							}
+							function loadOlder() {}
+							function markRead() { root.controller.markRead() }
 						}
 					}
 				}

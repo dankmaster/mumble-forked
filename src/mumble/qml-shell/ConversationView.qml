@@ -2,9 +2,12 @@ import QtQuick
 import QtQuick.Controls
 import Mumble.Theme 1.0
 
-// The v2 chat timeline (docs/chat-timeline-v2-plan.md, phase 3). Rows come
-// newest first from chatTimelineV2 and are laid out bottom to top, so the newest
-// message sits at the bottom without scrolling and older pages grow upwards.
+// The v2 chat timeline (docs/chat-timeline-v2-plan.md). Rows come newest first
+// from a ChatRowModel (chatTimelineV2 for rooms) and are laid out bottom to top,
+// so the newest message sits at the bottom without scrolling and older pages
+// grow upwards. `commands` performs actions, hydration, paging and read state:
+// RoomConversationCommands for rooms, the direct message window's own object
+// for a conversation.
 //
 // Scrolling rules:
 // - The view follows the newest message only while the reader is there. That
@@ -20,6 +23,11 @@ ListView {
 	// The shell's root item: shared helpers for avatars, attachments, previews
 	// and the quick reaction popup.
 	property var host: null
+	property var rowModel: chatTimelineV2
+	property QtObject commands: RoomConversationCommands {}
+	// Rooms use the shell's quick reaction popup; a separate window shows the
+	// reaction bar inside the row instead.
+	property bool hostReactionPopup: true
 	property bool followTail: true
 	property bool following: false
 	property double liveInsertAt: 0
@@ -41,7 +49,6 @@ ListView {
 	property int pendingRevealPages: 0
 	property var previewHeights: ({})
 	property int previewHeightCount: 0
-	readonly property bool localScope: String(chatTimelineV2.scopeToken || "").startsWith("local:")
 
 	function tailY() {
 		return originY + contentHeight + bottomMargin - height
@@ -63,15 +70,14 @@ ListView {
 		following = false
 	}
 	function loadOlderIfNeeded() {
-		if (!visible || count === 0 || localScope || scrollbarDragging || !activeScope.canLoadOlder
-				|| activeScope.loadingState === "older")
+		if (!visible || count === 0 || scrollbarDragging || !commands.canLoadOlder || commands.loadingOlder)
 			return
 		if (contentY - originY < height)
-			uiCommands.requestOlderMessages()
+			commands.loadOlder()
 	}
 	function queueHydration(stableId, item, force) {
 		const id = String(stableId || "")
-		if (localScope || !/^[1-9][0-9]*$/.test(id) || (hydrationRequested[id] && !force))
+		if (!commands.hydrationAvailable || !commands.validHydrationId(id) || (hydrationRequested[id] && !force))
 			return
 		hydrationRequested[id] = true
 		hydrationQueue.push(id)
@@ -82,6 +88,7 @@ ListView {
 	}
 	function openMessageActions(rowItem, anchorItem, x, y) {
 		messageActions.targetId = rowItem.stableId
+		messageActions.targetRow = rowItem
 		messageActions.targetText = rowItem.plainText
 		messageActions.targetReactions = rowItem.reactionsForQuickBar()
 		messageActions.targetAnchor = anchorItem
@@ -117,28 +124,28 @@ ListView {
 	// history ends.
 	function revealMessage(threadId, messageId) {
 		pendingRevealThread = 0
-		const row = chatTimelineV2.rowForMessage(threadId, messageId)
+		const row = rowModel.rowForMessage(threadId, messageId)
 		if (revealRow(row, String(messageId)))
 			return true
-		if (localScope || !activeScope.canLoadOlder)
+		if (!commands.canLoadOlder)
 			return false
 		pendingRevealThread = threadId
 		pendingRevealMessage = messageId
 		pendingRevealPages = 20
 		followTail = false
-		uiCommands.requestOlderMessages()
+		commands.loadOlder()
 		return false
 	}
 	function continuePendingReveal() {
 		if (pendingRevealThread === 0)
 			return
-		const row = chatTimelineV2.rowForMessage(pendingRevealThread, pendingRevealMessage)
+		const row = rowModel.rowForMessage(pendingRevealThread, pendingRevealMessage)
 		if (row >= 0) {
 			pendingRevealThread = 0
 			revealRow(row, String(pendingRevealMessage))
-		} else if (--pendingRevealPages > 0 && activeScope.canLoadOlder && activeScope.loadingState !== "older") {
-			uiCommands.requestOlderMessages()
-		} else if (!activeScope.canLoadOlder || pendingRevealPages <= 0) {
+		} else if (--pendingRevealPages > 0 && commands.canLoadOlder && !commands.loadingOlder) {
+			commands.loadOlder()
+		} else if (!commands.canLoadOlder || pendingRevealPages <= 0) {
 			pendingRevealThread = 0
 		}
 	}
@@ -170,7 +177,7 @@ ListView {
 		}
 		const settled = !moving && !flicking && !tailFollower.running && hydrationQueue.length === 0
 		return {
-			"scopeToken": String(activeScope.scopeToken || ""),
+			"scopeToken": String(rowModel.scopeToken || ""),
 			"generation": 0,
 			"count": count,
 			"presentationPending": false,
@@ -214,7 +221,7 @@ ListView {
 		messageActions.close()
 	}
 
-	model: chatTimelineV2
+	model: rowModel
 	verticalLayoutDirection: ListView.BottomToTop
 	reuseItems: true
 	cacheBuffer: Math.max(0, Math.round(height))
@@ -236,7 +243,7 @@ ListView {
 		laneMaximumWidth: rowView.host ? rowView.host.conversationLaneMaximumWidth : Theme.chatLaneMaximumWidth
 		searchCurrent: stableId.length > 0 && (stableId === rowView.flashStableId
 			|| (!!rowView.host && rowView.host.conversationSearchOpen
-				&& stableId === String(chatTimelineV2.currentMatchStableId || "")))
+				&& stableId === String(rowView.rowModel.currentMatchStableId || "")))
 		accessibilityViewportVisible: y + height > rowView.contentY && y < rowView.contentY + rowView.height
 		accessibilitySuppressed: !!rowView.host && rowView.host.backgroundAccessibilitySuppressed === true
 	}
@@ -244,13 +251,13 @@ ListView {
 	// With the list laid out bottom to top the footer sits above the oldest row.
 	footer: Item {
 		width: rowView.width
-		height: !rowView.localScope && (activeScope.canLoadOlder || activeScope.loadingState === "older") ? 40 : 0
+		height: rowView.commands.canLoadOlder || rowView.commands.loadingOlder ? 40 : 0
 		visible: height > 0
 
 		Row {
 			anchors.centerIn: parent
 			spacing: Theme.space2
-			visible: activeScope.loadingState === "older"
+			visible: rowView.commands.loadingOlder
 
 			ModernBusyIndicator {
 				anchors.verticalCenter: parent.verticalCenter
@@ -287,7 +294,7 @@ ListView {
 	}
 
 	Connections {
-		target: chatTimelineV2
+		target: view.rowModel
 		function onModelReset() {
 			view.resetForScope()
 		}
@@ -300,14 +307,11 @@ ListView {
 		}
 	}
 	Connections {
-		target: composer
+		target: view.commands
 		function onSendingChanged() {
-			if (composer.sending)
+			if (view.commands.sending)
 				view.followTail = true
 		}
-	}
-	Connections {
-		target: activeScope
 		function onUnreadCountChanged() {
 			markReadTimer.restart()
 		}
@@ -339,9 +343,8 @@ ListView {
 			const batch = view.hydrationQueue.splice(0, 32)
 			const highPriority = view.hydrationHighPriority
 			view.hydrationHighPriority = false
-			const scopeToken = String(activeScope.scopeToken || "")
-			if (batch.length > 0 && scopeToken.length > 0)
-				uiCommands.requestPreviewHydration(scopeToken, batch, highPriority)
+			if (batch.length > 0)
+				view.commands.hydrate(batch, highPriority)
 			if (view.hydrationQueue.length > 0)
 				start()
 		}
@@ -358,8 +361,8 @@ ListView {
 		interval: 400
 		onTriggered: {
 			if (view.visible && view.atLatest && Qt.application.state === Qt.ApplicationActive
-					&& Number(activeScope.unreadCount || 0) > 0)
-				uiCommands.markActiveScopeRead()
+					&& view.commands.unreadCount > 0)
+				view.commands.markRead()
 		}
 	}
 
@@ -372,6 +375,7 @@ ListView {
 		objectName: "conversationMessageActions"
 		accessibleName: qsTr("Message actions")
 		property string targetId: ""
+		property var targetRow: null
 		property string targetText: ""
 		property var targetReactions: []
 		property var targetAnchor: null
@@ -379,22 +383,29 @@ ListView {
 		property bool targetCanReact: false
 		property bool targetCanDelete: false
 		property bool targetCanRetry: false
-		onClosed: targetId = ""
+		onClosed: {
+			targetId = ""
+			targetRow = null
+		}
 
 		PayloadMenuItem {
 			payload: ({ "kind": "action", "id": "message.reply", "label": qsTr("Reply"), "icon": "reply" })
 			visible: messageActions.targetCanReply
 			height: visible ? rowImplicitHeight : 0
-			onActionRequested: uiCommands.replyToMessage(messageActions.targetId)
+			onActionRequested: view.commands.reply(messageActions.targetId)
 		}
 		PayloadMenuItem {
 			payload: ({ "kind": "action", "id": "message.react", "label": qsTr("Add reaction"), "icon": "reaction" })
 			visible: messageActions.targetCanReact
 			height: visible ? rowImplicitHeight : 0
 			onActionRequested: {
-				if (view.host && messageActions.targetAnchor)
+				if (!view.hostReactionPopup) {
+					if (messageActions.targetRow)
+						messageActions.targetRow.inlineReactionsOpen = true
+				} else if (view.host && messageActions.targetAnchor) {
 					view.host.showQuickReactions(messageActions.targetId, -1, messageActions.targetAnchor,
 						messageActions.targetReactions)
+				}
 			}
 		}
 		PayloadMenuItem {
@@ -412,14 +423,14 @@ ListView {
 			payload: ({ "kind": "action", "id": "message.retry", "label": qsTr("Retry"), "icon": "retry" })
 			visible: messageActions.targetCanRetry
 			height: visible ? rowImplicitHeight : 0
-			onActionRequested: uiCommands.retryMessage(messageActions.targetId)
+			onActionRequested: view.commands.retry(messageActions.targetId)
 		}
 		PayloadMenuItem {
 			payload: ({ "kind": "action", "id": "message.delete", "label": qsTr("Delete"), "icon": "delete",
 				"tone": "danger" })
 			visible: messageActions.targetCanDelete
 			height: visible ? rowImplicitHeight : 0
-			onActionRequested: uiCommands.deleteMessage(messageActions.targetId)
+			onActionRequested: view.commands.remove(messageActions.targetId)
 		}
 	}
 

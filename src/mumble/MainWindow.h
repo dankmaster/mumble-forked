@@ -549,6 +549,7 @@ public:
 
 	void syncChatTimelineV2Log(const PersistentChatTarget &target);
 	void mirrorChatTimelineV2Extras(const QVariantMap &messageState);
+	void mirrorChatTimelineV2DirectExtras(const ModernDirectMessageEntry &entry, QVariantMap state, bool mainView);
 	int modernShellPreviewHydrationIntervalMs() const;
 	QVector< ChatLocalEntry > chatTimelineV2DirectEntries(const ModernDirectMessageConversation &conversation) const;
 

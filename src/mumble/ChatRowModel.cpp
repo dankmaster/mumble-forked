@@ -190,8 +190,11 @@ QVariant ChatRowModel::data(const QModelIndex &index, int role) const {
 			return row.deliveryLabel;
 		case DeliveryCanRetryRole:
 			return row.deliveryCanRetry;
-		case StableIdRole:
-			return QString::number(row.key.messageId);
+		case StableIdRole: {
+			const auto extras = m_extras.constFind(row.key.identity());
+			return extras != m_extras.cend() && !extras->stableId.isEmpty() ? extras->stableId
+																			 : QString::number(row.key.messageId);
+		}
 		default:
 			return {};
 	}
@@ -357,6 +360,7 @@ void ChatRowModel::setExtras(const QVariantMap &messageState) {
 		return;
 	}
 	Extras next;
+	next.stableId    = messageState.value(QStringLiteral("stableId")).toString();
 	next.avatarUrl   = messageState.value(QStringLiteral("avatarUrl")).toString();
 	next.attachments = messageState.value(QStringLiteral("attachments")).toList();
 	next.preview     = messageState.value(QStringLiteral("preview")).toMap();
@@ -368,6 +372,9 @@ void ChatRowModel::setExtras(const QVariantMap &messageState) {
 	const quint64 identity = identityOnly.identity();
 	Extras &current        = m_extras[identity];
 	QList< int > roles;
+	if (current.stableId != next.stableId) {
+		roles << StableIdRole;
+	}
 	if (current.avatarUrl != next.avatarUrl) {
 		roles << AvatarUrlRole;
 	}

@@ -27830,6 +27830,7 @@ void MainWindow::publishQmlDirectMessageEntryUpdate(const unsigned int session,
 	const unsigned int activeSession = target.user ? target.user->uiSession : 0;
 	if (target.directMessage && activeSession == session) m_qmlShellHost->chatModel()->applyMessage(state);
 	if (m_chatTimelineV2Feed) {
+		mirrorChatTimelineV2DirectExtras(entry, state, target.directMessage && activeSession == session);
 		ModernDirectMessageConversation single;
 		single.messages.push_back(entry);
 		const QVector< ChatLocalEntry > entries = chatTimelineV2DirectEntries(single);
@@ -30898,6 +30899,24 @@ void MainWindow::mirrorChatTimelineV2Extras(const QVariantMap &messageState) {
 	}
 }
 
+void MainWindow::mirrorChatTimelineV2DirectExtras(const ModernDirectMessageEntry &entry, QVariantMap state,
+												  const bool mainView) {
+	if (!m_chatTimelineV2Feed || !m_qmlShellHost) {
+		return;
+	}
+	// Key the state like ChatRowBuilder::buildLocal keys the row, and keep the
+	// direct message controller's id for actions.
+	const bool persistent = static_cast< bool >(entry.persistentMessage);
+	state.insert(QStringLiteral("threadId"), persistent ? entry.persistentMessage->thread_id() : 0U);
+	state.insert(QStringLiteral("messageId"), persistent ? entry.persistentMessage->message_id()
+														 : static_cast< quint32 >(entry.localID));
+	state.insert(QStringLiteral("stableId"), state.value(QStringLiteral("id")));
+	m_qmlShellHost->chatTimelineV2DirectModel()->setExtras(state);
+	if (mainView) {
+		m_qmlShellHost->chatTimelineV2Model()->setExtras(state);
+	}
+}
+
 void MainWindow::syncChatTimelineV2Log(const PersistentChatTarget &target) {
 	if (!m_chatTimelineV2Feed || (!target.serverLog && !target.ephemeralTextPath)) {
 		return;
@@ -31807,6 +31826,17 @@ void MainWindow::applyQmlDirectMessagesState(const QVariantMap &state) {
 	}
 	m_qmlShellHost->directMessageController()->applyState(typedState);
 	const bool hasConversation = conversationIt != m_modernDirectMessageConversations.cend();
+	if (m_chatTimelineV2Feed && hasConversation) {
+		const QVariantList messageStates =
+			typedState.value(QStringLiteral("activeConversation")).toMap().value(QStringLiteral("messages")).toList();
+		const ModernDirectMessageConversation &conversation = conversationIt.value();
+		const bool mainView = target.directMessage;
+		for (qsizetype i = 0; i < messageStates.size() && i < static_cast< qsizetype >(conversation.messages.size());
+			 ++i) {
+			mirrorChatTimelineV2DirectExtras(conversation.messages[static_cast< std::size_t >(i)],
+											 messageStates.at(i).toMap(), mainView);
+		}
+	}
 	const QVector< ChatLocalEntry > v2Entries =
 		m_chatTimelineV2Feed && hasConversation ? chatTimelineV2DirectEntries(conversationIt.value())
 												: QVector< ChatLocalEntry >();
