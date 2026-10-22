@@ -78,6 +78,14 @@ ChatMessageFrame {
 
 	// Arrival animation: paint only (opacity and a short rise), owned by the row so
 	// it starts and stops with the delegate and never moves the list itself.
+	// Incubation gets little time while the reader scrolls, so a card could reach
+	// the screen at its estimated height and then grow against the scroll. Turning
+	// asynchronous off completes a running load now.
+	function finishPreview() {
+		if (previewLoader.active && previewLoader.status === Loader.Loading)
+			previewLoader.asynchronous = false
+	}
+
 	function previewGeometry() {
 		return previewSlot.visible ? previewSlot.geometry() : null
 	}
@@ -405,7 +413,10 @@ ChatMessageFrame {
 					// frame (several reused rows cost 30-90 ms), while a new card
 					// incubates over several frames behind its remembered height.
 					active: row.showPreviewCard && !row.accessibilityPooled
+					// Loads in the background; the view finishes it when the row comes
+					// near the screen (finishPreview).
 					asynchronous: true
+					onActiveChanged: if (!active) asynchronous = true
 					opacity: status === Loader.Ready ? 1 : 0
 					sourceComponent: RichPreviewCard {
 						preview: row.preview

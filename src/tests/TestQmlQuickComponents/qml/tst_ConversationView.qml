@@ -505,6 +505,47 @@ TestCase {
 		settleAtNewest()
 	}
 
+	// A link card about to scroll in is finished before it reaches the screen, so
+	// its row never grows in view against the scroll.
+	function test_link_cards_near_the_view_are_finished_before_they_scroll_in() {
+		const list = view()
+		const rows = []
+		for (let id = 400; id >= 1; --id) {
+			const row = message(id, "Link " + id)
+			row.preview = {
+				"kind": "article",
+				"url": "https://example.com/" + id,
+				"host": "example.com",
+				"title": "Article " + id,
+				"description": "A description long enough to wrap onto a second and a third line of the card."
+			}
+			row.card = { "status": "ready", "layout": "small" }
+			rows.push(row)
+		}
+		chatTimelineV2.resetRows("channel:links", rows)
+		settleAtNewest()
+		list.followTail = false
+		let unfinished = 0
+		let checked = 0
+		// Jump through history; after each jump, before any incubation time, every
+		// card on screen or just above or below it must be finished.
+		for (let jump = 1; jump <= 6; ++jump) {
+			list.positionAt(list.tailY() - list.height * 4 * jump)
+			list.forceLayout()
+			for (let y = list.contentY - list.height * 0.5; y < list.contentY + list.height * 1.5; y += 20) {
+				const index = list.indexAt(list.width / 2, y)
+				const item = index >= 0 ? list.itemAtIndex(index) : null
+				if (!item || !item.showPreviewCard)
+					continue
+				++checked
+				if (item.previewGeometry().card < 0)
+					++unfinished
+			}
+		}
+		verify(checked > 10, "checked " + checked + " cards")
+		compare(unfinished, 0, unfinished + " of " + checked + " cards near the view were still loading")
+	}
+
 	function test_rows_above_exist_before_they_scroll_in() {
 		const list = view()
 		settleAtNewest()

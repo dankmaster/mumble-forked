@@ -140,6 +140,18 @@ ListView {
 		// The rows moved with the view: take where the row is now.
 		pickAnchor()
 	}
+	// Rows within three quarters of a screen of the view finish their link cards
+	// before they scroll in, so they arrive at their real height.
+	function finishCardsNearView() {
+		const top = contentY - height * 0.75
+		const bottom = contentY + height * 1.75
+		const rows = contentItem.children
+		for (let i = 0; i < rows.length; ++i) {
+			const row = rows[i]
+			if (row.finishPreview && row.y + row.height > top && row.y < bottom)
+				row.finishPreview()
+		}
+	}
 	function resetAnchorHoldBudget() {
 		const exhausted = anchorHoldBudget <= 0
 		anchorHoldBudget = anchorHoldsPerFrame
@@ -375,6 +387,7 @@ ListView {
 	}
 
 	onContentYChanged: {
+		finishCardsNearView()
 		// The reader's scrolling picks a new reading row; anything else moving
 		// the view is layout, which the lock undoes.
 		if (readerScrolling || followTail)
