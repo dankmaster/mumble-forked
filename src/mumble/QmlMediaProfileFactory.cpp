@@ -67,8 +67,9 @@ const QHash< QString, QSet< QString > > &providerResourceDomains() {
 		  { QStringLiteral("instagram.com"), QStringLiteral("cdninstagram.com"),
 			QStringLiteral("facebook.com"), QStringLiteral("facebook.net"),
 			QStringLiteral("fbcdn.net"), QStringLiteral("fbsbx.com") } },
+		// soundcloud.cloud serves the widget's audio streams.
 		{ QStringLiteral("soundcloud"),
-		  { QStringLiteral("soundcloud.com"), QStringLiteral("sndcdn.com") } }
+		  { QStringLiteral("soundcloud.com"), QStringLiteral("sndcdn.com"), QStringLiteral("soundcloud.cloud") } }
 	};
 	return domains;
 }
@@ -301,6 +302,13 @@ public:
 		if (!blocked && (provider == QLatin1String("youtube") || provider == QLatin1String("twitch"))
 			&& info.resourceType() == QWebEngineUrlRequestInfo::ResourceTypeMainFrame) {
 			info.setHttpHeader(QByteArrayLiteral("Referer"), MediaClientReferer);
+		}
+		if (blocked) {
+			// Developer trace only: which provider resource was refused, so a
+			// provider that moves its media to a new host shows up.
+			mumble::chatperf::recordNote("qml.media.blocked",
+				QStringLiteral("%1 %2 %3").arg(provider, info.requestUrl().host(),
+					QString::number(static_cast< int >(info.resourceType()))));
 		}
 		info.block(blocked);
 	}

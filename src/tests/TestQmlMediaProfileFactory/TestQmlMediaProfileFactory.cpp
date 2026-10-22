@@ -54,6 +54,16 @@ void TestQmlMediaProfileFactory::providerResourcesAreDenyByDefault() {
 	QVERIFY(!QmlMediaProfileFactory::isResourceRequestAllowed(
 		QStringLiteral("youtube"), player, {}, QUrl(QStringLiteral("wss://www.youtube.com/socket")), player));
 
+	// The SoundCloud widget streams its audio from soundcloud.cloud.
+	const QUrl soundCloudPlayer(QStringLiteral("https://w.soundcloud.com/player/?url=test"));
+	QVERIFY(QmlMediaProfileFactory::isResourceRequestAllowed(
+		QStringLiteral("soundcloud"), soundCloudPlayer, {},
+		QUrl(QStringLiteral("https://playback.media-streaming.soundcloud.cloud/abc/aac_160k/def/playlist.m3u8")),
+		soundCloudPlayer));
+	QVERIFY(!QmlMediaProfileFactory::isResourceRequestAllowed(
+		QStringLiteral("soundcloud"), soundCloudPlayer, {},
+		QUrl(QStringLiteral("https://soundcloud.cloud.evil.test/x")), soundCloudPlayer));
+
 	const QUrl facebookPlayer(QStringLiteral("https://www.facebook.com/plugins/video.php?href=test"));
 	QVERIFY(QmlMediaProfileFactory::isResourceRequestAllowed(
 		QStringLiteral("facebook"), facebookPlayer, {},
