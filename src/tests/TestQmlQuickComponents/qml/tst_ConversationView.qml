@@ -391,6 +391,40 @@ TestCase {
 		compare(early.pages, 4)
 	}
 
+	// A burst of wheel notches while cards grow and pages arrive: every frame
+	// keeps up and the view keeps moving towards older history.
+	function test_fast_wheel_burst_through_growing_cards_keeps_frames_short() {
+		const list = view()
+		pagingCommands.pages = 0
+		pagingCommands.canLoadOlder = true
+		pagingCommands.loadingOlder = false
+		testCase.grownRows = ({})
+		const rows = []
+		for (let id = 1100; id > 1040; --id)
+			rows.push(message(id, "Link " + id))
+		chatTimelineV2.resetRows("channel:links", rows)
+		list.commands = pagingCommands
+		cardLoader.interval = 5
+		cardLoader.start()
+		settleAtNewest()
+		const start = list.contentY
+		let longest = 0
+		for (let burst = 0; burst < 6; ++burst) {
+			for (let notch = 0; notch < 8; ++notch)
+				mouseWheel(list, list.width / 2, list.height / 2, 0, 120)
+			for (let frame = 0; frame < 10; ++frame) {
+				const before = Date.now()
+				wait(16)
+				longest = Math.max(longest, Date.now() - before)
+			}
+		}
+		cardLoader.stop()
+		cardLoader.interval = 30
+		verify(longest < 500, "a frame took " + longest + " ms")
+		verify(start - list.contentY > list.height * 2, "moved up by " + (start - list.contentY))
+		verify(!list.followTail)
+	}
+
 	function test_wheel_notch_scrolls_a_full_step_and_releases_following() {
 		const list = view()
 		settleAtNewest()

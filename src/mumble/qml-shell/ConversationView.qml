@@ -62,6 +62,10 @@ ListView {
 	property string anchorStableId: ""
 	property real anchorScreenY: 0
 	property bool holdingAnchor: false
+	// Corrections left in this frame. Qt sometimes moves the rows along with
+	// contentY; the lock must give up then instead of chasing them, or layout
+	// never settles.
+	property int anchorHoldBudget: 4
 	property int previewHeightCount: 0
 
 	function tailY() {
@@ -97,9 +101,27 @@ ListView {
 		const shift = anchorItem.y - contentY - anchorScreenY
 		if (Math.abs(shift) < 0.5)
 			return
+		if (anchorHoldBudget <= 0) {
+			if (anchorHoldBudget === 0) {
+				--anchorHoldBudget
+				console.warn("ConversationView: the reading position kept moving with the view; anchor released")
+			}
+			pickAnchor()
+			return
+		}
+		if (anchorHoldBudget === 4)
+			Qt.callLater(resetAnchorHoldBudget)
+		--anchorHoldBudget
 		holdingAnchor = true
 		contentY += shift
 		holdingAnchor = false
+		// If the rows moved with the view, the reader's row did not come back:
+		// take where it is now as the new reading point.
+		if (Math.abs(anchorItem.y - contentY - anchorScreenY) >= 0.5)
+			pickAnchor()
+	}
+	function resetAnchorHoldBudget() {
+		anchorHoldBudget = 4
 	}
 	function loadOlderIfNeeded() {
 		if (!visible || count === 0 || scrollbarDragging || !commands.canLoadOlder || commands.loadingOlder)
