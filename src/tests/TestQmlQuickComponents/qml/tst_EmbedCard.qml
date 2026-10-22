@@ -216,6 +216,50 @@ TestCase {
 		compare(detailsSpy.signalArguments[0][0], 0)
 	}
 
+	function test_audio_card_says_what_it_is_and_who_made_it() {
+		const album = documentFor("media", "spotify", "Spotify", {
+			"source": { "url": "https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy" },
+			"content": { "type": "audio", "title": "Bobo & Gileus" },
+			"media": [image("cover")],
+			"playback": { "mode": "provider", "provider": "spotify", "url": "https://open.spotify.com/embed/album/x" }
+		})
+		const card = cardFor(album)
+		compare(card.family, "audio")
+		compare(card.audioKind, "Album")
+		compare(findChild(card, "embedCardHeader").text, "Spotify")
+		verify(findChild(card, "embedCardAudioPlay").visible)
+		const track = documentFor("media", "soundcloud", "SoundCloud", {
+			"source": { "url": "https://soundcloud.com/forss/flickermood" },
+			"content": { "type": "audio", "title": "Flickermood", "author": { "name": "Forss" } },
+			"media": [image("wave")],
+			"playback": { "mode": "provider", "provider": "soundcloud", "url": "https://w.soundcloud.com/player/?url=x" }
+		})
+		const soundCloud = cardFor(track)
+		compare(soundCloud.family, "audio")
+		compare(soundCloud.audioKind, "Track")
+		compare(soundCloud.byline, "Forss")
+	}
+
+	function test_header_falls_back_to_the_providers_own_line() {
+		const reddit = documentFor("media", "reddit", "Reddit", {
+			"content": { "type": "video", "title": "A post", "subtitle": "u/someone · r/pics" },
+			"media": [video("clip")],
+			"playback": { "mode": "native", "provider": "reddit" }
+		})
+		compare(findChild(cardFor(reddit), "embedCardHeader").text, "Reddit  ·  u/someone · r/pics")
+	}
+
+	function test_a_link_to_a_picture_is_a_picture_card() {
+		const document = documentFor("link", "", "upload.wikimedia.org", {
+			"source": { "url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/JPEG_example_flower.jpg" },
+			"content": { "type": "link", "title": "JPEG_example_flower.jpg" }
+		})
+		const card = cardFor(document, { "thumbnailUrl": "image://mumble/flower?g=1" })
+		compare(card.family, "image")
+		verify(findChild(card, "embedCardMediaBox").visible)
+		compare(card.title, "", "the file name is not a title")
+	}
+
 	function test_product_leads_its_facts_with_the_price() {
 		const card = cardFor(samples().product)
 		compare(findChild(card, "embedCardFacts").text, "9,69€  ·  Developer Valve  ·  Reviews Overwhelmingly Positive")

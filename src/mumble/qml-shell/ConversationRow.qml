@@ -457,7 +457,7 @@ ChatMessageFrame {
 						preview: row.preview
 						width: previewSlot.width
 						playing: !!row.view && row.view.playingStableId === row.stableId
-						playerHeight: playing && row.view ? row.view.playerHeightFor(mediaBox.width) : 0
+						playerHeight: playing && row.view ? row.view.inRowPlayerHeight(mediaBox.width) : 0
 						animationsEnabled: !!row.view && !row.view.moving
 						hoverEffectsEnabled: row.hoverEffectsEnabled
 						onOpenRequested: url => Qt.openUrlExternally(url)

@@ -300,6 +300,23 @@ ListView {
 			return Math.round(width * 9 / 16)
 		return player.viewportHeightForWidth(width) + Math.max(0, player.implicitHeight - player.mediaViewportHeight)
 	}
+	// The player in a card is never taller than 70% of the view (560 px at most):
+	// a portrait video plays narrower, centred in the card's media box.
+	readonly property real playerMaximumHeight: Math.max(240, Math.min(560, height * 0.7))
+	function playerWidthFor(boxWidth) {
+		const player = playerLoader.item
+		if (!player || boxWidth <= 0)
+			return boxWidth
+		const controls = Math.max(0, player.implicitHeight - player.mediaViewportHeight)
+		const ratio = player.viewportHeightForWidth(boxWidth) / boxWidth
+		if (ratio <= 0 || player.viewportHeightForWidth(boxWidth) + controls <= playerMaximumHeight)
+			return boxWidth
+		return Math.max(200, Math.floor((playerMaximumHeight - controls) / ratio))
+	}
+	// The media box's height while the player covers it.
+	function inRowPlayerHeight(boxWidth) {
+		return Math.min(playerMaximumHeight, playerHeightFor(playerWidthFor(boxWidth)))
+	}
 	function playingRow() {
 		const rows = contentItem.children
 		for (let i = 0; i < rows.length; ++i) {
@@ -319,9 +336,10 @@ ListView {
 			const at = box.mapToItem(view, 0, 0)
 			if (at.y + box.height > 0 && at.y < height) {
 				playerDocked = false
-				playerHost.x = at.x
+				const playerWidth = playerWidthFor(box.width)
+				playerHost.x = at.x + Math.round((box.width - playerWidth) / 2)
 				playerHost.y = at.y
-				playerHost.width = box.width
+				playerHost.width = playerWidth
 				return
 			}
 		}

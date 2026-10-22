@@ -38,9 +38,25 @@ Rectangle {
 	readonly property string sourceUrl: safeExternalUrl(document.source ? document.source.url : preview.url)
 	readonly property string title: {
 		const value = String(content.title || "").trim()
-		return value === providerLabel ? "" : value
+		// Neither the provider's name nor a picture's file name says anything new.
+		return value === providerLabel || /^[^\s/]+\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(value) ? "" : value
 	}
 	readonly property string description: String(content.description || "").trim()
+	// Who made it: the author, or the provider's own line (Reddit's subreddit).
+	readonly property string byline: String(author.name || content.subtitle || "").trim()
+	// What an audio link is, read from its address.
+	readonly property string audioKind: {
+		const path = sourceUrl.replace(/^https?:\/\/[^/]+/i, "").toLowerCase()
+		if (providerId === "spotify") {
+			const kind = (path.match(/^\/(?:intl-[a-z-]+\/)?(track|album|playlist|episode|show|artist)\//) || [])[1]
+			return kind === "track" ? qsTr("Song") : kind === "album" ? qsTr("Album")
+				: kind === "playlist" ? qsTr("Playlist") : kind === "episode" ? qsTr("Podcast episode")
+				: kind === "show" ? qsTr("Podcast") : kind === "artist" ? qsTr("Artist") : ""
+		}
+		if (providerId === "soundcloud")
+			return path.indexOf("/sets/") >= 0 ? qsTr("Playlist") : qsTr("Track")
+		return ""
+	}
 	readonly property string aspect: normalizedAspect(preview ? preview.embedAspect : "")
 	readonly property var firstMedia: media.length > 0 ? media[0] : ({})
 	readonly property string imageSource: stillSource(firstMedia)
@@ -114,6 +130,9 @@ Rectangle {
 			return "video"
 		if (presentation === "media")
 			return "image"
+		// A link straight to a picture is the picture.
+		if (imageSource.length > 0 && /\.(jpe?g|png|gif|webp|avif|bmp)(\?|#|$)/i.test(sourceUrl))
+			return "image"
 		if (presentation === "article" && imageSource.length > 0)
 			return "article"
 		return "link"
@@ -174,8 +193,9 @@ Rectangle {
 				anchors.verticalCenter: parent.verticalCenter
 				text: {
 					const parts = [root.providerLabel]
-					const name = String(root.author.name || "")
-					if (root.family !== "post" && name.length > 0 && name !== root.providerLabel)
+					const name = root.byline
+					if (root.family !== "post" && root.family !== "audio" && name.length > 0
+							&& name !== root.providerLabel)
 						parts.push(name)
 					return parts.filter(part => part.length > 0).join("  ·  ")
 				}
@@ -358,53 +378,51 @@ Rectangle {
 			}
 		}
 
-		// Audio: art, title and artist on one row; the player opens below.
+		// Audio: cover, what it is, title and artist, and a play button; the
+		// player opens below.
 		Row {
+			objectName: "embedCardAudio"
 			visible: root.family === "audio"
 			width: parent.width
 			spacing: Theme.space3
 
 			Rectangle {
-				width: 72
-				height: 72
+				width: 96
+				height: 96
 				radius: Theme.innerRadius - 4
 				color: Theme.mediaCanvas
 				clip: true
 
+				ModernIcon {
+					anchors.centerIn: parent
+					visible: audioCover.status !== Image.Ready
+					name: "volume"
+					size: 28
+					color: Theme.textMuted
+				}
 				Image {
+					id: audioCover
 					anchors.fill: parent
 					source: root.family === "audio" ? root.imageSource : ""
-					sourceSize: Qt.size(144, 144)
+					sourceSize: Qt.size(192, 192)
 					fillMode: Image.PreserveAspectCrop
 					asynchronous: true
 				}
-				Rectangle {
-					objectName: "embedCardAudioPlay"
-					anchors.centerIn: parent
-					width: 36
-					height: 36
-					radius: 18
-					visible: root.canPlay && !root.playing
-					color: Theme.withAlpha(Theme.mediaCanvas, 0.66)
-
-					ModernIcon {
-						anchors.centerIn: parent
-						name: "play"
-						size: 18
-						color: Theme.mediaOverlayTextStrong
-					}
-					MouseArea {
-						anchors.fill: parent
-						cursorShape: Qt.PointingHandCursor
-						onClicked: root.playRequested(0)
-					}
-				}
 			}
 			Column {
-				width: parent.width - 72 - Theme.space3
-				anchors.verticalCenter: parent.verticalCenter
+				width: parent.width - 96 - Theme.space3
+				height: 96
 				spacing: 2
 
+				Text {
+					width: parent.width
+					visible: text.length > 0
+					text: root.audioKind
+					textFormat: Text.PlainText
+					elide: Text.ElideRight
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+				}
 				Text {
 					width: parent.width
 					text: root.title || root.description
@@ -413,19 +431,58 @@ Rectangle {
 					elide: Text.ElideRight
 					maximumLineCount: 2
 					color: Theme.textStrong
-					font.pixelSize: Theme.fontBody
+					font.pixelSize: Theme.fontTitle
 					font.weight: Font.DemiBold
 				}
 				Text {
 					width: parent.width
 					visible: text.length > 0
-					text: String(root.author.name || "")
+					text: root.byline
 					textFormat: Text.PlainText
 					elide: Text.ElideRight
 					maximumLineCount: 1
 					color: Theme.textMuted
 					font.pixelSize: Theme.fontLabel
 				}
+			}
+		}
+		Rectangle {
+			objectName: "embedCardAudioPlay"
+			visible: root.family === "audio" && root.canPlay && !root.playing
+			width: audioPlayRow.implicitWidth + Theme.space3 * 2
+			height: 30
+			radius: 15
+			color: audioPlayArea.containsMouse ? Theme.surfaceHover : Theme.withAlpha(Theme.surfaceHover, 0.7)
+			border.color: Theme.surfaceBorder
+			Accessible.role: Accessible.Button
+			Accessible.name: qsTr("Play")
+			Accessible.onPressAction: root.playRequested(0)
+
+			Row {
+				id: audioPlayRow
+				anchors.centerIn: parent
+				spacing: Theme.space1
+
+				ModernIcon {
+					anchors.verticalCenter: parent.verticalCenter
+					name: "play"
+					size: 14
+					color: Theme.textStrong
+				}
+				Text {
+					anchors.verticalCenter: parent.verticalCenter
+					text: qsTr("Play")
+					color: Theme.textStrong
+					font.pixelSize: Theme.fontLabel
+					font.weight: Font.DemiBold
+				}
+			}
+			MouseArea {
+				id: audioPlayArea
+				anchors.fill: parent
+				hoverEnabled: true
+				cursorShape: Qt.PointingHandCursor
+				onClicked: root.playRequested(0)
 			}
 		}
 

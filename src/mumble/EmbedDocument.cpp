@@ -620,12 +620,31 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		: type == QLatin1String("article")
 			? firstText(metadata, { QStringLiteral("articlePublishedAt") }, 128) : QString();
 
+	// oEmbed previews (SoundCloud, Spotify, Reddit, Vimeo...) carry their author
+	// only in the subtitle line, as "<site> by <author>" or as Reddit's
+	// "u/author · r/subreddit".
+	QVariantMap contentAuthor = author(provider, metadata);
+	QString subtitle          = firstText(preview, { QStringLiteral("subtitle") }, 512);
+	const QString label       = providerLabel(provider, metadata, host);
+	if (contentAuthor.isEmpty() && !subtitle.isEmpty()) {
+		const QString prefix = label + QStringLiteral(" by ");
+		if (subtitle.startsWith(prefix, Qt::CaseInsensitive) && subtitle.size() > prefix.size()) {
+			contentAuthor.insert(QStringLiteral("name"), subtitle.mid(prefix.size()).trimmed());
+			subtitle.clear();
+		}
+	}
+	if (subtitle.compare(label, Qt::CaseInsensitive) == 0
+		|| subtitle == contentAuthor.value(QStringLiteral("name")).toString() || subtitle == title) {
+		subtitle.clear();
+	}
+
 	QVariantMap content {
 		{ QStringLiteral("type"), type },
 		{ QStringLiteral("title"), title },
+		{ QStringLiteral("subtitle"), subtitle },
 		{ QStringLiteral("description"), description },
 		{ QStringLiteral("publishedAt"), publishedAt },
-		{ QStringLiteral("author"), author(provider, metadata) }
+		{ QStringLiteral("author"), contentAuthor }
 	};
 	for (auto it = content.begin(); it != content.end();) {
 		if ((it.value().metaType().id() == QMetaType::QString && it.value().toString().isEmpty())

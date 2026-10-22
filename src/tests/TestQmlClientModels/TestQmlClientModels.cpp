@@ -5910,6 +5910,23 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	QVERIFY(directDocument.value(QStringLiteral("commonPresentation")).toBool());
 	QCOMPARE(directDocument.value(QStringLiteral("provider")).toMap()
 				 .value(QStringLiteral("id")).toString(), QStringLiteral("direct"));
+	// oEmbed providers carry their author in the subtitle line.
+	const QVariantMap soundCloudContent = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://soundcloud.com/forss/flickermood") },
+		{ QStringLiteral("title"), QStringLiteral("Flickermood") },
+		{ QStringLiteral("subtitle"), QStringLiteral("SoundCloud by Forss") },
+		{ QStringLiteral("embedKind"), QStringLiteral("soundcloud") },
+		{ QStringLiteral("embedUrl"), QStringLiteral("https://w.soundcloud.com/player/?url=x") }
+	}).value(QStringLiteral("content")).toMap();
+	QCOMPARE(soundCloudContent.value(QStringLiteral("author")).toMap().value(QStringLiteral("name")).toString(),
+			 QStringLiteral("Forss"));
+	QVERIFY(!soundCloudContent.contains(QStringLiteral("subtitle")));
+	const QVariantMap redditContent = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.reddit.com/r/pics/comments/abc/title/") },
+		{ QStringLiteral("title"), QStringLiteral("A post") },
+		{ QStringLiteral("subtitle"), QStringLiteral("u/someone · r/pics") }
+	}).value(QStringLiteral("content")).toMap();
+	QCOMPARE(redditContent.value(QStringLiteral("subtitle")).toString(), QStringLiteral("u/someone · r/pics"));
 	QCOMPARE(v2DocumentMismatches, 0);
 }
 
