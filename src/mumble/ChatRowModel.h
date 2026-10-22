@@ -10,7 +10,15 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QHash>
+#include <QtCore/QtGlobal>
 #include <QtCore/QVariantMap>
+
+// The v2 timeline is the default; MUMBLE_CHAT_TIMELINE_V2=0 brings back the
+// previous timeline until it is removed (docs/chat-timeline-v2-plan.md, phase 6).
+inline bool chatTimelineV2Enabled() {
+	return !qEnvironmentVariableIsSet("MUMBLE_CHAT_TIMELINE_V2")
+		   || qEnvironmentVariableIntValue("MUMBLE_CHAT_TIMELINE_V2") != 0;
+}
 
 // Typed rows of the v2 chat timeline, newest first: row 0 is the bottom of a
 // ListView laid out bottom to top, live messages insert at row 0 and older

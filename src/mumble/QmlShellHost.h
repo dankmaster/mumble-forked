@@ -68,7 +68,7 @@ public:
 	ParticipantModel *participantModel() const;
 	void clearConnectionState();
 	ChatTimelineModel *chatModel() const;
-	// The v2 timeline's typed rows; filled only when MUMBLE_CHAT_TIMELINE_V2 is set.
+	// The v2 timeline's typed rows; empty when MUMBLE_CHAT_TIMELINE_V2=0.
 	ChatRowModel *chatTimelineV2Model() const;
 	// The direct-message window's v2 rows, filled under the same switch.
 	ChatRowModel *chatTimelineV2DirectModel() const;

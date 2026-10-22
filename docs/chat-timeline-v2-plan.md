@@ -325,6 +325,13 @@ old one in a connected session without UI-thread stalls.
 **Exit:** history from the dev server yields known geometry for all new media
 and embeds; the fallback is covered by tests.
 
+**Status:** done without a schema change. Uploaded images already stored their
+size; `ChatEmbedRef` gained `preview_width`/`preview_height`, read with a LEFT
+JOIN on the preview asset (`ChatMessageEmbedTable::getEmbeds`). The client
+gives wide previews of known size the large card layout. Provider-specific
+`preview_kind`/`layout_hint` were left out: the card template still decides its
+layout on the client.
+
 ## Phase 3: ConversationView
 
 Build `ConversationView.qml` and the row components behind the development
@@ -349,24 +356,21 @@ switch, at feature parity with today's timeline:
 **Exit:** the visual fixtures render every row kind; the parity checklist is
 complete; the in-client benchmark meets every gate on fixture data.
 
-**Status (first slice):** `ConversationView.qml`, `ConversationRow.qml` and
-`ChatBodyBlocks.qml` replace the timeline when `MUMBLE_CHAT_TIMELINE_V2=1`.
-Rows are built on `ChatMessageFrame` and reuse `AttachmentGallery`,
-`RichPreviewCard`, the quick reaction popup, `ModernMenu`/`PayloadMenuItem` and
-the existing `uiCommands`. Until phase 4, avatar, attachment and preview
-sources come from the current message pipeline: `MainWindow` mirrors each
-message state it builds into `ChatRowModel::setExtras`, and visible rows ask
-for hydration through `uiCommands.requestPreviewHydration`. The current
-timeline's presentation gate is off under the switch, since nothing renders it.
-Covered: header and grouping, date separators, reply context, reactions and
-quick reactions, delivery state and retry, delete, copy text, attachments, link
-cards, code/quote/heading blocks, server-log rows, jump to latest, paging,
-mark read, follow-the-newest with eased snap, resize compensation and the
-in-row arrival animation (`tst_ConversationView`). Still open: unread marker,
-jump to the replied message, deleted-message state, search highlight, empty and
-loading states, images inline in legacy HTML bodies, avatars and actions for
-direct messages shown in the main view, accessibility gate, and automation and
-visual-fixture hooks.
+**Status:** done. `ConversationView.qml`, `ConversationRow.qml` and
+`ChatBodyBlocks.qml` are the timeline. Rows are built on `ChatMessageFrame` and
+reuse `AttachmentGallery`, `RichPreviewCard`, `QuickReactionBar`,
+`ModernMenu`/`PayloadMenuItem` and `ConversationSearchBar`. A commands object
+(`RoomConversationCommands.qml` for rooms) performs actions, hydration, paging
+and read state. Until the asset path below replaces it, avatar, attachment and
+preview sources come from the current message pipeline: `MainWindow` mirrors
+each message state it builds into `ChatRowModel::setExtras`, and visible rows
+ask for hydration. Search, jump to the replied message (paging it in), empty
+and loading states, the accessible row summary and the automation/fixture
+functions (`timelinePresentationState`, `visualFixtureTimelineState`,
+`positionVisualFixtureTimelineAt`) answer for the new view. The current view had
+no unread marker and never showed deleted messages (the store drops them), so
+neither was ported. `tst_ConversationView` covers following, live inserts and
+resizes while reading, scrollbar drags, reveal and the commands interface.
 
 ## Phase 4: media and playback
 
@@ -383,6 +387,16 @@ visual-fixture hooks.
 **Exit:** the real-media gates from 0.1 hold inside the client against the dev
 server.
 
+**Status:** partly done. Attachments already loaded at their display size and
+dropped their images when a row left the list. Media hydration, paced for the
+current timeline at one or two messages per 90-140 ms, runs at six per frame
+for the v2 view, and finished previews publish every frame instead of every
+50 ms. The view remembers each link card's rendered height and starts unseen
+cards from their layout's typical height. Not done: `MediaBox`, the GIF policy,
+the shared playback surface (playback already runs through the single
+`mediaSession`), preview decode sizes inside `RichPreviewCard`, and the cache
+storage rework.
+
 ## Phase 5: direct messages
 
 `DirectMessageWindow.qml` and the docked tray switch to `ConversationView`
@@ -392,10 +406,18 @@ with the DM model. The duplicated row markup and width helpers in
 **Exit:** the DM scenarios of the local dev chat matrix pass, and the same
 gates hold in the DM window.
 
+**Status:** the direct message window shows `ConversationView` over
+`chatTimelineV2Direct` with commands that call the `directMessages` controller,
+and the reaction bar opens inside the row. Direct message states are mirrored
+into the v2 models with the controller's id as the row's `stableId`. The old
+row markup in `DirectMessageWindow.qml` stays until phase 6, for the opt-out.
+
 ## Phase 6: switch the default and delete the old timeline
 
 1. Make the new view the default after a dogfooding period on the shared dev
-   client with the old view still selectable.
+   client with the old view still selectable. **Done:** the new view is the
+   default; `MUMBLE_CHAT_TIMELINE_V2=0` selects the old one. Both models are
+   still fed until the deletion below.
 2. Delete:
    - the timeline section of `Main.qml`
    - the deferred and cold presentation code

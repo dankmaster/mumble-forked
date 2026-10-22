@@ -30868,11 +30868,9 @@ void MainWindow::initializePersistentChatBackend() {
 }
 
 void MainWindow::initializeChatTimelineV2Feed() {
-	// Phase 1 of the v2 timeline: the new data layer runs next to the current
-	// timeline on the same controller traffic, behind a development switch, so
-	// its build and apply costs can be traced in connected sessions.
-	if (m_chatTimelineV2Feed || !m_persistentChatController || !m_qmlShellHost
-		|| qEnvironmentVariableIntValue("MUMBLE_CHAT_TIMELINE_V2") <= 0) {
+	// The v2 timeline's data layer: it mirrors the controller's active scope,
+	// the logs and direct messages into the models ConversationView shows.
+	if (m_chatTimelineV2Feed || !m_persistentChatController || !m_qmlShellHost || !chatTimelineV2Enabled()) {
 		return;
 	}
 	m_chatTimelineV2Feed =

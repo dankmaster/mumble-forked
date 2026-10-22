@@ -159,10 +159,9 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("chatModel"), m_chatModel.get());
 	context->setContextProperty(QStringLiteral("chatTimelineV2"), m_chatTimelineV2Model.get());
 	context->setContextProperty(QStringLiteral("chatTimelineV2Direct"), m_chatTimelineV2DirectModel.get());
-	// Development switch for the v2 timeline view (docs/chat-timeline-v2-plan.md).
-	const bool chatTimelineV2Enabled = qEnvironmentVariableIntValue("MUMBLE_CHAT_TIMELINE_V2") > 0;
-	context->setContextProperty(QStringLiteral("chatTimelineV2Enabled"), chatTimelineV2Enabled);
-	if (chatTimelineV2Enabled) {
+	const bool timelineV2 = chatTimelineV2Enabled();
+	context->setContextProperty(QStringLiteral("chatTimelineV2Enabled"), timelineV2);
+	if (timelineV2) {
 		m_chatModel->setPresentationGateEnabled(false);
 	}
 	context->setContextProperty(QStringLiteral("composer"), m_composerController.get());

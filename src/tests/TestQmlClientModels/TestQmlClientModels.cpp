@@ -3710,8 +3710,9 @@ void TestQmlClientModels::mainWindowDefersPreviewDtoBuildsDuringScroll() {
 	QVERIFY(drainStart > previewDrainScheduleStart);
 	const QString previewDrainScheduleBody =
 		source.mid(previewDrainScheduleStart, drainStart - previewDrainScheduleStart);
+	// The current timeline keeps its paced drain; the v2 view drains every frame.
 	QVERIFY(previewDrainScheduleBody.contains(
-		QStringLiteral("QTimer::singleShot(ModernShellPreviewUpdateDrainMs, this")));
+		QStringLiteral("QTimer::singleShot(m_chatTimelineV2Feed ? 16 : ModernShellPreviewUpdateDrainMs, this")));
 	const qsizetype navigateStart =
 		source.indexOf(QStringLiteral("bool MainWindow::navigateToPersistentChatScope"));
 	const qsizetype navigateEnd =
