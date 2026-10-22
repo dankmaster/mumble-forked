@@ -324,19 +324,25 @@ ListView {
 	// The player in a card is never taller than 70% of the view (560 px at most):
 	// a portrait video plays narrower, centred in the card's media box.
 	readonly property real playerMaximumHeight: Math.max(240, Math.min(560, height * 0.7))
+	// A provider widget without playback control (SoundCloud, Spotify) gets a
+	// volume strip under it; YouTube and files have the player's own controls.
+	readonly property bool playerVolumeStripShown: !!playerLoader.item && !!session
+		&& !session.playbackControllable && String(playbackInfo.provider || "") !== "direct"
+	readonly property int playerVolumeStripHeight: playerVolumeStripShown ? 36 : 0
 	function playerWidthFor(boxWidth) {
 		const player = playerLoader.item
 		if (!player || boxWidth <= 0)
 			return boxWidth
 		const controls = Math.max(0, player.implicitHeight - player.mediaViewportHeight)
 		const ratio = player.viewportHeightForWidth(boxWidth) / boxWidth
-		if (ratio <= 0 || player.viewportHeightForWidth(boxWidth) + controls <= playerMaximumHeight)
+		const available = playerMaximumHeight - playerVolumeStripHeight
+		if (ratio <= 0 || player.viewportHeightForWidth(boxWidth) + controls <= available)
 			return boxWidth
-		return Math.max(200, Math.floor((playerMaximumHeight - controls) / ratio))
+		return Math.max(200, Math.floor((available - controls) / ratio))
 	}
 	// The media box's height while the player covers it.
 	function inRowPlayerHeight(boxWidth) {
-		return Math.min(playerMaximumHeight, playerHeightFor(playerWidthFor(boxWidth)))
+		return Math.min(playerMaximumHeight, playerHeightFor(playerWidthFor(boxWidth)) + playerVolumeStripHeight)
 	}
 	function playingRow() {
 		const rows = contentItem.children
@@ -368,7 +374,7 @@ ListView {
 		// At most 60% of the view's height: a portrait video docks narrower.
 		const maximumHeight = Math.max(160, height * 0.6) - 32
 		let dockWidth = Math.min(360, Math.max(200, width * 0.4))
-		while (dockWidth > 140 && playerHeightFor(dockWidth) > maximumHeight)
+		while (dockWidth > 140 && playerHeightFor(dockWidth) + playerVolumeStripHeight > maximumHeight)
 			dockWidth -= 20
 		playerHost.width = dockWidth
 		playerHost.x = width - playerHost.width - Theme.space4
@@ -841,6 +847,7 @@ ListView {
 		z: 20
 		visible: playerLoader.active
 		height: (view.playerDocked ? dockBar.height : 0) + (playerLoader.item ? playerLoader.item.implicitHeight : 0)
+			+ view.playerVolumeStripHeight
 
 		Rectangle {
 			anchors.fill: parent
@@ -906,6 +913,47 @@ ListView {
 			// in QQuickWebEngineView::setProfile.
 			asynchronous: true
 			onLoaded: view.placePlayer()
+		}
+		Rectangle {
+			objectName: "conversationPlayerVolume"
+			visible: view.playerVolumeStripShown
+			y: dockBar.height + (playerLoader.item ? playerLoader.item.implicitHeight : 0)
+			width: parent.width
+			height: view.playerVolumeStripHeight
+			color: Theme.surfaceRaised
+			border.color: Theme.surfaceBorder
+
+			Row {
+				anchors.fill: parent
+				anchors.leftMargin: Theme.space1
+				anchors.rightMargin: Theme.space3
+				spacing: Theme.space2
+
+				ModernIconButton {
+					anchors.verticalCenter: parent.verticalCenter
+					dense: true
+					iconName: view.session && (view.session.muted || view.session.volume === 0) ? "volume-off" : "volume"
+					selected: !!view.session && view.session.muted
+					Accessible.name: view.session && view.session.muted ? qsTr("Unmute media") : qsTr("Mute media")
+					onClicked: view.session && view.session.toggleMuted()
+				}
+				ModernSlider {
+					anchors.verticalCenter: parent.verticalCenter
+					width: Math.max(80, parent.width - 120)
+					from: 0
+					to: 100
+					stepSize: 1
+					value: view.session ? Number(view.session.volume) : 0
+					onMoved: view.session && view.session.setVolume(Math.round(value))
+					Accessible.name: qsTr("Media volume")
+				}
+				Text {
+					anchors.verticalCenter: parent.verticalCenter
+					text: view.session ? Math.round(view.session.volume) + "%" : ""
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+				}
+			}
 		}
 		FrameAnimation {
 			running: playerLoader.active

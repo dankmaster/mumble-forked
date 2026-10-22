@@ -350,6 +350,27 @@ Rectangle {
 		return true
 	}
 
+	// Remembers every media element that starts playing, also those a page keeps
+	// out of the document (SoundCloud's widget does), and gives each the
+	// session's volume, so volume and mute reach them.
+	readonly property string mediaTrackerSource: "(function(){if(window.__mumbleMedia)return;"
+		+ "window.__mumbleMedia=new Set();const play=HTMLMediaElement.prototype.play;"
+		+ "HTMLMediaElement.prototype.play=function(){try{window.__mumbleMedia.add(this);"
+		+ "if(typeof window.__mumbleVolume==='number')this.volume=window.__mumbleVolume;"
+		+ "if(typeof window.__mumbleMuted==='boolean')this.muted=window.__mumbleMuted;}catch(e){}"
+		+ "return play.apply(this,arguments);};})();"
+	function installMediaTracker(view) {
+		if (!view || !view.userScripts || typeof WebEngine === "undefined" || typeof WebEngine.script !== "function")
+			return
+		const script = WebEngine.script()
+		script.name = "mumbleMediaTracker"
+		script.sourceCode = mediaTrackerSource
+		script.injectionPoint = WebEngineScript.DocumentCreation
+		script.worldId = WebEngineScript.MainWorld
+		script.runsOnSubFrames = true
+		view.userScripts.insert(script)
+	}
+
 	function playerScript(command, value) {
 		const provider = JSON.stringify(String(session ? session.provider : ""))
 		const animated = animationPresentation ? "true" : "false"
@@ -366,9 +387,9 @@ Rectangle {
 				: command === "seek"
 				? "const target=" + numericValue + ";if(isYt&&typeof yt.seekTo==='function'){yt.seekTo(target,true);return true;}if(media){media.currentTime=target;return true;}return false;"
 				: command === "volume"
-				? "const target=Math.max(0,Math.min(100," + numericValue + "));if(isYt&&typeof yt.setVolume==='function'){yt.setVolume(target);return true;}if(media){media.volume=target/100;return true;}return false;"
+				? "const target=Math.max(0,Math.min(100," + numericValue + "));window.__mumbleVolume=target/100;const tracked=Array.from(window.__mumbleMedia||[]);tracked.forEach(function(m){try{m.volume=target/100;}catch(e){}});if(isYt&&typeof yt.setVolume==='function'){yt.setVolume(target);return true;}if(media){media.volume=target/100;return true;}return tracked.length>0;"
 				: command === "mute"
-				? "const muted=" + (numericValue > 0 ? "true" : "false") + ";if(isYt){if(muted&&typeof yt.mute==='function')yt.mute();else if(!muted&&typeof yt.unMute==='function')yt.unMute();return true;}if(media){media.muted=muted;return true;}return false;"
+				? "const muted=" + (numericValue > 0 ? "true" : "false") + ";window.__mumbleMuted=muted;const tracked=Array.from(window.__mumbleMedia||[]);tracked.forEach(function(m){try{m.muted=muted;}catch(e){}});if(isYt){if(muted&&typeof yt.mute==='function')yt.mute();else if(!muted&&typeof yt.unMute==='function')yt.unMute();return true;}if(media){media.muted=muted;return true;}return tracked.length>0;"
 				: "const adaptiveError=String(window.__mumbleAdaptiveState&&window.__mumbleAdaptiveState.error||'');const playbackError=adaptiveError||String(window.__mumbleMediaPlayError||'');if(isYt){const state=yt.getPlayerState();return {position:Number(yt.getCurrentTime()||0),duration:Number(yt.getDuration()||0),paused:state!==1,error:playbackError};}"
 				  + "if(media)return {position:Number(media.currentTime||0),duration:isFinite(media.duration)?Number(media.duration):0,paused:!!media.paused,error:playbackError};return null;")
 			+ "})()"
@@ -1121,11 +1142,14 @@ Rectangle {
 			return
 		}
 		const generation = expectedGeneration === undefined ? _mediaGeneration : expectedGeneration
-		if (generation !== _mediaGeneration || !ready || !documentReady
-				|| !session.playbackControllable)
+		if (generation !== _mediaGeneration || !ready || !documentReady)
 			return
+		// A provider widget without playback control (SoundCloud, Spotify) still
+		// takes the session's volume through its tracked media elements.
 		runPlayerScript(playerScript("volume", session.volume), generation)
 		runPlayerScript(playerScript("mute", session.muted ? 1 : 0), generation)
+		if (!session.playbackControllable)
+			return
 		if (Number(session.position || 0) > 0.05)
 			runPlayerScript(playerScript("seek", session.position), generation)
 		const requestedState = _animationInitialPausePending
@@ -1419,6 +1443,7 @@ Rectangle {
 		sourceComponent: WebEngineView {
 			id: webPlayer
 			property int loadGeneration: -1
+			Component.onCompleted: inlinePlayer.installMediaTracker(webPlayer)
 			profile: inlinePlayer.mediaProfileFactory
 				? inlinePlayer.mediaProfileFactory.videoProfile : null
 			url: inlinePlayer.rendererDocumentUrl
