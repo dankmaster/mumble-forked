@@ -532,6 +532,9 @@ public:
 	bool deferredPresentationUpdatesPending() const;
 	void requestScopeReplacementPresentation();
 	void setPresentationBusy(bool busy);
+	// The v2 timeline does not render this model, so nothing would release a
+	// presentation hold; with the gate off the model is never busy.
+	void setPresentationGateEnabled(bool enabled);
 	ChatTimelinePresentationProxyModel *presentationModel();
 	ChatTimelinePresentationProxyModel *deferredPresentationModel();
 	Q_INVOKABLE bool deferredMessagePlainForMaterialization(const QString &messageId) const;
@@ -630,6 +633,7 @@ private:
 	qulonglong m_prependGeneration = 0;
 	QVariantList m_pendingPrependRows;
 	bool m_presentationBusy = false;
+	bool m_presentationGateEnabled = true;
 	bool m_deferredPresentationUpdateDrainScheduled = false;
 	QHash< QString, QVariantMap > m_deferredPresentationUpdates;
 	// Source updates for a fixed-height deferred row are not presentation work

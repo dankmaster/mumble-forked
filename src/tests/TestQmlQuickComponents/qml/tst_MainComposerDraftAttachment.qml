@@ -238,7 +238,7 @@ TestCase {
 	function test_jump_to_latest_does_not_overlay_a_message() {
 		// Its own layout row, sized independently of the button's visibility so the
 		// timeline never resizes when the reader leaves or reaches the bottom.
-		verify(/id:\s*jumpToLatestRow[\s\S]{0,200}readonly property bool reserved:\s*timeline\.count\s*>\s*0[\s\S]{0,120}Layout\.preferredHeight:\s*reserved[\s\S]{0,400}id:\s*jumpToLatestButton/.test(mainSource))
+		verify(/id:\s*jumpToLatestRow[\s\S]{0,200}readonly property bool reserved:\s*conversationView\s*\?\s*conversationView\.count\s*>\s*0[\s\S]{0,40}:\s*timeline\.count\s*>\s*0[\s\S]{0,120}Layout\.preferredHeight:\s*reserved[\s\S]{0,400}id:\s*jumpToLatestButton/.test(mainSource))
 		verify(!/id:\s*jumpToLatestRow[\s\S]{0,400}Layout\.preferredHeight:\s*(jumpToLatestButton\.)?visible/.test(mainSource))
 		verify(!/id:\s*jumpToLatestButton[\s\S]{0,180}parent:\s*timeline/.test(mainSource))
 	}
@@ -826,7 +826,7 @@ TestCase {
 	}
 
 	function test_chat_scroll_materializes_only_rows_that_have_heavy_content() {
-		verify(/id:\s*timeline[\s\S]*model:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*2[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*baseCacheBuffer[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*scopePresentationPending[\s\S]*maximumRichScrollRetentionBuffer[\s\S]*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
+		verify(/id:\s*timeline[\s\S]*model:\s*chatTimelineV2Enabled\s*\?\s*null\s*:\s*chatModel\.presentationModel[\s\S]*reuseItems:\s*true[\s\S]*baseCacheBuffer:[\s\S]*height\s*\*\s*2[\s\S]*richScrollRetentionBuffer:\s*0[\s\S]*richScrollRetentionTarget:\s*0[\s\S]*richScrollRetentionRampStep:\s*128[\s\S]*nearViewportPrefetchDistance:\s*baseCacheBuffer[\s\S]*maximumRichScrollRetentionBuffer:\s*18000[\s\S]*cacheBuffer:\s*scopePresentationPending[\s\S]*maximumRichScrollRetentionBuffer[\s\S]*Math\.max\(baseCacheBuffer,\s*richScrollRetentionBuffer\)/.test(mainSource))
 		verify(/onRichScrollInProgressChanged:[\s\S]*if\s*\(richScrollInProgress\)[\s\S]*richScrollRetentionTarget\s*=\s*Math\.min\(maximumRichScrollRetentionBuffer,[\s\S]*contentHeight\s*\+\s*height[\s\S]*richScrollRetentionRampTimer\.start\(\)/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]*richScrollRetentionRampTimer\.stop\(\)[\s\S]*richScrollRetentionBuffer\s*=\s*0[\s\S]*richScrollRetentionTarget\s*=\s*0/.test(mainSource))
 		verify(/function\s+beginScopeChange\(\)[\s\S]{0,900}chatModel\.presentationBusy\s*=\s*true/.test(mainSource))

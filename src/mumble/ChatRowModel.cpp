@@ -116,6 +116,35 @@ QVariant ChatRowModel::data(const QModelIndex &index, int role) const {
 		return {};
 	}
 	const ChatTimelineRow &row = m_rows.at(index.row());
+	if (role >= AvatarUrlRole && role <= CanDeleteRole) {
+		const auto extras = m_extras.constFind(row.key.identity());
+		if (extras == m_extras.cend()) {
+			switch (role) {
+				case AvatarUrlRole:
+					return QString();
+				case AttachmentsRole:
+					return QVariantList();
+				case PreviewRole:
+					return QVariantMap();
+				default:
+					return false;
+			}
+		}
+		switch (role) {
+			case AvatarUrlRole:
+				return extras->avatarUrl;
+			case AttachmentsRole:
+				return extras->attachments;
+			case PreviewRole:
+				return extras->preview;
+			case CanReplyRole:
+				return extras->canReply;
+			case CanReactRole:
+				return extras->canReact;
+			default:
+				return extras->canDelete;
+		}
+	}
 	switch (role) {
 		case MessageIdRole:
 			return row.key.messageId;
@@ -161,6 +190,8 @@ QVariant ChatRowModel::data(const QModelIndex &index, int role) const {
 			return row.deliveryLabel;
 		case DeliveryCanRetryRole:
 			return row.deliveryCanRetry;
+		case StableIdRole:
+			return QString::number(row.key.messageId);
 		default:
 			return {};
 	}
@@ -190,6 +221,13 @@ QHash< int, QByteArray > ChatRowModel::roleNames() const {
 		{ DeliveryStateRole, "deliveryState" },
 		{ DeliveryLabelRole, "deliveryLabel" },
 		{ DeliveryCanRetryRole, "deliveryCanRetry" },
+		{ StableIdRole, "stableId" },
+		{ AvatarUrlRole, "avatarUrl" },
+		{ AttachmentsRole, "attachments" },
+		{ PreviewRole, "preview" },
+		{ CanReplyRole, "canReply" },
+		{ CanReactRole, "canReact" },
+		{ CanDeleteRole, "canDelete" },
 	};
 }
 
@@ -305,6 +343,71 @@ void ChatRowModel::removeMessages(const QVector< quint64 > &identities) {
 	}
 	if (count() != countBefore) {
 		emit countChanged();
+	}
+}
+
+void ChatRowModel::setExtras(const QVariantMap &messageState) {
+	ChatTimelineRowKey identityOnly;
+	identityOnly.threadId  = messageState.value(QStringLiteral("threadId")).toUInt();
+	identityOnly.messageId = messageState.value(QStringLiteral("messageId")).toUInt();
+	if (identityOnly.messageId == 0) {
+		return;
+	}
+	Extras next;
+	next.avatarUrl   = messageState.value(QStringLiteral("avatarUrl")).toString();
+	next.attachments = messageState.value(QStringLiteral("attachments")).toList();
+	next.preview     = messageState.value(QStringLiteral("preview")).toMap();
+	next.canReply    = messageState.value(QStringLiteral("canReply")).toBool();
+	next.canReact    = messageState.value(QStringLiteral("canReact")).toBool();
+	next.canDelete   = messageState.value(QStringLiteral("canDelete")).toBool();
+	next.touched     = ++m_extrasSequence;
+
+	const quint64 identity = identityOnly.identity();
+	Extras &current        = m_extras[identity];
+	QList< int > roles;
+	if (current.avatarUrl != next.avatarUrl) {
+		roles << AvatarUrlRole;
+	}
+	if (current.attachments != next.attachments) {
+		roles << AttachmentsRole;
+	}
+	if (current.preview != next.preview) {
+		roles << PreviewRole;
+	}
+	if (current.canReply != next.canReply) {
+		roles << CanReplyRole;
+	}
+	if (current.canReact != next.canReact) {
+		roles << CanReactRole;
+	}
+	if (current.canDelete != next.canDelete) {
+		roles << CanDeleteRole;
+	}
+	current = std::move(next);
+	if (!roles.isEmpty()) {
+		const int row = rowForMessage(identityOnly.threadId, identityOnly.messageId);
+		if (row >= 0) {
+			emit dataChanged(index(row), index(row), roles);
+		}
+	}
+	pruneExtras();
+}
+
+void ChatRowModel::pruneExtras() {
+	// Keep extras for shown rows and for the most recent updates, which may be
+	// for rows the worker has not delivered yet.
+	constexpr qsizetype Limit = 4096;
+	constexpr quint64 Recent  = 1024;
+	if (m_extras.size() <= Limit) {
+		return;
+	}
+	const quint64 cutoff = m_extrasSequence > Recent ? m_extrasSequence - Recent : 0;
+	for (auto it = m_extras.begin(); it != m_extras.end();) {
+		if (it->touched < cutoff && !m_keyByIdentity.contains(it.key())) {
+			it = m_extras.erase(it);
+		} else {
+			++it;
+		}
 	}
 }
 

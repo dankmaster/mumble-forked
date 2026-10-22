@@ -10,6 +10,7 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QHash>
+#include <QtCore/QVariantMap>
 
 // Typed rows of the v2 chat timeline, newest first: row 0 is the bottom of a
 // ListView laid out bottom to top, live messages insert at row 0 and older
@@ -44,6 +45,13 @@ public:
 		DeliveryStateRole,
 		DeliveryLabelRole,
 		DeliveryCanRetryRole,
+		StableIdRole,
+		AvatarUrlRole,
+		AttachmentsRole,
+		PreviewRole,
+		CanReplyRole,
+		CanReactRole,
+		CanDeleteRole,
 	};
 
 	explicit ChatRowModel(QObject *parent = nullptr);
@@ -60,6 +68,11 @@ public:
 	// replaced row reports only the roles that changed.
 	void upsertRows(QVector< ChatTimelineRow > rows);
 	void removeMessages(const QVector< quint64 > &identities);
+	// Presentation state that still comes from the current message pipeline
+	// (avatar, attachment and preview image sources, permissions) until the
+	// v2 asset path replaces it. Takes that pipeline's message state; it may
+	// arrive before or after the row itself.
+	void setExtras(const QVariantMap &messageState);
 
 	const ChatTimelineRow &rowAt(int row) const { return m_rows.at(row); }
 	Q_INVOKABLE int rowForMessage(quint32 threadId, quint32 messageId) const;
@@ -74,10 +87,23 @@ private:
 	int lowerBound(const ChatTimelineRowKey &key, int from = 0) const;
 	void insertRun(int position, QVector< ChatTimelineRow > &run);
 	static QList< int > changedRoles(const ChatTimelineRow &before, const ChatTimelineRow &after);
+	void pruneExtras();
+
+	struct Extras {
+		QString avatarUrl;
+		QVariantList attachments;
+		QVariantMap preview;
+		bool canReply   = false;
+		bool canReact   = false;
+		bool canDelete  = false;
+		quint64 touched = 0;
+	};
 
 	QVector< ChatTimelineRow > m_rows;
 	QHash< quint64, ChatTimelineRowKey > m_keyByIdentity;
 	QString m_scopeToken;
+	QHash< quint64, Extras > m_extras;
+	quint64 m_extrasSequence = 0;
 };
 
 #endif // MUMBLE_MUMBLE_CHATROWMODEL_H_

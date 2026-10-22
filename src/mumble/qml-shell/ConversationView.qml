@@ -1,0 +1,255 @@
+import QtQuick
+import QtQuick.Controls
+import Mumble.Theme 1.0
+
+// The v2 chat timeline (docs/chat-timeline-v2-plan.md, phase 3). Rows come
+// newest first from chatTimelineV2 and are laid out bottom to top, so the newest
+// message sits at the bottom without scrolling and older pages grow upwards.
+//
+// Scrolling rules:
+// - The view follows the newest message only while the reader is there. That
+//   intent changes through the reader's own scrolling or an explicit jump, never
+//   through layout the list does itself.
+// - While following, growth below eases the view down and ends with a snap.
+// - While reading history, a row at or below the reading point that changes
+//   height moves the view by the same amount in the same frame.
+ListView {
+	id: view
+	objectName: "conversationView"
+
+	// The shell's root item: shared helpers for avatars, attachments, previews
+	// and the quick reaction popup.
+	property var host: null
+	property bool followTail: true
+	property bool following: false
+	property double liveInsertAt: 0
+	property int liveInsertLast: -1
+	property var hydrationRequested: ({})
+	property var hydrationQueue: []
+	property bool hydrationHighPriority: false
+	readonly property bool atLatest: followTail || tailY() - contentY < 4
+	readonly property ListView rowView: view
+	readonly property bool localScope: String(chatTimelineV2.scopeToken || "").startsWith("local:")
+
+	function tailY() {
+		return originY + contentHeight + bottomMargin - height
+	}
+	function jumpToLatest() {
+		followTail = true
+	}
+	function arrivalActive(rowIndex) {
+		return rowIndex <= liveInsertLast && Date.now() - liveInsertAt < 400
+	}
+	function compensateRowResize(rowIndex, delta) {
+		if (followTail || delta === 0)
+			return
+		const anchorIndex = indexAt(width / 2, contentY + height / 2)
+		if (anchorIndex < 0 || rowIndex > anchorIndex)
+			return
+		following = true
+		contentY -= delta
+		following = false
+	}
+	function loadOlderIfNeeded() {
+		if (!visible || count === 0 || localScope || !activeScope.canLoadOlder
+				|| activeScope.loadingState === "older")
+			return
+		if (contentY - originY < height)
+			uiCommands.requestOlderMessages()
+	}
+	function queueHydration(stableId, item, force) {
+		const id = String(stableId || "")
+		if (localScope || !/^[1-9][0-9]*$/.test(id) || (hydrationRequested[id] && !force))
+			return
+		hydrationRequested[id] = true
+		hydrationQueue.push(id)
+		if (item && item.y + item.height > contentY && item.y < contentY + height)
+			hydrationHighPriority = true
+		if (!hydrationTimer.running)
+			hydrationTimer.start()
+	}
+	function openMessageActions(rowItem, anchorItem, x, y) {
+		messageActions.targetId = rowItem.stableId
+		messageActions.targetText = rowItem.plainText
+		messageActions.targetReactions = rowItem.reactionsForQuickBar()
+		messageActions.targetAnchor = anchorItem
+		messageActions.targetCanReply = rowItem.canReply
+		messageActions.targetCanReact = rowItem.canReact
+		messageActions.targetCanDelete = rowItem.canDelete
+		messageActions.targetCanRetry = rowItem.deliveryCanRetry
+		messageActions.popup(anchorItem, x, y)
+	}
+	function resetForScope() {
+		followTail = true
+		liveInsertLast = -1
+		hydrationRequested = ({})
+		hydrationQueue = []
+		hydrationHighPriority = false
+		messageActions.close()
+	}
+
+	model: chatTimelineV2
+	verticalLayoutDirection: ListView.BottomToTop
+	reuseItems: true
+	cacheBuffer: Math.max(0, Math.round(height))
+	boundsBehavior: Flickable.StopAtBounds
+	maximumFlickVelocity: 7000
+	flickDeceleration: 3500
+	pixelAligned: true
+	clip: true
+	activeFocusOnTab: true
+	Accessible.role: Accessible.List
+	Accessible.name: qsTr("Messages")
+
+	// Geometry binds to rowView, never to the row's own view property, so the
+	// first layout of a new row already uses the real lane width.
+	delegate: ConversationRow {
+		view: rowView
+		width: rowView.width
+		laneAvailableWidth: Math.max(1, rowView.width - rowView.leftMargin - rowView.rightMargin - Theme.space4)
+		laneMaximumWidth: rowView.host ? rowView.host.conversationLaneMaximumWidth : Theme.chatLaneMaximumWidth
+	}
+
+	onContentYChanged: Qt.callLater(loadOlderIfNeeded)
+	onCountChanged: Qt.callLater(loadOlderIfNeeded)
+	onMovementStarted: followTail = false
+	onMovementEnded: followTail = tailY() - contentY < 4
+	// Far jumps cut straight to the newest page; short distances ease in below.
+	onFollowTailChanged: if (followTail && tailY() - contentY > height * 2) positionViewAtBeginning()
+	onAtLatestChanged: markReadTimer.restart()
+
+	Connections {
+		target: chatTimelineV2
+		function onModelReset() {
+			view.resetForScope()
+		}
+		function onRowsInserted(parent, first, last) {
+			if (first === 0 && view.count > last + 1) {
+				view.liveInsertAt = Date.now()
+				view.liveInsertLast = last
+				markReadTimer.restart()
+			}
+		}
+	}
+	Connections {
+		target: composer
+		function onSendingChanged() {
+			if (composer.sending)
+				view.followTail = true
+		}
+	}
+	Connections {
+		target: activeScope
+		function onUnreadCountChanged() {
+			markReadTimer.restart()
+		}
+	}
+	Connections {
+		target: Qt.application
+		function onStateChanged() {
+			markReadTimer.restart()
+		}
+	}
+
+	FrameAnimation {
+		id: tailFollower
+		running: view.visible && view.followTail && view.tailY() - view.contentY > 0.5
+		onTriggered: {
+			const gap = view.tailY() - view.contentY
+			const step = gap * (1 - Math.exp(-frameTime * 16))
+			view.following = true
+			// pixelAligned rounds sub-pixel steps away, so finish with a snap.
+			view.contentY = step < 1 ? view.tailY() : view.contentY + step
+			view.following = false
+		}
+	}
+
+	Timer {
+		id: hydrationTimer
+		interval: 60
+		onTriggered: {
+			const batch = view.hydrationQueue.splice(0, 32)
+			const highPriority = view.hydrationHighPriority
+			view.hydrationHighPriority = false
+			const scopeToken = String(activeScope.scopeToken || "")
+			if (batch.length > 0 && scopeToken.length > 0)
+				uiCommands.requestPreviewHydration(scopeToken, batch, highPriority)
+			if (view.hydrationQueue.length > 0)
+				start()
+		}
+	}
+
+	Timer {
+		id: markReadTimer
+		interval: 400
+		onTriggered: {
+			if (view.visible && view.atLatest && Qt.application.state === Qt.ApplicationActive
+					&& Number(activeScope.unreadCount || 0) > 0)
+				uiCommands.markActiveScopeRead()
+		}
+	}
+
+	ScrollBar.vertical: ModernScrollBar {}
+
+	ModernMenu {
+		id: messageActions
+		objectName: "conversationMessageActions"
+		accessibleName: qsTr("Message actions")
+		property string targetId: ""
+		property string targetText: ""
+		property var targetReactions: []
+		property var targetAnchor: null
+		property bool targetCanReply: false
+		property bool targetCanReact: false
+		property bool targetCanDelete: false
+		property bool targetCanRetry: false
+		onClosed: targetId = ""
+
+		PayloadMenuItem {
+			payload: ({ "kind": "action", "id": "message.reply", "label": qsTr("Reply"), "icon": "reply" })
+			visible: messageActions.targetCanReply
+			height: visible ? rowImplicitHeight : 0
+			onActionRequested: uiCommands.replyToMessage(messageActions.targetId)
+		}
+		PayloadMenuItem {
+			payload: ({ "kind": "action", "id": "message.react", "label": qsTr("Add reaction"), "icon": "reaction" })
+			visible: messageActions.targetCanReact
+			height: visible ? rowImplicitHeight : 0
+			onActionRequested: {
+				if (view.host && messageActions.targetAnchor)
+					view.host.showQuickReactions(messageActions.targetId, -1, messageActions.targetAnchor,
+						messageActions.targetReactions)
+			}
+		}
+		PayloadMenuItem {
+			payload: ({ "kind": "action", "id": "message.copy", "label": qsTr("Copy text"), "icon": "copy" })
+			visible: messageActions.targetText.length > 0
+			height: visible ? rowImplicitHeight : 0
+			onActionRequested: {
+				clipboardHelper.text = messageActions.targetText
+				clipboardHelper.selectAll()
+				clipboardHelper.copy()
+				clipboardHelper.text = ""
+			}
+		}
+		PayloadMenuItem {
+			payload: ({ "kind": "action", "id": "message.retry", "label": qsTr("Retry"), "icon": "retry" })
+			visible: messageActions.targetCanRetry
+			height: visible ? rowImplicitHeight : 0
+			onActionRequested: uiCommands.retryMessage(messageActions.targetId)
+		}
+		PayloadMenuItem {
+			payload: ({ "kind": "action", "id": "message.delete", "label": qsTr("Delete"), "icon": "delete",
+				"tone": "danger" })
+			visible: messageActions.targetCanDelete
+			height: visible ? rowImplicitHeight : 0
+			onActionRequested: uiCommands.deleteMessage(messageActions.targetId)
+		}
+	}
+
+	TextEdit {
+		id: clipboardHelper
+		visible: false
+		Accessible.ignored: true
+	}
+}

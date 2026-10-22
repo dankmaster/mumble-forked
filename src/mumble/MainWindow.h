@@ -548,6 +548,7 @@ public:
 	enum class ModernShellMessageBuildMode : unsigned char { Full, FastFirstPaint };
 
 	void syncChatTimelineV2Log(const PersistentChatTarget &target);
+	void mirrorChatTimelineV2Extras(const QVariantMap &messageState);
 	QVector< ChatLocalEntry > chatTimelineV2DirectEntries(const ModernDirectMessageConversation &conversation) const;
 
 	bool hasPersistentChatCapabilities() const;

@@ -998,6 +998,122 @@ private:
 	Qt::ScrollPhase m_lastPhase = Qt::NoScrollPhase;
 };
 
+// Rows shaped like ChatRowModel (the v2 timeline) for ConversationView tests:
+// newest first, with every role the row delegate requires.
+class ConversationFixtureModel final : public QAbstractListModel {
+	Q_OBJECT
+	Q_PROPERTY(int count READ count NOTIFY countChanged)
+	Q_PROPERTY(QString scopeToken READ scopeToken NOTIFY scopeTokenChanged)
+
+public:
+	explicit ConversationFixtureModel(QObject *parent = nullptr) : QAbstractListModel(parent) {}
+
+	int rowCount(const QModelIndex &parent = QModelIndex()) const override {
+		return parent.isValid() ? 0 : static_cast< int >(m_rows.size());
+	}
+	QVariant data(const QModelIndex &index, int role) const override {
+		if (!index.isValid() || index.row() >= m_rows.size()) return {};
+		const QByteArray name = roleNames().value(role);
+		const QVariantMap &row = m_rows.at(index.row());
+		const QString key = QString::fromLatin1(name);
+		return row.contains(key) ? row.value(key) : defaults().value(key);
+	}
+	QHash< int, QByteArray > roleNames() const override {
+		QHash< int, QByteArray > names;
+		int role = Qt::UserRole + 1;
+		for (const QString &key : defaults().keys()) names.insert(role++, key.toLatin1());
+		return names;
+	}
+	int count() const { return static_cast< int >(m_rows.size()); }
+	QString scopeToken() const { return m_scopeToken; }
+
+	Q_INVOKABLE void resetRows(const QString &scopeToken, const QVariantList &rows) {
+		beginResetModel();
+		m_rows.clear();
+		for (const QVariant &row : rows) m_rows.push_back(row.toMap());
+		m_scopeToken = scopeToken;
+		endResetModel();
+		emit scopeTokenChanged();
+		emit countChanged();
+	}
+	Q_INVOKABLE void insertRows(int position, const QVariantList &rows) {
+		if (rows.isEmpty() || position < 0 || position > m_rows.size()) return;
+		beginInsertRows(QModelIndex(), position, position + static_cast< int >(rows.size()) - 1);
+		for (int i = 0; i < rows.size(); ++i) m_rows.insert(position + i, rows.at(i).toMap());
+		endInsertRows();
+		emit countChanged();
+	}
+	Q_INVOKABLE void updateRow(int position, const QVariantMap &changes) {
+		if (position < 0 || position >= m_rows.size()) return;
+		for (auto it = changes.cbegin(); it != changes.cend(); ++it) m_rows[position].insert(it.key(), it.value());
+		emit dataChanged(index(position), index(position));
+	}
+
+signals:
+	void countChanged();
+	void scopeTokenChanged();
+
+private:
+	static const QVariantMap &defaults() {
+		static const QVariantMap values{
+			{ QStringLiteral("messageId"), 0 },		   { QStringLiteral("threadId"), 0 },
+			{ QStringLiteral("stableId"), QString() },	   { QStringLiteral("kind"), QStringLiteral("text") },
+			{ QStringLiteral("authorName"), QString() },	   { QStringLiteral("own"), false },
+			{ QStringLiteral("timeText"), QString() },	   { QStringLiteral("dateLabel"), QString() },
+			{ QStringLiteral("groupStart"), true },		   { QStringLiteral("edited"), false },
+			{ QStringLiteral("bodyBlocks"), QVariantList() }, { QStringLiteral("plainText"), QString() },
+			{ QStringLiteral("media"), QVariantList() },	   { QStringLiteral("card"), QVariantMap() },
+			{ QStringLiteral("reactions"), QVariantList() },  { QStringLiteral("replyActor"), QString() },
+			{ QStringLiteral("replySnippet"), QString() },	   { QStringLiteral("deliveryState"), QString() },
+			{ QStringLiteral("deliveryLabel"), QString() },   { QStringLiteral("deliveryCanRetry"), false },
+			{ QStringLiteral("avatarUrl"), QString() },	   { QStringLiteral("attachments"), QVariantList() },
+			{ QStringLiteral("preview"), QVariantMap() },	   { QStringLiteral("canReply"), false },
+			{ QStringLiteral("canReact"), false },		   { QStringLiteral("canDelete"), false },
+		};
+		return values;
+	}
+
+	QList< QVariantMap > m_rows;
+	QString m_scopeToken;
+};
+
+class FakeActiveScope final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(QString scopeToken MEMBER m_scopeToken NOTIFY changed)
+	Q_PROPERTY(bool activity MEMBER m_activity NOTIFY changed)
+	Q_PROPERTY(bool canLoadOlder MEMBER m_canLoadOlder NOTIFY changed)
+	Q_PROPERTY(QString loadingState MEMBER m_loadingState NOTIFY changed)
+	Q_PROPERTY(qulonglong unreadCount MEMBER m_unreadCount NOTIFY unreadCountChanged)
+
+public:
+	explicit FakeActiveScope(QObject *parent = nullptr) : QObject(parent) {}
+
+signals:
+	void changed();
+	void unreadCountChanged();
+
+private:
+	QString m_scopeToken = QStringLiteral("channel:1");
+	bool m_activity      = false;
+	bool m_canLoadOlder  = false;
+	QString m_loadingState;
+	qulonglong m_unreadCount = 0;
+};
+
+class FakeComposer final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(bool sending MEMBER m_sending NOTIFY sendingChanged)
+
+public:
+	explicit FakeComposer(QObject *parent = nullptr) : QObject(parent) {}
+
+signals:
+	void sendingChanged();
+
+private:
+	bool m_sending = false;
+};
+
 class QmlQuickComponentsSetup final : public QObject {
 	Q_OBJECT
 
@@ -1041,6 +1157,9 @@ public slots:
 		auto *dialogState = new FakeDialogState(engine);
 		engine->rootContext()->setContextProperty(QStringLiteral("dialogState"), dialogState);
 		engine->rootContext()->setContextProperty(QStringLiteral("uiCommands"), new FakeUiCommands(engine));
+		engine->rootContext()->setContextProperty(QStringLiteral("chatTimelineV2"), new ConversationFixtureModel(engine));
+		engine->rootContext()->setContextProperty(QStringLiteral("activeScope"), new FakeActiveScope(engine));
+		engine->rootContext()->setContextProperty(QStringLiteral("composer"), new FakeComposer(engine));
 		engine->rootContext()->setContextProperty(QStringLiteral("manualPlugin"),
 											 new FakeManualPluginController(engine));
 		engine->rootContext()->setContextProperty(QStringLiteral("accessibilityProbe"),

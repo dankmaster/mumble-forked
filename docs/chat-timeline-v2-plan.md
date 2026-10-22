@@ -349,6 +349,25 @@ switch, at feature parity with today's timeline:
 **Exit:** the visual fixtures render every row kind; the parity checklist is
 complete; the in-client benchmark meets every gate on fixture data.
 
+**Status (first slice):** `ConversationView.qml`, `ConversationRow.qml` and
+`ChatBodyBlocks.qml` replace the timeline when `MUMBLE_CHAT_TIMELINE_V2=1`.
+Rows are built on `ChatMessageFrame` and reuse `AttachmentGallery`,
+`RichPreviewCard`, the quick reaction popup, `ModernMenu`/`PayloadMenuItem` and
+the existing `uiCommands`. Until phase 4, avatar, attachment and preview
+sources come from the current message pipeline: `MainWindow` mirrors each
+message state it builds into `ChatRowModel::setExtras`, and visible rows ask
+for hydration through `uiCommands.requestPreviewHydration`. The current
+timeline's presentation gate is off under the switch, since nothing renders it.
+Covered: header and grouping, date separators, reply context, reactions and
+quick reactions, delivery state and retry, delete, copy text, attachments, link
+cards, code/quote/heading blocks, server-log rows, jump to latest, paging,
+mark read, follow-the-newest with eased snap, resize compensation and the
+in-row arrival animation (`tst_ConversationView`). Still open: unread marker,
+jump to the replied message, deleted-message state, search highlight, empty and
+loading states, images inline in legacy HTML bodies, avatars and actions for
+direct messages shown in the main view, accessibility gate, and automation and
+visual-fixture hooks.
+
 ## Phase 4: media and playback
 
 1. Introduce `MediaBox.qml` on top of `QmlAsyncImageProvider`, which already

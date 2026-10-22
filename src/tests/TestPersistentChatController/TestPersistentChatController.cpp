@@ -235,6 +235,7 @@ private slots:
 	void rowBuilderMarksSystemAndOwnMessages();
 	void rowBuilderDecoratesAcrossPageBoundaries();
 	void rowModelKeepsNewestFirstAndReportsExactRoles();
+	void rowModelAppliesExtrasBeforeAndAfterRows();
 	void timelineFeedMirrorsActiveScope();
 	void timelineFeedDropsWorkForRetiredScope();
 	void rowBuilderBuildsLogLinesAndDirectMessages();
@@ -1298,6 +1299,38 @@ void TestPersistentChatController::rowModelKeepsNewestFirstAndReportsExactRoles(
 
 	model.resetScope(QStringLiteral("3:91"));
 	QCOMPARE(model.count(), 0);
+}
+
+void TestPersistentChatController::rowModelAppliesExtrasBeforeAndAfterRows() {
+	ChatRowModel model;
+	model.resetScope(QStringLiteral("3:90"));
+	const auto state = [](quint32 id, const QString &avatar, bool canReply) {
+		return QVariantMap{ { QStringLiteral("threadId"), id },
+							{ QStringLiteral("messageId"), id },
+							{ QStringLiteral("avatarUrl"), avatar },
+							{ QStringLiteral("canReply"), canReply },
+							{ QStringLiteral("attachments"), QVariantList{ QVariantMap{ { QStringLiteral("id"), 7 } } } } };
+	};
+	const auto roleValue = [&model](int row, int role) { return model.data(model.index(row), role); };
+
+	// Extras for a row the worker has not delivered yet are kept until it arrives.
+	model.setExtras(state(2, QStringLiteral("image://mumble/avatar/2"), true));
+	model.upsertRows({ rowWithKey(1, 100), rowWithKey(2, 200) });
+	QCOMPARE(roleValue(0, ChatRowModel::StableIdRole).toString(), QStringLiteral("2"));
+	QCOMPARE(roleValue(0, ChatRowModel::AvatarUrlRole).toString(), QStringLiteral("image://mumble/avatar/2"));
+	QVERIFY(roleValue(0, ChatRowModel::CanReplyRole).toBool());
+	QCOMPARE(roleValue(0, ChatRowModel::AttachmentsRole).toList().size(), 1);
+	QVERIFY(roleValue(1, ChatRowModel::AvatarUrlRole).toString().isEmpty());
+	QVERIFY(!roleValue(1, ChatRowModel::CanReplyRole).toBool());
+
+	// Later extras for a shown row report only the roles that changed.
+	QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+	model.setExtras(state(2, QStringLiteral("image://mumble/avatar/2"), true));
+	QCOMPARE(changed.size(), 0);
+	model.setExtras(state(2, QStringLiteral("image://mumble/avatar/2"), false));
+	QCOMPARE(changed.size(), 1);
+	QCOMPARE(changed.first().at(0).toModelIndex().row(), 0);
+	QCOMPARE(qvariant_cast< QList< int > >(changed.first().at(2)), (QList< int >{ ChatRowModel::CanReplyRole }));
 }
 
 void TestPersistentChatController::timelineFeedMirrorsActiveScope() {

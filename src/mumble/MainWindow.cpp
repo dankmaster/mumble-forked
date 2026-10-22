@@ -49,6 +49,7 @@
 #		include "ModernUiAutomationServer.h"
 #	endif
 #include "ChatRowBuilder.h"
+#include "ChatRowModel.h"
 #include "ChatTimelineFeed.h"
 #include "PersistentChatController.h"
 #include "PersistentChatGateway.h"
@@ -26036,6 +26037,7 @@ QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarge
 
 		messages.push_back(buildModernShellCachedMessageState(m_persistentChatMessages[i], target, canReply, canReact,
 															  canDeleteMessages, buildMode));
+		mirrorChatTimelineV2Extras(messages.constLast().toMap());
 	}
 	appendModernShellConnectTrace(QStringLiteral("buildModernShellMessageStates scope=%1 id=%2 count=%3 begin=%4 end=%5 mode=%6 ms=%7")
 									  .arg(static_cast< int >(target.scope))
@@ -27611,6 +27613,7 @@ void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) 
 	const bool canDeleteMessages  = canDeletePersistentChatMessages(target, true);
 	const QVariantMap state =
 		buildModernShellCachedMessageState(message, target, canReply, canReact, canDeleteMessages);
+	mirrorChatTimelineV2Extras(state);
 	const ChatTimelineModel::MessageMutation mutation = m_qmlShellHost->chatModel()->applyMessage(state);
 	if (mutation == ChatTimelineModel::MessageMutation::Inserted)
 		mumble::chatperf::recordValue("qml.chat.append.direct", 1);
@@ -30878,6 +30881,12 @@ void MainWindow::initializeChatTimelineV2Feed() {
 	m_chatTimelineV2DirectFeed->setOptionsProvider(ownOptions);
 }
 
+
+void MainWindow::mirrorChatTimelineV2Extras(const QVariantMap &messageState) {
+	if (m_chatTimelineV2Feed && m_qmlShellHost) {
+		m_qmlShellHost->chatTimelineV2Model()->setExtras(messageState);
+	}
+}
 
 void MainWindow::syncChatTimelineV2Log(const PersistentChatTarget &target) {
 	if (!m_chatTimelineV2Feed || (!target.serverLog && !target.ephemeralTextPath)) {

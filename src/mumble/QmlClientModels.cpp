@@ -4005,7 +4005,13 @@ void ChatTimelineModel::requestScopeReplacementPresentation() {
 	emit scopeReplacementPresentationRequested();
 }
 
+void ChatTimelineModel::setPresentationGateEnabled(const bool enabled) {
+	m_presentationGateEnabled = enabled;
+	if (!enabled) setPresentationBusy(false);
+}
+
 void ChatTimelineModel::setPresentationBusy(bool busy) {
+	busy = busy && m_presentationGateEnabled;
 	if (m_presentationBusy == busy) return;
 	m_presentationBusy = busy;
 	emit presentationBusyChanged();

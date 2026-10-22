@@ -69,6 +69,9 @@
 	<file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>
 	<file alias="WatchTogetherStage.qml">qml-shell/WatchTogetherStage.qml</file>
 	<file alias="ChatMessageFrame.qml">qml-shell/ChatMessageFrame.qml</file>
+	<file alias="ChatBodyBlocks.qml">qml-shell/ChatBodyBlocks.qml</file>
+	<file alias="ConversationRow.qml">qml-shell/ConversationRow.qml</file>
+	<file alias="ConversationView.qml">qml-shell/ConversationView.qml</file>
 	<file alias="QuickReactionBar.qml">qml-shell/QuickReactionBar.qml</file>
 	<file alias="RichMessageBody.qml">qml-shell/RichMessageBody.qml</file>
 	<file alias="AttachmentGallery.qml">qml-shell/AttachmentGallery.qml</file>

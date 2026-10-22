@@ -3738,7 +3738,9 @@ ApplicationWindow {
 					objectName: "chatTimeline"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    model: chatModel.presentationModel
+					// The v2 timeline replaces this view behind its development switch.
+					visible: !chatTimelineV2Enabled
+                    model: chatTimelineV2Enabled ? null : chatModel.presentationModel
 					// The auto-connected scope can already be populated before the
 					// activeScope signal connection exists. Start the same bounded
 					// presentation transaction for that initial scope explicitly.
@@ -13519,6 +13521,22 @@ ApplicationWindow {
 					}
                 }
 
+				Loader {
+					id: conversationViewLoader
+					objectName: "conversationViewLoader"
+					Layout.fillWidth: true
+					Layout.fillHeight: true
+					active: chatTimelineV2Enabled
+					visible: active
+					sourceComponent: ConversationView {
+						host: root
+						leftMargin: root.timelineHorizontalMargin
+						rightMargin: root.timelineHorizontalMargin
+						topMargin: activeScope.activity ? Theme.space1 : root.timelineVerticalMargin
+						bottomMargin: Math.max(Theme.space2, root.timelineVerticalMargin - jumpToLatestRow.height)
+					}
+				}
+
 				// Keep this navigation action in its own layout row. A floating pill on
 				// top of the viewport obscured the newest visible message, especially in
 				// compact layouts and immediately after history prepends. The row keeps
@@ -13527,7 +13545,9 @@ ApplicationWindow {
 				Item {
 					id: jumpToLatestRow
 					objectName: "jumpToLatestRow"
-					readonly property bool reserved: timeline.count > 0
+					readonly property var conversationView: conversationViewLoader.item
+					readonly property bool reserved: conversationView ? conversationView.count > 0
+						: timeline.count > 0
 					Layout.fillWidth: true
 					Layout.preferredHeight: reserved
 						? jumpToLatestButton.implicitHeight + jumpToLatestButton.timelineTopMargin
@@ -13542,8 +13562,9 @@ ApplicationWindow {
 						anchors.right: parent.right
 						anchors.rightMargin: Theme.space4
 						y: timelineTopMargin
-						visible: jumpToLatestRow.reserved && !timeline.stickToBottom
-							&& !timeline.scopePresentationPending
+						visible: jumpToLatestRow.reserved && (jumpToLatestRow.conversationView
+							? !jumpToLatestRow.conversationView.atLatest
+							: !timeline.stickToBottom && !timeline.scopePresentationPending)
 						dense: true
 						tone: timeline.pendingTailMessageCount > 0 ? "accent" : "neutral"
 						text: timeline.pendingTailMessageCount > 0
@@ -13553,6 +13574,10 @@ ApplicationWindow {
 							? qsTr("Scroll to %n new message(s)", "", timeline.pendingTailMessageCount)
 							: qsTr("Scroll to the newest message")
 						onClicked: {
+							if (jumpToLatestRow.conversationView) {
+								jumpToLatestRow.conversationView.jumpToLatest()
+								return
+							}
 							timeline.releasePrependAnchor()
 							timeline.releaseViewportAnchor()
 							timeline.releaseTopAnchor()
