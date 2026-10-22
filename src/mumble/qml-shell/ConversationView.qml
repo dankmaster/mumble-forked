@@ -33,6 +33,12 @@ ListView {
 	// never compensated while held.
 	readonly property bool scrollbarDragging: verticalScrollBar.pressed
 	readonly property ListView rowView: view
+	// A message the reader jumped to (search match or replied message) is
+	// outlined briefly.
+	property string flashStableId: ""
+	property int pendingRevealThread: 0
+	property int pendingRevealMessage: 0
+	property int pendingRevealPages: 0
 	readonly property bool localScope: String(chatTimelineV2.scopeToken || "").startsWith("local:")
 
 	function tailY() {
@@ -83,12 +89,111 @@ ListView {
 		messageActions.targetCanRetry = rowItem.deliveryCanRetry
 		messageActions.popup(anchorItem, x, y)
 	}
+	function revealRow(row, stableId) {
+		if (row < 0 || row >= count)
+			return false
+		followTail = false
+		positionViewAtIndex(row, ListView.Center)
+		flashStableId = String(stableId || "")
+		flashTimer.restart()
+		return true
+	}
+	// Scrolls to a message, paging older history in until it is loaded or the
+	// history ends.
+	function revealMessage(threadId, messageId) {
+		pendingRevealThread = 0
+		const row = chatTimelineV2.rowForMessage(threadId, messageId)
+		if (revealRow(row, String(messageId)))
+			return true
+		if (localScope || !activeScope.canLoadOlder)
+			return false
+		pendingRevealThread = threadId
+		pendingRevealMessage = messageId
+		pendingRevealPages = 20
+		followTail = false
+		uiCommands.requestOlderMessages()
+		return false
+	}
+	function continuePendingReveal() {
+		if (pendingRevealThread === 0)
+			return
+		const row = chatTimelineV2.rowForMessage(pendingRevealThread, pendingRevealMessage)
+		if (row >= 0) {
+			pendingRevealThread = 0
+			revealRow(row, String(pendingRevealMessage))
+		} else if (--pendingRevealPages > 0 && activeScope.canLoadOlder && activeScope.loadingState !== "older") {
+			uiCommands.requestOlderMessages()
+		} else if (!activeScope.canLoadOlder || pendingRevealPages <= 0) {
+			pendingRevealThread = 0
+		}
+	}
+	function firstVisibleRow() {
+		let best = null
+		for (let y = contentY + 1; y < contentY + height; y += 8) {
+			const index = indexAt(width / 2, y)
+			if (index >= 0) {
+				best = itemAtIndex(index)
+				break
+			}
+		}
+		return best
+	}
+	// Automation and visual-fixture readiness, in the shape the shell's
+	// timelinePresentationState() reports for the current timeline.
+	function presentationState() {
+		const first = firstVisibleRow()
+		const visibleRows = []
+		for (let y = contentY; y < contentY + height; ) {
+			const index = indexAt(width / 2, y + 1)
+			const item = index >= 0 ? itemAtIndex(index) : null
+			if (!item) {
+				y += 8
+				continue
+			}
+			visibleRows.push({ "id": String(item.stableId || ""), "y": item.y - contentY, "height": item.height })
+			y = item.y + item.height
+		}
+		const settled = !moving && !flicking && !tailFollower.running && hydrationQueue.length === 0
+		return {
+			"scopeToken": String(activeScope.scopeToken || ""),
+			"generation": 0,
+			"count": count,
+			"presentationPending": false,
+			"presentationFinalizing": false,
+			"scopeResetPending": false,
+			"stablePresentationReady": true,
+			"stableFrameCommitted": true,
+			"stableFrameConsecutiveCount": 2,
+			"stableFrameCommittedAt": Date.now(),
+			"visibleFrameCommitted": true,
+			"settled": settled,
+			"firstVisibleId": first ? String(first.stableId || "") : "",
+			"firstVisibleOffset": first ? first.y - contentY : 0,
+			"contentY": contentY,
+			"followTail": followTail,
+			"visibleRows": visibleRows,
+			"visibleDeferredSummaryCount": 0,
+			"visibleBlankPresentationCount": 0,
+			"visibleBlankPreviewSurfaceCount": 0,
+			"visiblePresentationHeightPendingCount": 0,
+			"visiblePresentationHeightMismatchCount": 0,
+			"maximumVisiblePresentationHeightError": 0,
+			"presentationFastPath": false,
+			"sparseBottomAlignmentActive": false,
+			"sparseBottomAlignmentError": 0,
+			"sparseTailContentYError": 0,
+			"pendingHydrationCount": hydrationQueue.length,
+			"historyLoaderVisible": !!footerItem && footerItem.height > 0
+		}
+	}
 	function resetForScope() {
 		followTail = true
 		liveInsertLast = -1
 		hydrationRequested = ({})
 		hydrationQueue = []
 		hydrationHighPriority = false
+		pendingRevealThread = 0
+		flashStableId = ""
 		messageActions.close()
 	}
 
@@ -112,10 +217,44 @@ ListView {
 		width: rowView.width
 		laneAvailableWidth: Math.max(1, rowView.width - rowView.leftMargin - rowView.rightMargin - Theme.space4)
 		laneMaximumWidth: rowView.host ? rowView.host.conversationLaneMaximumWidth : Theme.chatLaneMaximumWidth
+		searchCurrent: stableId.length > 0 && (stableId === rowView.flashStableId
+			|| (!!rowView.host && rowView.host.conversationSearchOpen
+				&& stableId === String(chatTimelineV2.currentMatchStableId || "")))
+		accessibilityViewportVisible: y + height > rowView.contentY && y < rowView.contentY + rowView.height
+		accessibilitySuppressed: !!rowView.host && rowView.host.backgroundAccessibilitySuppressed === true
+	}
+
+	// With the list laid out bottom to top the footer sits above the oldest row.
+	footer: Item {
+		width: rowView.width
+		height: !rowView.localScope && (activeScope.canLoadOlder || activeScope.loadingState === "older") ? 40 : 0
+		visible: height > 0
+
+		Row {
+			anchors.centerIn: parent
+			spacing: Theme.space2
+			visible: activeScope.loadingState === "older"
+
+			ModernBusyIndicator {
+				anchors.verticalCenter: parent.verticalCenter
+				running: parent.visible
+				Accessible.name: qsTr("Loading older messages")
+			}
+			Text {
+				anchors.verticalCenter: parent.verticalCenter
+				text: qsTr("Loading older messages…")
+				textFormat: Text.PlainText
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontCaption
+			}
+		}
 	}
 
 	onContentYChanged: Qt.callLater(loadOlderIfNeeded)
-	onCountChanged: Qt.callLater(loadOlderIfNeeded)
+	onCountChanged: {
+		Qt.callLater(loadOlderIfNeeded)
+		Qt.callLater(continuePendingReveal)
+	}
 	onMovementStarted: followTail = false
 	onMovementEnded: followTail = tailY() - contentY < 4
 	// Far jumps cut straight to the newest page; short distances ease in below.
@@ -189,6 +328,12 @@ ListView {
 			if (view.hydrationQueue.length > 0)
 				start()
 		}
+	}
+
+	Timer {
+		id: flashTimer
+		interval: 1600
+		onTriggered: view.flashStableId = ""
 	}
 
 	Timer {

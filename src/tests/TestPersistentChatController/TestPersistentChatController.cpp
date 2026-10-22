@@ -236,6 +236,7 @@ private slots:
 	void rowBuilderDecoratesAcrossPageBoundaries();
 	void rowModelKeepsNewestFirstAndReportsExactRoles();
 	void rowModelAppliesExtrasBeforeAndAfterRows();
+	void rowModelSearchesNewestFirstAndKeepsTheCurrentMatch();
 	void timelineFeedMirrorsActiveScope();
 	void timelineFeedDropsWorkForRetiredScope();
 	void rowBuilderBuildsLogLinesAndDirectMessages();
@@ -1341,6 +1342,40 @@ void TestPersistentChatController::rowModelAppliesExtrasBeforeAndAfterRows() {
 	QCOMPARE(changed.size(), 1);
 	QCOMPARE(changed.first().at(0).toModelIndex().row(), 0);
 	QCOMPARE(qvariant_cast< QList< int > >(changed.first().at(2)), (QList< int >{ ChatRowModel::CanReplyRole }));
+}
+
+void TestPersistentChatController::rowModelSearchesNewestFirstAndKeepsTheCurrentMatch() {
+	ChatRowModel model;
+	model.resetScope(QStringLiteral("3:90"));
+	model.upsertRows({ rowWithKey(1, 100), rowWithKey(2, 200), rowWithKey(3, 300), rowWithKey(12, 1200) });
+	QSignalSpy current(&model, &ChatRowModel::currentMatchChanged);
+
+	// "message 1" matches messages 1 and 12; the newest is selected first.
+	model.setQuery(QStringLiteral("  MESSAGE 1 "));
+	QCOMPARE(model.matchCount(), 2);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("12"));
+	QCOMPARE(model.currentMatchRow(), 0);
+	QVERIFY(current.size() > 0);
+
+	QVERIFY(model.nextMatch());
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("1"));
+	QCOMPARE(model.currentMatchRow(), 3);
+	QVERIFY(model.nextMatch());
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("12"));
+	QVERIFY(model.previousMatch());
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("1"));
+
+	// A newer row arriving keeps the current match on the same message.
+	model.upsertRows({ rowWithKey(13, 1300) });
+	QCOMPARE(model.matchCount(), 3);
+	QCOMPARE(model.currentMatchStableId(), QStringLiteral("1"));
+	QCOMPARE(model.currentMatchRow(), 4);
+	QCOMPARE(model.rowForStableId(QStringLiteral("13")), 0);
+
+	model.clearSearch();
+	QCOMPARE(model.matchCount(), 0);
+	QCOMPARE(model.currentMatchRow(), -1);
+	QVERIFY(model.currentMatchStableId().isEmpty());
 }
 
 void TestPersistentChatController::timelineFeedMirrorsActiveScope() {

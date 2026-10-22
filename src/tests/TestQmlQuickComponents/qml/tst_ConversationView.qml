@@ -132,6 +132,22 @@ TestCase {
 		verify(!list.followTail)
 	}
 
+	function test_reveal_message_centers_and_outlines_it() {
+		const list = view()
+		settleAtNewest()
+		verify(list.revealMessage(1, 150))
+		verify(!list.followTail)
+		compare(list.flashStableId, "150")
+		const index = 240 - 150
+		const item = list.itemAtIndex(index)
+		verify(!!item)
+		verify(item.searchCurrent)
+		const center = item.y + item.height / 2 - list.contentY
+		verify(Math.abs(center - list.height / 2) < item.height + 2, "centered: " + center)
+		// A message that is not loaded and cannot be paged in is not found.
+		verify(!list.revealMessage(1, 999))
+	}
+
 	function test_row_height_is_stable_across_reuse() {
 		const list = view()
 		settleAtNewest()

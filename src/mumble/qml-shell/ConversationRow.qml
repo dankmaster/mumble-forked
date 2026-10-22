@@ -11,6 +11,8 @@ ChatMessageFrame {
 	id: row
 
 	required property int index
+	required property int threadId
+	required property int replyToMessageId
 	required property string kind
 	required property string authorName
 	required property string timeText
@@ -166,6 +168,9 @@ ChatMessageFrame {
 		id: body
 
 		width: row.innerWidth
+		Accessible.role: Accessible.ListItem
+		Accessible.name: [row.logRow ? "" : (row.own ? qsTr("You") : row.authorName), row.plainText, row.timeText]
+			.filter(part => String(part).length > 0).join("  ·  ")
 		implicitHeight: row.logRow ? logText.implicitHeight : Math.max(row.startsGroup && !row.systemRow ? Theme.avatarMedium : 0,
 			column.implicitHeight)
 		height: implicitHeight
@@ -260,7 +265,18 @@ ChatMessageFrame {
 				width: Math.min(row.columnWidth, Math.max(160, replyText.implicitWidth + Theme.space3 * 2))
 				height: replyText.implicitHeight + Theme.space1 * 2
 				radius: Theme.innerRadius
-				color: Theme.chatReplySurface
+				color: replyHover.hovered && row.replyToMessageId > 0 ? Theme.surfaceHover : Theme.chatReplySurface
+				Accessible.role: Accessible.Button
+				Accessible.name: qsTr("Replying to %1: %2").arg(row.replyActor).arg(row.replySnippet)
+
+				HoverHandler {
+					id: replyHover
+					cursorShape: row.replyToMessageId > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+				}
+				TapHandler {
+					enabled: row.replyToMessageId > 0 && !!row.view
+					onTapped: row.view.revealMessage(row.threadId, row.replyToMessageId)
+				}
 
 				Rectangle {
 					width: 2

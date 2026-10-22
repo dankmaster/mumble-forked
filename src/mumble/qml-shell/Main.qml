@@ -1217,6 +1217,8 @@ ApplicationWindow {
 					return
 				if (conversationSearchButton.visible && conversationSearchButton.enabled)
 					conversationSearchButton.forceActiveFocus(Qt.OtherFocusReason)
+				else if (conversationViewLoader.item)
+					conversationViewLoader.item.forceActiveFocus(Qt.OtherFocusReason)
 				else
 					timeline.forceActiveFocus(Qt.OtherFocusReason)
 			})
@@ -1226,6 +1228,10 @@ ApplicationWindow {
 	function revealConversationSearchMatch(row, stableId) {
 		if (!root.conversationSearchOpen || row < 0 || String(stableId || "").length === 0)
 			return
+		if (conversationViewLoader.item) {
+			conversationViewLoader.item.revealRow(row, stableId)
+			return
+		}
 		const presentationRow = chatModel.presentationModel.rowForStableId(String(stableId || ""))
 		if (presentationRow < 0) {
 			if (chatModel.materializeDeferredMessage(String(stableId || "")))
@@ -1246,6 +1252,15 @@ ApplicationWindow {
 	function positionVisualFixtureTimelineAt(stableId) {
 		if (!root.visualFixtureOverrideActive)
 			return false
+		if (conversationViewLoader.item) {
+			const view = conversationViewLoader.item
+			const index = chatTimelineV2.rowForStableId(String(stableId || ""))
+			if (index < 0)
+				return false
+			view.followTail = false
+			view.positionViewAtIndex(index, ListView.Beginning)
+			return true
+		}
 		const row = chatModel.presentationModel.rowForStableId(String(stableId || ""))
 		if (row < 0)
 			return false
@@ -1265,6 +1280,16 @@ ApplicationWindow {
 	function visualFixtureTimelineState() {
 		if (!root.visualFixtureOverrideActive)
 			return ({})
+		if (conversationViewLoader.item) {
+			const view = conversationViewLoader.item
+			const first = view.firstVisibleRow()
+			return {
+				"firstVisibleStableId": first ? String(first.stableId || "") : "",
+				"firstVisibleOffset": first ? Number(first.y - view.contentY) : 0,
+				"contentY": Number(view.contentY),
+				"count": Number(view.count)
+			}
+		}
 		const item = timeline.firstVisibleMessageDelegate()
 		return {
 			"firstVisibleStableId": item ? String(item.stableId || "") : "",
@@ -2065,6 +2090,12 @@ ApplicationWindow {
 	}
 
 	function timelinePresentationState() {
+		if (conversationViewLoader.item) {
+			const state = conversationViewLoader.item.presentationState()
+			state.roomHeaderHeight = stonksRoomPanelLoader.height
+			state.emptyConversationVisible = emptyConversationState.visible
+			return state
+		}
 		try {
 			const maximumY = timeline.tailContentYTarget()
 			const firstVisible = timeline.firstVisibleMessageDelegate()
@@ -3499,7 +3530,7 @@ ApplicationWindow {
 					Layout.fillWidth: true
 					Layout.preferredHeight: visible ? implicitHeight : 0
 					visible: root.conversationSearchOpen
-					timelineModel: chatModel
+					timelineModel: chatTimelineV2Enabled ? chatTimelineV2 : chatModel
 					narrowLayout: root.narrowShell
 					accessibilitySuppressed: root.backgroundAccessibilitySuppressed
 					visualFixtureMode: root.visualFixtureOverrideActive
@@ -13436,18 +13467,24 @@ ApplicationWindow {
 					Rectangle {
 						id: emptyConversationState
 						objectName: "emptyConversationState"
+						// The v2 timeline hides this view, so the state moves over to it.
+						parent: chatTimelineV2Enabled ? conversationViewLoader : timeline
 						anchors.centerIn: parent
-						width: Math.max(1, Math.min(380, timeline.width
+						width: Math.max(1, Math.min(380, parent.width
 							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
 						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
+						readonly property int conversationRowCount: chatTimelineV2Enabled
+							? chatTimelineV2.count : chatModel.count
+						readonly property bool presentationContentVisible: chatTimelineV2Enabled
+							|| timeline.scopePresentationContentVisible
 						// A bounded branded shell owns every replacement frame. Internal
 						// materialization/finalization phases are never named or exposed.
 						readonly property bool visualLoading: !activeScope.activity
 							&& (activeScope.loading
-								|| !timeline.scopePresentationContentVisible)
-						visible: (activeScope.activity ? chatModel.count === 0
-							: chatModel.count === 0
-								|| !timeline.scopePresentationContentVisible)
+								|| !presentationContentVisible)
+						visible: (activeScope.activity ? conversationRowCount === 0
+							: conversationRowCount === 0
+								|| !presentationContentVisible)
 							&& !root.connectionTransitionActive
 							&& !root.connectionFailureActive
 						z: 5

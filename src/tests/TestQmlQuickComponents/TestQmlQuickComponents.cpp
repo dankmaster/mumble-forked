@@ -1043,6 +1043,20 @@ public:
 		endInsertRows();
 		emit countChanged();
 	}
+	Q_INVOKABLE int rowForMessage(int threadId, int messageId) const {
+		for (int row = 0; row < m_rows.size(); ++row) {
+			if (m_rows.at(row).value(QStringLiteral("threadId")).toInt() == threadId
+				&& m_rows.at(row).value(QStringLiteral("messageId")).toInt() == messageId)
+				return row;
+		}
+		return -1;
+	}
+	Q_INVOKABLE int rowForStableId(const QString &stableId) const {
+		for (int row = 0; row < m_rows.size(); ++row) {
+			if (m_rows.at(row).value(QStringLiteral("stableId")).toString() == stableId) return row;
+		}
+		return -1;
+	}
 	Q_INVOKABLE void updateRow(int position, const QVariantMap &changes) {
 		if (position < 0 || position >= m_rows.size()) return;
 		for (auto it = changes.cbegin(); it != changes.cend(); ++it) m_rows[position].insert(it.key(), it.value());
@@ -1069,6 +1083,7 @@ private:
 			{ QStringLiteral("avatarUrl"), QString() },	   { QStringLiteral("attachments"), QVariantList() },
 			{ QStringLiteral("preview"), QVariantMap() },	   { QStringLiteral("canReply"), false },
 			{ QStringLiteral("canReact"), false },		   { QStringLiteral("canDelete"), false },
+			{ QStringLiteral("replyToMessageId"), 0 },
 		};
 		return values;
 	}

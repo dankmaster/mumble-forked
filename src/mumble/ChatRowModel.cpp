@@ -242,6 +242,7 @@ void ChatRowModel::resetScope(const QString &scopeToken) {
 		emit countChanged();
 	}
 	emit scopeTokenChanged();
+	refreshSearch();
 }
 
 int ChatRowModel::lowerBound(const ChatTimelineRowKey &key, int from) const {
@@ -323,6 +324,7 @@ void ChatRowModel::upsertRows(QVector< ChatTimelineRow > rows) {
 	if (count() != countBefore) {
 		emit countChanged();
 	}
+	refreshSearch();
 }
 
 void ChatRowModel::removeMessages(const QVector< quint64 > &identities) {
@@ -343,6 +345,7 @@ void ChatRowModel::removeMessages(const QVector< quint64 > &identities) {
 	}
 	if (count() != countBefore) {
 		emit countChanged();
+		refreshSearch();
 	}
 }
 
@@ -423,6 +426,20 @@ int ChatRowModel::rowForMessage(quint32 threadId, quint32 messageId) const {
 	return position < count() && m_rows.at(position).key == known.value() ? position : -1;
 }
 
+int ChatRowModel::rowForStableId(const QString &stableId) const {
+	bool valid              = false;
+	const quint32 messageId = stableId.trimmed().toUInt(&valid);
+	if (!valid || messageId == 0) {
+		return -1;
+	}
+	for (int row = 0; row < m_rows.size(); ++row) {
+		if (m_rows.at(row).key.messageId == messageId) {
+			return row;
+		}
+	}
+	return -1;
+}
+
 QVariantList ChatRowModel::rowsMatching(const QString &query) const {
 	QVariantList matches;
 	const QString needle = query.trimmed();
@@ -437,6 +454,90 @@ QVariantList ChatRowModel::rowsMatching(const QString &query) const {
 		}
 	}
 	return matches;
+}
+
+bool ChatRowModel::rowMatches(const ChatTimelineRow &row, const QString &needle) {
+	if (row.plainText.contains(needle, Qt::CaseInsensitive) || row.authorName.contains(needle, Qt::CaseInsensitive)
+		|| row.replyActor.contains(needle, Qt::CaseInsensitive)
+		|| row.replySnippet.contains(needle, Qt::CaseInsensitive)) {
+		return true;
+	}
+	return std::any_of(row.media.cbegin(), row.media.cend(), [&needle](const ChatTimelineMedia &media) {
+		return media.fileName.contains(needle, Qt::CaseInsensitive);
+	});
+}
+
+void ChatRowModel::setQuery(const QString &query) {
+	const QString normalized = query.trimmed();
+	if (normalized == m_query) {
+		return;
+	}
+	m_query = normalized;
+	emit queryChanged();
+	m_currentMatch = -1;
+	refreshSearch();
+	if (!m_matches.isEmpty()) {
+		selectMatch(0);
+	}
+}
+
+void ChatRowModel::refreshSearch() {
+	// Keeps the current match on the same message while rows arrive or leave.
+	const quint64 current = m_currentMatch >= 0 && m_currentMatch < m_matches.size() ? m_matches.at(m_currentMatch) : 0;
+	const int countBefore = matchCount();
+	const int indexBefore = m_currentMatch;
+	m_matches.clear();
+	if (!m_query.isEmpty()) {
+		for (const ChatTimelineRow &row : m_rows) {
+			if (rowMatches(row, m_query)) {
+				m_matches.push_back(row.key.identity());
+			}
+		}
+	}
+	m_currentMatch = current != 0 ? static_cast< int >(m_matches.indexOf(current)) : -1;
+	if (matchCount() != countBefore) {
+		emit matchCountChanged();
+	}
+	if (m_currentMatch != indexBefore || current != 0) {
+		emit currentMatchChanged();
+	}
+}
+
+bool ChatRowModel::selectMatch(int index) {
+	if (m_matches.isEmpty()) {
+		return false;
+	}
+	const int size = static_cast< int >(m_matches.size());
+	m_currentMatch = ((index % size) + size) % size;
+	emit currentMatchChanged();
+	return true;
+}
+
+bool ChatRowModel::nextMatch() {
+	return selectMatch(m_currentMatch < 0 ? 0 : m_currentMatch + 1);
+}
+
+bool ChatRowModel::previousMatch() {
+	return selectMatch(m_currentMatch < 0 ? 0 : m_currentMatch - 1);
+}
+
+void ChatRowModel::clearSearch() {
+	setQuery(QString());
+}
+
+int ChatRowModel::currentMatchRow() const {
+	if (m_currentMatch < 0 || m_currentMatch >= m_matches.size()) {
+		return -1;
+	}
+	const quint64 identity = m_matches.at(m_currentMatch);
+	return rowForMessage(static_cast< quint32 >(identity >> 32), static_cast< quint32 >(identity & 0xffffffffU));
+}
+
+QString ChatRowModel::currentMatchStableId() const {
+	if (m_currentMatch < 0 || m_currentMatch >= m_matches.size()) {
+		return {};
+	}
+	return QString::number(static_cast< quint32 >(m_matches.at(m_currentMatch) & 0xffffffffU));
 }
 
 QList< int > ChatRowModel::changedRoles(const ChatTimelineRow &before, const ChatTimelineRow &after) {

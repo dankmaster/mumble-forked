@@ -20,6 +20,13 @@ class ChatRowModel final : public QAbstractListModel {
 	Q_OBJECT
 	Q_PROPERTY(int count READ count NOTIFY countChanged)
 	Q_PROPERTY(QString scopeToken READ scopeToken NOTIFY scopeTokenChanged)
+	// Conversation search, the same contract ConversationSearchBar uses with the
+	// current timeline model. Matches are newest first; "next" goes older.
+	Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
+	Q_PROPERTY(int matchCount READ matchCount NOTIFY matchCountChanged)
+	Q_PROPERTY(int currentMatchIndex READ currentMatchIndex NOTIFY currentMatchChanged)
+	Q_PROPERTY(int currentMatchRow READ currentMatchRow NOTIFY currentMatchChanged)
+	Q_PROPERTY(QString currentMatchStableId READ currentMatchStableId NOTIFY currentMatchChanged)
 
 public:
 	enum Role {
@@ -76,18 +83,36 @@ public:
 
 	const ChatTimelineRow &rowAt(int row) const { return m_rows.at(row); }
 	Q_INVOKABLE int rowForMessage(quint32 threadId, quint32 messageId) const;
+	// Row of the newest message with this message id (the stableId role), or -1.
+	Q_INVOKABLE int rowForStableId(const QString &stableId) const;
 	// Rows whose author or text contains the query, newest first.
 	Q_INVOKABLE QVariantList rowsMatching(const QString &query) const;
+
+	QString query() const { return m_query; }
+	void setQuery(const QString &query);
+	int matchCount() const { return static_cast< int >(m_matches.size()); }
+	int currentMatchIndex() const { return m_currentMatch; }
+	int currentMatchRow() const;
+	QString currentMatchStableId() const;
+	Q_INVOKABLE bool nextMatch();
+	Q_INVOKABLE bool previousMatch();
+	Q_INVOKABLE void clearSearch();
 
 signals:
 	void countChanged();
 	void scopeTokenChanged();
+	void queryChanged();
+	void matchCountChanged();
+	void currentMatchChanged();
 
 private:
 	int lowerBound(const ChatTimelineRowKey &key, int from = 0) const;
 	void insertRun(int position, QVector< ChatTimelineRow > &run);
 	static QList< int > changedRoles(const ChatTimelineRow &before, const ChatTimelineRow &after);
 	void pruneExtras();
+	static bool rowMatches(const ChatTimelineRow &row, const QString &needle);
+	void refreshSearch();
+	bool selectMatch(int index);
 
 	struct Extras {
 		QString avatarUrl;
@@ -104,6 +129,9 @@ private:
 	QString m_scopeToken;
 	QHash< quint64, Extras > m_extras;
 	quint64 m_extrasSequence = 0;
+	QString m_query;
+	QVector< quint64 > m_matches;
+	int m_currentMatch = -1;
 };
 
 #endif // MUMBLE_MUMBLE_CHATROWMODEL_H_
