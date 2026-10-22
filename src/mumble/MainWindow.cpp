@@ -25617,8 +25617,9 @@ void MainWindow::scheduleDeferredModernShellPreviewUpdateDrain() {
 	m_deferredModernShellPreviewUpdateDrainScheduled = true;
 	// A completed provider DTO can trigger variable-height QML card polish.
 	// Leave one heartbeat/render window between final writes so several
-	// providers completing together cannot monopolize the GUI event loop.
-	QTimer::singleShot(ModernShellPreviewUpdateDrainMs, this, [this]() {
+	// providers completing together cannot monopolize the GUI event loop. The
+	// v2 view keeps its rows' geometry, so one frame is enough there.
+	QTimer::singleShot(m_chatTimelineV2Feed ? 16 : ModernShellPreviewUpdateDrainMs, this, [this]() {
 		m_deferredModernShellPreviewUpdateDrainScheduled = false;
 		drainDeferredModernShellPreviewUpdates();
 	});
@@ -26155,7 +26156,7 @@ void MainWindow::handleModernShellPreviewHydrationRequest(const QString &scopeTo
 	}
 
 	if (!m_modernShellPreviewHydrationTimer->isActive()) {
-		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 140 : 90);
+		m_modernShellPreviewHydrationTimer->start(modernShellPreviewHydrationIntervalMs());
 	}
 }
 
@@ -26195,6 +26196,13 @@ void MainWindow::retryPersistentChatAttachmentPreview(const QString &scopeToken,
 	publishQmlChatMessage(*message);
 }
 
+int MainWindow::modernShellPreviewHydrationIntervalMs() const {
+	if (m_chatTimelineV2Feed) {
+		return 16;
+	}
+	return m_modernShellPreviewHydrationLinkDense ? 140 : 90;
+}
+
 void MainWindow::flushModernShellPreviewHydrationQueue() {
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	if (target.serverLog || target.directMessage
@@ -26207,12 +26215,14 @@ void MainWindow::flushModernShellPreviewHydrationQueue() {
 
 	if (m_qmlShellHost && m_qmlShellHost->chatModel()->presentationBusy()) {
 		if (m_modernShellPreviewHydrationTimer) {
-			m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 140 : 90);
+			m_modernShellPreviewHydrationTimer->start(modernShellPreviewHydrationIntervalMs());
 		}
 		return;
 	}
 
-	const int budget = m_modernShellPreviewHydrationLinkDense ? 1 : 2;
+	// The current timeline lays a hydrated row out again on the GUI thread, so it
+	// admits one or two per tick. The v2 view only swaps a row's sources.
+	const int budget = m_chatTimelineV2Feed ? 6 : (m_modernShellPreviewHydrationLinkDense ? 1 : 2);
 	int processed    = 0;
 	while (!m_modernShellPreviewHydrationQueue.isEmpty() && processed < budget) {
 		const qulonglong messageID = m_modernShellPreviewHydrationQueue.takeFirst();
@@ -26229,7 +26239,7 @@ void MainWindow::flushModernShellPreviewHydrationQueue() {
 	}
 
 	if (!m_modernShellPreviewHydrationQueue.isEmpty() && m_modernShellPreviewHydrationTimer) {
-		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 140 : 90);
+		m_modernShellPreviewHydrationTimer->start(modernShellPreviewHydrationIntervalMs());
 	}
 }
 

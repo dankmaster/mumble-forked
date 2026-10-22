@@ -345,14 +345,25 @@ ChatMessageFrame {
 				id: previewSlot
 				visible: row.showPreviewCard || row.showPreviewPlaceholder
 				width: Math.min(row.columnWidth, Theme.chatRichMaximumWidth - Theme.avatarMedium - Theme.space2)
-				height: !visible ? 0 : previewLoader.status === Loader.Ready && previewLoader.item
-					? previewLoader.item.implicitHeight : placeholder.height
+				// A card seen before keeps its last height while it loads again, so a
+				// row scrolled back into view does not grow under the reader.
+				readonly property real rememberedHeight: row.view ? row.view.previewHeightFor(row.stableId) : 0
+				readonly property bool cardReady: previewLoader.status === Loader.Ready && !!previewLoader.item
+				// Otherwise start from the card layout; rendered cards are about this tall.
+				readonly property real expectedHeight: row.card.layout === "large" ? 300
+					: row.card.layout === "small" ? 200 : 180
+				height: !visible ? 0 : cardReady ? previewLoader.item.implicitHeight
+					: rememberedHeight > 0 ? rememberedHeight : expectedHeight
+				onHeightChanged: {
+					if (cardReady && row.view)
+						row.view.rememberPreviewHeight(row.stableId, height)
+				}
 
 				Rectangle {
 					id: placeholder
 					visible: row.showPreviewPlaceholder
 					width: parent.width
-					height: 64
+					height: parent.height
 					radius: Theme.innerRadius
 					color: Theme.surfaceRaised
 					border.color: Theme.divider

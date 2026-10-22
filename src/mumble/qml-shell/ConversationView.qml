@@ -39,6 +39,8 @@ ListView {
 	property int pendingRevealThread: 0
 	property int pendingRevealMessage: 0
 	property int pendingRevealPages: 0
+	property var previewHeights: ({})
+	property int previewHeightCount: 0
 	readonly property bool localScope: String(chatTimelineV2.scopeToken || "").startsWith("local:")
 
 	function tailY() {
@@ -88,6 +90,19 @@ ListView {
 		messageActions.targetCanDelete = rowItem.canDelete
 		messageActions.targetCanRetry = rowItem.deliveryCanRetry
 		messageActions.popup(anchorItem, x, y)
+	}
+	function previewHeightFor(stableId) {
+		return Number(previewHeights[String(stableId)] || 0)
+	}
+	function rememberPreviewHeight(stableId, height) {
+		const key = String(stableId || "")
+		if (key.length === 0 || height <= 0)
+			return
+		if (!(key in previewHeights) && ++previewHeightCount > 2000) {
+			previewHeights = ({})
+			previewHeightCount = 1
+		}
+		previewHeights[key] = height
 	}
 	function revealRow(row, stableId) {
 		if (row < 0 || row >= count)
@@ -194,6 +209,8 @@ ListView {
 		hydrationHighPriority = false
 		pendingRevealThread = 0
 		flashStableId = ""
+		previewHeights = ({})
+		previewHeightCount = 0
 		messageActions.close()
 	}
 
