@@ -535,6 +535,38 @@ TestCase {
 		verify(bodyOf(2).visible, "the link stays when its card failed")
 	}
 
+	// Jumping into link-heavy history never leaves a row drawn over another one
+	// (a card finished inside the list's layout pass used to keep its row at a
+	// stale place).
+	function test_jumping_through_link_cards_never_overlaps_rows() {
+		const list = view()
+		const rows = []
+		for (let id = 120; id >= 1; --id) {
+			const row = message(id, "https://example.com/" + id)
+			row.preview = {
+				"kind": "article", "url": "https://example.com/" + id, "host": "example.com",
+				"title": "Article " + id, "description": "A description that wraps onto a second line of the card.",
+				"document": { "schemaVersion": 1, "presentation": id % 3 === 0 ? "media" : "link",
+					"provider": { "id": "", "label": "example.com" }, "source": { "url": "https://example.com/" + id },
+					"content": { "type": "link", "title": "Article " + id, "description": "A description." },
+					"media": id % 3 === 0 ? [{ "id": "media:0", "kind": "image", "url": "image://mumble/jump-" + id + "?g=1" }] : [],
+					"facts": [], "playback": { "mode": "none" } }
+			}
+			row.card = { "status": "ready", "layout": id % 3 === 0 ? "large" : "small" }
+			rows.push(row)
+		}
+		chatTimelineV2.resetRows("channel:links", rows)
+		settleAtNewest()
+		const targets = [110, 20, 90, 5, 70, 40, 115]
+		for (let i = 0; i < targets.length; ++i) {
+			list.positionAtIndex(targets[i], ListView.Beginning)
+			wait(60)
+			const state = list.presentationState()
+			compare(state.overlappingRows, 0, "rows overlap after jumping to " + targets[i] + ": "
+				+ JSON.stringify(state.placedRows))
+		}
+	}
+
 	// A link card about to scroll in is finished before it reaches the screen, so
 	// its row never grows in view against the scroll.
 	function test_link_cards_near_the_view_are_finished_before_they_scroll_in() {
@@ -557,11 +589,12 @@ TestCase {
 		list.followTail = false
 		let unfinished = 0
 		let checked = 0
-		// Jump through history; after each jump, before any incubation time, every
-		// card on screen must be finished.
+		// Jump through history; after each jump, once the jump's layout pass is
+		// over and before the next frame, every card on screen must be finished.
 		for (let jump = 1; jump <= 6; ++jump) {
 			list.positionAt(list.tailY() - list.height * 4 * jump)
 			list.forceLayout()
+			wait(0)
 			for (let y = list.contentY; y < list.contentY + list.height; y += 20) {
 				const index = list.indexAt(list.width / 2, y)
 				const item = index >= 0 ? list.itemAtIndex(index) : null

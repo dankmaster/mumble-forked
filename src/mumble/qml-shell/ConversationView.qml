@@ -595,7 +595,10 @@ ListView {
 	}
 
 	onContentYChanged: {
-		finishCardsNearView()
+		// After the list's own layout pass: a card finished inside it changes a
+		// row's height mid-layout, and the list then keeps that row at its old
+		// place, drawn over its neighbours.
+		Qt.callLater(finishCardsNearView)
 		// The reader's scrolling picks a new reading row; anything else moving
 		// the view is layout, which the lock undoes.
 		if (readerScrolling || followTail)
