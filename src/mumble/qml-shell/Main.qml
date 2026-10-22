@@ -1249,6 +1249,15 @@ ApplicationWindow {
 		timeline.positionViewAtIndex(presentationRow, ListView.Center)
 	}
 
+	// Automation: shows the conversation's row at an index (0 is the newest).
+	function positionConversationRowAt(index) {
+		const view = conversationViewLoader.item
+		if (!view || index < 0 || index >= view.count)
+			return false
+		view.followTail = false
+		view.positionAtIndex(index, ListView.Beginning)
+		return true
+	}
 	function positionVisualFixtureTimelineAt(stableId) {
 		if (!root.visualFixtureOverrideActive)
 			return false

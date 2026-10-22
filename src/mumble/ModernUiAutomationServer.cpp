@@ -6776,6 +6776,18 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("qmlPositionConversationRow")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariant positioned;
+		if (!QMetaObject::invokeMethod(host->window(), "positionConversationRowAt", Q_RETURN_ARG(QVariant, positioned),
+									   Q_ARG(QVariant, request.value(QStringLiteral("index")).toInt()))
+			|| !positioned.toBool()) {
+			return errorResponse(tr("The conversation row could not be shown."));
+		}
+		return okResponse();
+	}
+
 	if (command == QLatin1String("qmlRunningAnimations")) {
 		// Animations that keep the render loop ticking, with where they are declared
 		// and whether their item can be seen at all.
