@@ -6783,6 +6783,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
 		QQuickWindow *window = host->window();
 		QVariantList running;
+		QVariantList updating;
 		std::function< void(QQuickItem *) > visit = [&](QQuickItem *item) {
 			for (QObject *child : item->children()) {
 				if (!child->inherits("QQuickAbstractAnimation") && !child->inherits("QQuickFrameAnimation")) continue;
@@ -6803,12 +6804,29 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 					{ QStringLiteral("size"), QStringLiteral("%1x%2").arg(item->width()).arg(item->height()) }
 				});
 			}
+			// Items that schedule frames on their own: playing GIFs and web or video surfaces.
+			const bool playingImage = item->inherits("QQuickAnimatedImage") && item->property("playing").toBool()
+									  && !item->property("paused").toBool();
+			const QByteArray className(item->metaObject()->className());
+			if (playingImage || className.contains("WebEngine") || className.contains("VideoOutput")) {
+				const QRectF bounds = item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+				const QQmlContext *context = qmlContext(item);
+				updating.push_back(QVariantMap {
+					{ QStringLiteral("item"), QString::fromLatin1(className) },
+					{ QStringLiteral("file"), context ? context->baseUrl().toString() : QString() },
+					{ QStringLiteral("visible"), item->isVisible() },
+					{ QStringLiteral("onScreen"), bounds.intersects(QRectF(0, 0, window->width(), window->height())) },
+					{ QStringLiteral("frameCount"), item->property("frameCount") },
+					{ QStringLiteral("source"), item->property("source").toUrl().scheme() }
+				});
+			}
 			for (QQuickItem *childItem : item->childItems())
 				visit(childItem);
 		};
 		visit(window->contentItem());
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("running"), running);
+		response.insert(QStringLiteral("updating"), updating);
 		return response;
 	}
 
