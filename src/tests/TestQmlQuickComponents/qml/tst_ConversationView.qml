@@ -505,6 +505,36 @@ TestCase {
 		settleAtNewest()
 	}
 
+	// A message that is only the link its card shows is the card; any other text
+	// stays, and so does the link when the card failed.
+	function test_link_only_message_shows_only_its_card() {
+		const list = view()
+		function linkRow(id, text, state) {
+			const row = message(id, text)
+			row.preview = { "kind": "article", "url": "https://www.example.com/page/", "host": "example.com",
+				"title": "Example page", "description": "Description" }
+			if (state)
+				row.preview.state = state
+			return row
+		}
+		chatTimelineV2.resetRows("channel:links", [
+			linkRow(3, "http://example.com/page"),
+			linkRow(2, "Look at this https://www.example.com/page/"),
+			linkRow(1, "https://www.example.com/page/", "error")
+		])
+		settleAtNewest()
+		function bodyOf(index) {
+			const item = list.itemAtIndex(index)
+			verify(item !== null)
+			const body = findChild(item, "conversationRowBody")
+			verify(body !== null)
+			return body
+		}
+		tryVerify(() => !bodyOf(0).visible, 2000, "the link-only message hides its text")
+		verify(bodyOf(1).visible, "text beside the link stays")
+		verify(bodyOf(2).visible, "the link stays when its card failed")
+	}
+
 	// A link card about to scroll in is finished before it reaches the screen, so
 	// its row never grows in view against the scroll.
 	function test_link_cards_near_the_view_are_finished_before_they_scroll_in() {

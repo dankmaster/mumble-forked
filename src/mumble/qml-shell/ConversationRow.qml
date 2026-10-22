@@ -69,6 +69,11 @@ ChatMessageFrame {
 	readonly property bool showPreviewPlaceholder: !previewFailed
 		&& (previewLoading || (!hasPreview && cardExpected)
 			|| (showPreviewCard && previewLoader.status !== Loader.Ready))
+	// The message text is nothing but the link the card (or its placeholder) shows.
+	readonly property bool bodyIsPreviewLink: (showPreviewCard || showPreviewPlaceholder)
+		&& linkKey(plainText).length > 0
+		&& (linkKey(plainText) === linkKey(preview ? preview.url : "")
+			|| linkKey(plainText) === linkKey(card ? card.url : ""))
 	readonly property var blockMedia: (media || []).filter(item => item.kind !== "inlineImage")
 	readonly property bool attachmentsLoading: (attachments || []).some(attachment =>
 		!!attachment && String(attachment.state || "").toLowerCase() === "loading")
@@ -81,6 +86,15 @@ ChatMessageFrame {
 	// Incubation gets little time while the reader scrolls, so a card could reach
 	// the screen at its estimated height and then grow against the scroll. Turning
 	// asynchronous off completes a running load now.
+	// A link compared without scheme, "www." or a trailing slash; empty when the
+	// text is not a single link.
+	function linkKey(text) {
+		const value = String(text || "").trim().toLowerCase()
+		if (value.length === 0 || /\s/.test(value) || !/^https?:\/\//.test(value))
+			return ""
+		return value.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "")
+	}
+
 	function previewPending() {
 		return previewLoader.active && previewLoader.status === Loader.Loading
 	}
@@ -299,7 +313,9 @@ ChatMessageFrame {
 			}
 
 			ChatBodyBlocks {
-				visible: row.bodyBlocks.length > 0
+				objectName: "conversationRowBody"
+				// A message that is only the link its card shows is the card.
+				visible: row.bodyBlocks.length > 0 && !row.bodyIsPreviewLink
 				width: row.columnWidth
 				blocks: row.bodyBlocks
 				textColor: row.systemRow ? Theme.textMuted : Theme.textMain
