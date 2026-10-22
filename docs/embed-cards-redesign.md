@@ -177,6 +177,11 @@ Done (v2 timeline and direct messages):
 - `ConversationView` owns one player over the playing card's media box and
   docks it with return and close buttons; link actions are one view menu.
 - Link-only messages show only their card.
+- `EmbedDetailSheet.qml`: a card with more than it shows opens a sheet with a
+  picture browser (previous, next, arrow keys, a strip of every picture), the
+  whole text and thread, every fact, and the provider's rich view from
+  `ProviderDetails` (Steam, Flashback, GitHub, Twitch, stores, finance). A
+  video chosen there plays in its card.
 - Rows finish their card before it scrolls in (on screen at once, the nearest
   one ahead per scroll step).
 
@@ -185,7 +190,7 @@ Not done:
 - Steps 1 and 2 of the migration: provider-specific facts for GitHub, Twitch,
   Vimeo and the rest, and the declared `cardHeight` in the row model. Cards
   of those providers show as generic link or video cards.
-- The detail surface: browsing a product's or post's pictures, and the rich
-  views (Steam purchase panel, Stonks, Flashback threads).
+- Rewriting the rich provider views in the new style; the sheet still shows
+  the old `ProviderDetails` templates.
 - A review of the cards in the light theme.
 - Removing `RichPreviewCard` and `ProviderDetails` with the old timeline.
