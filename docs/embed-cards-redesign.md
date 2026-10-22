@@ -1,8 +1,8 @@
-# Embed Cards Redesign (proposal)
+# Embed Cards Redesign
 
-Status: proposal, 2026-10-22. Builds on the "Card templates" and "Shared
-playback surface" items in `chat-timeline-v2-plan.md` and replaces their
-sketch with a concrete design.
+Status: first stage in use, 2026-10-22 (see "Status" at the end). Builds on the
+"Card templates" and "Shared playback surface" items in
+`chat-timeline-v2-plan.md` and replaces their sketch with a concrete design.
 
 ## Why
 
@@ -159,9 +159,33 @@ Flashback threads) move to the shared detail surface that opens on click.
 5. Switch `ConversationRow` to `EmbedCard`; keep `RichPreviewCard` for the old
    timeline until phase 6 deletes both.
 
-## Open questions
+## Decisions
 
-- Should a link-only message hide its URL text? (Proposed: yes.)
-- Picture-in-picture dock or pause when a playing row leaves the view?
-  (Proposed: dock.)
-- Do we keep a left accent edge per provider, or a neutral card everywhere?
+- A link-only message hides its URL text.
+- A playing row that leaves the view docks its player in the corner.
+- Cards are neutral everywhere, with no accent edge per provider.
+
+## Status
+
+Done (v2 timeline and direct messages):
+
+- `EmbedCard.qml` draws every preview that has a typed document, which the v2
+  rows now always carry; the seven families, the neutral frame, the one-line
+  header and the fixed-aspect media box are in place. `tst_EmbedCard.qml`
+  covers them and, with `MUMBLE_EMBED_CARD_GALLERY_DIR` (and
+  `QT_QPA_FONTDIR` for real fonts) set, saves a picture of each family.
+- `ConversationView` owns one player over the playing card's media box and
+  docks it with return and close buttons; link actions are one view menu.
+- Link-only messages show only their card.
+- Rows finish their card before it scrolls in (on screen at once, the nearest
+  one ahead per scroll step).
+
+Not done:
+
+- Steps 1 and 2 of the migration: provider-specific facts for GitHub, Twitch,
+  Vimeo and the rest, and the declared `cardHeight` in the row model. Cards
+  of those providers show as generic link or video cards.
+- The detail surface: browsing a product's or post's pictures, and the rich
+  views (Steam purchase panel, Stonks, Flashback threads).
+- A review of the cards in the light theme.
+- Removing `RichPreviewCard` and `ProviderDetails` with the old timeline.
