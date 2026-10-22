@@ -20,6 +20,13 @@ ColumnLayout {
 	readonly property bool socialPresentation: document && document.presentation === "social"
 	readonly property bool marketplacePresentation: document
 		&& document.presentation === "marketplace"
+	// A title that only names the provider (an X post titled "X") repeats the
+	// card header.
+	readonly property string displayTitle: {
+		const title = String(content.title || "").trim()
+		const label = String(provider.label || "").trim()
+		return title.toLowerCase() === label.toLowerCase() ? "" : title
+	}
 	signal externalOpenRequested(string url)
 
 	spacing: Theme.space3
@@ -90,8 +97,8 @@ ColumnLayout {
 	Label {
 		objectName: "embedDocumentTitle"
 		Layout.fillWidth: true
-		visible: String(root.content.title || "").length > 0
-		text: String(root.content.title || "")
+		visible: root.displayTitle.length > 0
+		text: root.displayTitle
 		textFormat: Text.PlainText
 		color: Theme.textStrong
 		font.pixelSize: root.socialPresentation || root.marketplacePresentation
@@ -125,56 +132,43 @@ ColumnLayout {
 		onOpenRequested: function(url) { root.externalOpenRequested(url) }
 	}
 
-	GridLayout {
+	// Facts read as one quiet line (label, then value), wrapping when needed,
+	// instead of a grid of framed tiles inside the card's own frame.
+	Flow {
+		objectName: "embedDocumentFacts"
 		Layout.fillWidth: true
 		visible: root.facts.length > 0
-		columns: width >= 480 ? 3 : 2
-		columnSpacing: Theme.space2
-		rowSpacing: Theme.space2
+		spacing: Theme.space3
 
 		Repeater {
 			model: root.facts
 
-			delegate: Rectangle {
+			delegate: Row {
 				id: factCard
 				required property var modelData
 				required property int index
 				objectName: "embedDocumentFact_" + index
+				spacing: Theme.space1
 
-				Layout.fillWidth: true
-				implicitHeight: factLayout.implicitHeight + Theme.space2 * 2
-				radius: Theme.innerRadius
-				color: Theme.embedSurface
-				border.color: Theme.embedBorder
-
-				ColumnLayout {
-					id: factLayout
-					anchors.fill: parent
-					anchors.margins: Theme.space2
-					spacing: 0
-
-					Label {
-						objectName: "embedDocumentFactLabel_" + factCard.index
-						Layout.fillWidth: true
-						text: String(factCard.modelData.label || "")
-						textFormat: Text.PlainText
-						color: Theme.textMuted
-						font.pixelSize: Theme.fontCaption
-						elide: Text.ElideRight
-					}
-					Label {
-						objectName: "embedDocumentFactValue_" + factCard.index
-						Layout.fillWidth: true
-						text: String(factCard.modelData.value === undefined
-							|| factCard.modelData.value === null ? "" : factCard.modelData.value)
-						textFormat: Text.PlainText
-						color: Theme.textStrong
-						font.pixelSize: Theme.fontCaption
-						font.weight: Font.DemiBold
-						wrapMode: Text.Wrap
-						maximumLineCount: 2
-						elide: Text.ElideRight
-					}
+				Label {
+					objectName: "embedDocumentFactLabel_" + factCard.index
+					anchors.baseline: factValue.baseline
+					text: String(factCard.modelData.label || "")
+					textFormat: Text.PlainText
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+				}
+				Label {
+					id: factValue
+					objectName: "embedDocumentFactValue_" + factCard.index
+					width: Math.min(implicitWidth, Math.max(80, root.width * 0.6))
+					text: String(factCard.modelData.value === undefined
+						|| factCard.modelData.value === null ? "" : factCard.modelData.value)
+					textFormat: Text.PlainText
+					color: Theme.textStrong
+					font.pixelSize: Theme.fontCaption
+					font.weight: Font.DemiBold
+					elide: Text.ElideRight
 				}
 			}
 		}

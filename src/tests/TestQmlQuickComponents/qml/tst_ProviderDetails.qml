@@ -1461,8 +1461,9 @@ TestCase {
 			"forumQuoteAuthor": "qmlvän", "forumQuoteExcerpt": "Quoted context."
 		}, "forum", true, "flashback")
 		const card = findChild(item, "providerFlashbackThread")
-		compare(String(card.color), String(item.withAlpha(item.providerAccent, 0.055)))
-		compare(String(card.border.color), String(item.providerAccentBorder))
+		// The template lies inside the preview card's own frame.
+		compare(card.color.a, 0)
+		compare(card.border.width, 0)
 		compare(findChild(item, "providerFlashbackMasthead").color.a, 0)
 		compare(String(findChild(item, "providerFlashbackQuote").color),
 			String(Theme.panel))

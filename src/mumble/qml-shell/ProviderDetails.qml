@@ -9,6 +9,9 @@ import Mumble.ProviderPresentation 1.0
 FocusScope {
 	id: root
 
+	// Templates sit inside the preview card's own frame and padding; they draw
+	// no second frame, fill or inset of their own.
+	readonly property real templateInset: 0
 	property var metadata: ({})
 	property string previewKind: ""
 	property string providerHint: ""
@@ -1532,13 +1535,13 @@ FocusScope {
 		Rectangle {
 			id: articleCard
 			objectName: "providerArticleCard"
-			implicitHeight: articleLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: articleLayout.implicitHeight + root.templateInset * 2
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? articleLayout.implicitHeight + Theme.space3 * 2 : 0
+			Layout.preferredHeight: visible ? articleLayout.implicitHeight + root.templateInset * 2 : 0
 			visible: root.articlePresentation
 			radius: Theme.innerRadius
-			color: Theme.panel
-			border.color: root.providerAccentBorder
+			color: "transparent"
+			border.width: 0
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.heading
 			Accessible.description: root.joinAccessibleSentences([
@@ -1550,7 +1553,7 @@ FocusScope {
 			ColumnLayout {
 				id: articleLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				spacing: Theme.space2
 
 				RowLayout {
@@ -1599,6 +1602,8 @@ FocusScope {
 							Layout.fillWidth: true
 							spacing: Theme.space2
 							ProviderIdentityBadge {
+								// The card header already names the provider.
+								visible: false
 								Layout.preferredWidth: 30
 								Layout.preferredHeight: 30
 								providerToken: root.providerToken
@@ -1704,13 +1709,13 @@ FocusScope {
 		Rectangle {
 			id: commerceCard
 			objectName: "providerCommerceCard"
-			implicitHeight: commerceCardLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: commerceCardLayout.implicitHeight + root.templateInset * 2
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? commerceCardLayout.implicitHeight + Theme.space3 * 2 : 0
+			Layout.preferredHeight: visible ? commerceCardLayout.implicitHeight + root.templateInset * 2 : 0
 			visible: root.commercePresentation
 			radius: Theme.innerRadius
-			color: root.withAlpha(root.providerAccent, 0.055)
-			border.color: root.providerAccentBorder
+			color: "transparent"
+			border.width: 0
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.heading
 			Accessible.description: root.accessibleSummary()
@@ -1718,7 +1723,7 @@ FocusScope {
 			ColumnLayout {
 				id: commerceCardLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				spacing: Theme.space2
 
 				Rectangle {
@@ -1788,6 +1793,8 @@ FocusScope {
 					Layout.fillWidth: true
 					spacing: Theme.space2
 					ProviderIdentityBadge {
+						// The card header already names the provider.
+						visible: false
 						Layout.preferredWidth: 32
 						Layout.preferredHeight: 32
 						providerToken: root.providerToken
@@ -1803,6 +1810,7 @@ FocusScope {
 						spacing: 0
 						Label {
 							Layout.fillWidth: true
+							visible: false
 							text: root.providerDisplayName
 							textFormat: Text.PlainText
 							color: root.providerForeground
@@ -1952,13 +1960,13 @@ FocusScope {
 		Rectangle {
 			id: steamCard
 			objectName: "providerSteamCard"
-			implicitHeight: steamLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: steamLayout.implicitHeight + root.templateInset * 2
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? steamLayout.implicitHeight + Theme.space3 * 2 : 0
+			Layout.preferredHeight: visible ? steamLayout.implicitHeight + root.templateInset * 2 : 0
 			visible: root.steamPresentation
 			radius: Theme.innerRadius
-			color: root.withAlpha(root.providerAccent, 0.08)
-			border.color: root.providerAccentBorder
+			color: "transparent"
+			border.width: 0
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.heading
 			Accessible.description: root.accessibleSummary()
@@ -1966,7 +1974,7 @@ FocusScope {
 			ColumnLayout {
 				id: steamLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				// The default store card must fit the canonical chat viewport without
 				// dropping its media rail, pricing, reviews, or deal action above the fold.
 				spacing: Theme.space2
@@ -1975,6 +1983,8 @@ FocusScope {
 					Layout.fillWidth: true
 					spacing: Theme.space2
 					Rectangle {
+						// The card header already says Steam.
+						visible: false
 						Layout.preferredWidth: 34
 						Layout.preferredHeight: 34
 						radius: Theme.innerRadius
@@ -1995,6 +2005,7 @@ FocusScope {
 						spacing: 0
 						Label {
 							Layout.fillWidth: true
+							visible: false
 							text: qsTr("STEAM STORE")
 							textFormat: Text.PlainText
 							color: root.providerForeground
@@ -2250,10 +2261,11 @@ FocusScope {
 					Rectangle {
 						objectName: "providerSteamUserReviews"
 						Layout.fillWidth: true
-						Layout.preferredHeight: steamReviewCopy.implicitHeight + Theme.space2 * 2
+						Layout.preferredHeight: steamReviewCopy.implicitHeight + 0
 						visible: root.steamReviewSummary.length > 0
 						radius: Theme.innerRadius
-						color: Theme.panel
+						color: "transparent"
+						border.width: 0
 						border.color: root.steamReviewTone() === "success"
 							? root.withAlpha(Theme.success, 0.55)
 							: root.steamReviewTone() === "danger" ? root.withAlpha(Theme.danger, 0.55)
@@ -2261,10 +2273,10 @@ FocusScope {
 						ColumnLayout {
 							id: steamReviewCopy
 							anchors.fill: parent
-							anchors.margins: Theme.space2
+							anchors.margins: 0
 							spacing: 0
 							Label {
-								text: qsTr("USER REVIEWS")
+								text: qsTr("User reviews")
 								textFormat: Text.PlainText
 								color: Theme.textMuted
 								font.pixelSize: Theme.fontCaption
@@ -2300,15 +2312,16 @@ FocusScope {
 					Rectangle {
 						objectName: "providerSteamMetacritic"
 						Layout.fillWidth: true
-						Layout.preferredHeight: steamMetacriticCopy.implicitHeight + Theme.space2 * 2
+						Layout.preferredHeight: steamMetacriticCopy.implicitHeight + 0
 						visible: root.hasValue("steamMetacriticScore")
 						radius: Theme.innerRadius
-						color: Theme.panel
+						color: "transparent"
+						border.width: 0
 						border.color: Theme.surfaceBorder
 						RowLayout {
 							id: steamMetacriticCopy
 							anchors.fill: parent
-							anchors.margins: Theme.space2
+							anchors.margins: 0
 							spacing: Theme.space2
 							Rectangle {
 								Layout.preferredWidth: 32
@@ -2343,15 +2356,16 @@ FocusScope {
 				Rectangle {
 					objectName: "providerSteamPurchase"
 					Layout.fillWidth: true
-					Layout.preferredHeight: steamPurchaseRow.implicitHeight + Theme.space2 * 2
+					Layout.preferredHeight: steamPurchaseRow.implicitHeight + 0
 					visible: root.primaryValue.length > 0 || root.steamDiscountLabel.length > 0
 					radius: Theme.innerRadius
-					color: Theme.panel
+					color: "transparent"
+					border.width: 0
 					border.color: root.providerAccentBorder
 					RowLayout {
 						id: steamPurchaseRow
 						anchors.fill: parent
-						anchors.margins: Theme.space2
+						anchors.margins: 0
 						spacing: Theme.space2
 						Rectangle {
 							objectName: "providerSteamDiscount"
@@ -2511,13 +2525,13 @@ FocusScope {
 		Rectangle {
 			id: googleCard
 			objectName: "providerGoogleSearch"
-			implicitHeight: googleLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: googleLayout.implicitHeight + root.templateInset * 2
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? googleLayout.implicitHeight + Theme.space3 * 2 : 0
+			Layout.preferredHeight: visible ? googleLayout.implicitHeight + root.templateInset * 2 : 0
 			visible: root.googlePresentation
 			radius: Theme.innerRadius
-			color: Theme.panel
-			border.color: root.providerAccentBorder
+			color: "transparent"
+			border.width: 0
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.googleModeLabel
 			Accessible.description: root.googleQuery
@@ -2525,7 +2539,7 @@ FocusScope {
 			ColumnLayout {
 				id: googleLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				spacing: Theme.space3
 
 				RowLayout {
@@ -2645,13 +2659,13 @@ FocusScope {
 		Rectangle {
 			id: flashbackCard
 			objectName: "providerFlashbackThread"
-			implicitHeight: flashbackLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: flashbackLayout.implicitHeight + root.templateInset * 2
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? flashbackLayout.implicitHeight + Theme.space3 * 2 : 0
+			Layout.preferredHeight: visible ? flashbackLayout.implicitHeight + root.templateInset * 2 : 0
 			visible: root.flashbackPresentation
 			radius: Theme.innerRadius
-			color: root.withAlpha(root.providerAccent, 0.055)
-			border.color: root.providerAccentBorder
+			color: "transparent"
+			border.width: 0
 			clip: true
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.heading
@@ -2660,7 +2674,7 @@ FocusScope {
 			ColumnLayout {
 				id: flashbackLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				spacing: Theme.space2
 
 				Rectangle {
@@ -2910,10 +2924,10 @@ FocusScope {
 			Rectangle {
 			id: xCard
 			objectName: "providerXPost"
-			implicitHeight: xLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: xLayout.implicitHeight + root.templateInset * 2
 			radius: Theme.innerRadius
-			color: Theme.panel
-			border.color: Theme.surfaceBorder
+			color: "transparent"
+			border.width: 0
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("X post")
 			Accessible.description: root.socialAccessibleSummary()
@@ -2921,7 +2935,7 @@ FocusScope {
 			ColumnLayout {
 				id: xLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				spacing: Theme.space3
 
 				RowLayout {
@@ -3045,16 +3059,17 @@ FocusScope {
 			Rectangle {
 			id: instagramCard
 			objectName: "providerInstagramPost"
-			implicitHeight: instagramLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: instagramLayout.implicitHeight + root.templateInset * 2
 			radius: Theme.innerRadius
-			color: Theme.panel
-			border.color: root.providerAccentBorder
+			color: "transparent"
+			border.width: 0
 			clip: true
 			Accessible.role: Accessible.Grouping
 			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : qsTr("Instagram post")
 			Accessible.description: root.socialAccessibleSummary()
 
 			Rectangle {
+				visible: false
 				anchors.left: parent.left
 				anchors.right: parent.right
 				anchors.top: parent.top
@@ -3070,8 +3085,8 @@ FocusScope {
 			ColumnLayout {
 				id: instagramLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
-				anchors.topMargin: Theme.space3 + 3
+				anchors.margins: root.templateInset
+				anchors.topMargin: root.templateInset
 				spacing: Theme.space3
 
 				RowLayout {
@@ -3208,10 +3223,10 @@ FocusScope {
 			Rectangle {
 			id: githubCard
 			objectName: "providerGitHubRepository"
-			implicitHeight: githubLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: githubLayout.implicitHeight + root.templateInset * 2
 			radius: Theme.innerRadius
-			color: Theme.panel
-			border.color: Theme.surfaceBorder
+			color: "transparent"
+			border.width: 0
 			Accessible.role: Accessible.Grouping
 			Accessible.name: qsTr("Repository details")
 			Accessible.description: root.socialAccessibleSummary()
@@ -3219,7 +3234,7 @@ FocusScope {
 			ColumnLayout {
 				id: githubLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				spacing: Theme.space3
 
 				RowLayout {
@@ -3263,6 +3278,8 @@ FocusScope {
 						Layout.minimumWidth: 0
 						spacing: 0
 						Label {
+							// The card header already says GitHub.
+							visible: false
 							text: "GitHub"
 							textFormat: Text.PlainText
 							color: Theme.textMuted
@@ -3403,12 +3420,12 @@ FocusScope {
 			Rectangle {
 			id: twitchCard
 			objectName: "providerTwitchStream"
-			implicitHeight: twitchLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: twitchLayout.implicitHeight + (framed ? Theme.space3 * 2 : root.templateInset * 2)
 			radius: Theme.innerRadius
-			color: root.providerErrorText.length > 0
-				? root.withAlpha(Theme.danger, 0.08) : root.providerAccentSubtle
-			border.color: root.providerErrorText.length > 0
-				? root.withAlpha(Theme.danger, 0.6) : root.providerAccentBorder
+			readonly property bool framed: root.providerErrorText.length > 0
+			color: framed ? root.withAlpha(Theme.danger, 0.08) : "transparent"
+			border.width: framed ? 1 : 0
+			border.color: root.withAlpha(Theme.danger, 0.6)
 			Accessible.role: root.providerErrorText.length > 0
 				? Accessible.AlertMessage : Accessible.Grouping
 			Accessible.name: root.identityTitle.length > 0
@@ -3420,14 +3437,15 @@ FocusScope {
 				anchors.top: parent.top
 				anchors.bottom: parent.bottom
 				width: 4
-				color: root.providerErrorText.length > 0 ? Theme.danger : root.providerAccent
+				visible: twitchCard.framed
+				color: Theme.danger
 			}
 
 			ColumnLayout {
 				id: twitchLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
-				anchors.leftMargin: Theme.space3 + 4
+				anchors.margins: twitchCard.framed ? Theme.space3 : root.templateInset
+				anchors.leftMargin: twitchCard.framed ? Theme.space3 + 4 : root.templateInset
 				spacing: Theme.space2
 
 				RowLayout {
@@ -3543,14 +3561,14 @@ FocusScope {
 		Rectangle {
 			id: genericSocialPostCard
 			objectName: "providerSocialPost"
-			implicitHeight: genericSocialPostLayout.implicitHeight + Theme.space3 * 2
+			implicitHeight: genericSocialPostLayout.implicitHeight + root.templateInset * 2
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? genericSocialPostLayout.implicitHeight
-				+ Theme.space3 * 2 : 0
+				+ root.templateInset * 2 : 0
 			visible: root.genericSocialPostPresentation
 			radius: Theme.innerRadius
-			color: root.withAlpha(root.providerAccent, 0.06)
-			border.color: root.withAlpha(root.providerAccent, 0.32)
+			color: "transparent"
+			border.width: 0
 			Accessible.role: Accessible.Grouping
 			Accessible.name: qsTr("Social post")
 			Accessible.description: root.genericSocialAccessibleSummary()
@@ -3558,7 +3576,7 @@ FocusScope {
 			ColumnLayout {
 				id: genericSocialPostLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: root.templateInset
 				spacing: Theme.space2
 
 				RowLayout {
@@ -3650,7 +3668,8 @@ FocusScope {
 
 			Label {
 				Layout.fillWidth: true
-				visible: root.heading.length > 0
+				// Category kickers restate the card type.
+				visible: false
 				text: root.heading
 				textFormat: Text.PlainText
 				color: Theme.textMuted
@@ -3774,7 +3793,9 @@ FocusScope {
 			id: identityCard
 			objectName: "providerIdentity"
 			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? identityLayout.implicitHeight + Theme.space3 * 2 : 0
+			// Framed and inset only to flag an error; otherwise it is part of the card.
+			readonly property real inset: root.providerErrorText.length > 0 ? Theme.space3 : root.templateInset
+			Layout.preferredHeight: visible ? identityLayout.implicitHeight + inset * 2 : 0
 			visible: !root.financeLayout && !root.commerceLayout
 				&& !root.googlePresentation && !root.flashbackPresentation
 				&& !root.articlePresentation
@@ -3795,7 +3816,7 @@ FocusScope {
 			RowLayout {
 				id: identityLayout
 				anchors.fill: parent
-				anchors.margins: Theme.space3
+				anchors.margins: identityCard.inset
 				spacing: Theme.space3
 
 				ProviderIdentityBadge {
@@ -3803,7 +3824,8 @@ FocusScope {
 					Layout.preferredWidth: root.variant === "audio" ? 48 : 42
 					Layout.preferredHeight: Layout.preferredWidth
 					Layout.alignment: Qt.AlignTop
-					visible: root.providerMark.length > 0
+					// Initials repeat the card header; only a real mark would add anything.
+					visible: false
 					providerToken: root.providerToken
 					badgeText: root.providerMark
 					presentation: "mark"
@@ -3822,7 +3844,7 @@ FocusScope {
 
 					Label {
 						Layout.fillWidth: true
-						visible: root.heading.length > 0
+						visible: false
 						text: root.heading
 						textFormat: Text.PlainText
 						color: Theme.textMuted

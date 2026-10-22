@@ -54,6 +54,9 @@ ColumnLayout {
 	property bool retainStaticVisual: false
 	property bool animationsEnabled: true
 	property bool mediaRequiresReveal: false
+	// The only picture is a poster for the provider's own player (Spotify
+	// artwork, for example): it offers playback instead of the image viewer.
+	property bool posterPlaysEmbed: false
 	property bool viewportVisible: true
 	property real viewportPreferredWidth: 0
 	property real viewportPreferredHeight: 0
@@ -429,6 +432,41 @@ ColumnLayout {
 			Accessible.ignored: true
 		}
 
+		// Images and artwork are shown whole; instead of black bars, the same
+		// picture decoded tiny fills the frame as a soft, dimmed backdrop.
+		Image {
+			id: stillBackdrop
+			objectName: "embedDocumentMediaBackdrop"
+			anchors.fill: parent
+			visible: stillImage.visible && stillImage.fillMode === Image.PreserveAspectFit
+				&& stillImage.status === Image.Ready
+			source: visible ? stillImage.source : ""
+			asynchronous: true
+			cache: true
+			// The still's own decode, drawn into a tiny layer and stretched back:
+			// soft, and no second image request. The pixmap cache keys on source,
+			// requested size and fill mode, so all three match the still (the size
+			// literally: Image.sourceSize reports the decoded size once loaded),
+			// and scaling up from the centre makes the fitted picture cover the
+			// clipped frame.
+			sourceSize: Qt.size(1280, 960)
+			fillMode: Image.PreserveAspectFit
+			scale: paintedWidth > 0 && paintedHeight > 0
+				? Math.max(width / paintedWidth, height / paintedHeight) : 1
+			smooth: true
+			opacity: 0.45
+			layer.enabled: visible
+			layer.textureSize: Qt.size(48, 36)
+			layer.smooth: true
+			Accessible.ignored: true
+		}
+		Rectangle {
+			anchors.fill: parent
+			visible: stillBackdrop.visible
+			color: Qt.rgba(0, 0, 0, 0.35)
+			Accessible.ignored: true
+		}
+
 		Image {
 			id: stillImage
 			objectName: "embedDocumentMediaImage"
@@ -442,7 +480,9 @@ ColumnLayout {
 			cache: true
 			// Share one exact decoded-size cache key with Main's bounded preheater.
 			sourceSize: Qt.size(1280, 960)
-			fillMode: Image.PreserveAspectFit
+			// A video poster is a frame of the video: fill the frame (this also drops
+			// letterbox bars baked into provider thumbnails).
+			fillMode: root.effectiveCurrentKind === "video" ? Image.PreserveAspectCrop : Image.PreserveAspectFit
 			// Leave the Image item mounted throughout the source handoff; the
 			// fallback underlay remains visible when no texture exists.
 			visible: String(source).length > 0
@@ -490,7 +530,7 @@ ColumnLayout {
 			objectName: "embedDocumentPlaybackPrompt"
 			anchors.centerIn: parent
 			visible: !root.mediaRequiresReveal
-				&& (root.currentKind === "video" || root.currentKind === "audio")
+				&& (root.currentKind === "video" || root.currentKind === "audio" || root.posterPlaysEmbed)
 			implicitWidth: playbackPromptContent.implicitWidth + Theme.space4
 			implicitHeight: Theme.controlHeight
 			width: implicitWidth
@@ -514,7 +554,8 @@ ColumnLayout {
 				Label {
 					text: root.currentKind === "audio" ? qsTr("Play audio")
 						: root.currentAnimatedPresentation ? qsTr("Play animation")
-						: qsTr("Play video")
+						: root.currentKind === "video" ? qsTr("Play video")
+						: qsTr("Play")
 					textFormat: Text.PlainText
 					color: Theme.contrastText(root.accent)
 					font.pixelSize: Theme.fontLabel
@@ -542,6 +583,8 @@ ColumnLayout {
 					return qsTr("Play %1").arg(title)
 				if (root.currentKind === "audio")
 					return qsTr("Play audio: %1").arg(title)
+				if (root.posterPlaysEmbed)
+					return qsTr("Play %1").arg(title)
 				return qsTr("Open %1").arg(title)
 			}
 			onClicked: root.mediaRequested(root.selectedIndex)

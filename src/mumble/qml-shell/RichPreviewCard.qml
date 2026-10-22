@@ -439,9 +439,11 @@ Rectangle {
 	readonly property bool fullBleedMediaStage: !typedDocumentUsesGallery
 		&& ((hasDirectMedia && currentMediaKind !== "audio") || fullBleedEmbed)
 	readonly property string genericProviderMark: buildGenericProviderMark()
-	readonly property bool genericHeaderShowsIdentityMark: previewState === "ready"
-		&& !inlineMediaStageVisible && imageSource.length === 0 && !hasExternalImage
-		&& !hasDirectMedia && !hasExternalMedia && genericProviderMark.length > 0
+	// Without an image the header shows no initials tile: the provider is named
+	// in the card's header row already.
+	readonly property bool genericHeaderShowsIdentityMark: false
+	readonly property bool typedPosterPlaysEmbed: typedDocumentActive && typedPlaybackMode === "provider"
+		&& hasEmbedPreview && mediaItems.length <= 1
 	// The centered short/square player keeps the ordinary card inset, while
 	// wide providers intentionally meet the top edge. Keep these values in one
 	// place so the delegate's implicit height always includes the same insets
@@ -1341,6 +1343,10 @@ Rectangle {
 			sensitiveMediaRevealed = true
 			return
 		}
+		if (typedPosterPlaysEmbed) {
+			requestInlinePlaybackWithFocus()
+			return
+		}
 		if (currentMediaKind === "image") {
 			requestCurrentMedia()
 			return
@@ -1384,16 +1390,121 @@ Rectangle {
 		spacing: Theme.space3
 		z: 1
 
-		EmbedSourceLink {
-			objectName: "previewSourceLink"
-			compactPresentation: true
+		RowLayout {
+			objectName: "previewHeaderRow"
 			Layout.fillWidth: true
-			sourceUrl: root.originalProviderUrl
-			providerLabel: root.typedDocumentActive && root.embedDocument.provider
-				? String(root.embedDocument.provider.label || root.providerLabel)
-				: root.providerLabel
-			accent: providerDetails.providerAccent
-			onOpenRequested: function(url) { root.externalOpenRequested(url) }
+			spacing: Theme.space1
+
+			EmbedSourceLink {
+				objectName: "previewSourceLink"
+				compactPresentation: true
+				Layout.fillWidth: true
+				sourceUrl: root.originalProviderUrl
+				providerLabel: root.typedDocumentActive && root.embedDocument.provider
+					? String(root.embedDocument.provider.label || root.providerLabel)
+					: root.providerLabel
+				accent: providerDetails.providerAccent
+				onOpenRequested: function(url) { root.externalOpenRequested(url) }
+			}
+			ModernIconButton {
+				id: previewOverflowButton
+				objectName: "previewOverflowButton"
+				visible: root.previewState !== "loading" && root.hasOverflowActions
+				dense: true
+				iconName: "more"
+				Accessible.name: qsTr("Preview actions")
+				Accessible.description: root.inlineActionUsesPlaybackSemantics
+					? qsTr("Open secondary playback and preview actions")
+					: qsTr("Open secondary preview actions")
+				onClicked: previewOverflowMenu.open()
+
+				ModernMenu {
+					id: previewOverflowMenu
+					objectName: "previewOverflowMenu"
+					x: Math.min(0, previewOverflowButton.width - width)
+					y: previewOverflowButton.height
+					implicitWidth: 210
+
+					MenuItem {
+						objectName: "previewPopoutButton"
+						visible: root.hasPopoutAction
+						text: root.popoutActionLabel
+						Accessible.description: root.popoutActionDescription
+						onTriggered: {
+							if (root.hasEmbedPreview)
+								root.popoutPlayRequested(root.safeEmbedUrl, root.safeEmbedProvider)
+							else
+								root.requestCurrentDirectMediaPopout()
+						}
+					}
+					MenuItem {
+						objectName: "previewWatchTogetherButton"
+						visible: root.sharedPlaybackSupported
+						enabled: root.watchTogetherAvailable
+						text: root.watchTogetherAvailable ? qsTr("Watch together") : qsTr("Session active")
+						Accessible.description: root.watchTogetherAvailable
+							? qsTr("Start a synchronized media session")
+							: qsTr("End or leave the active media session first")
+						onTriggered: root.watchTogetherRequested(root.safeEmbedUrl,
+							root.safeEmbedProvider, root.displayTitle, root.normalizedEmbedAspect)
+					}
+					MenuItem {
+						objectName: "previewOpenOriginalButton"
+						visible: root.hasSecondaryOriginalOpenAction
+						text: root.preview && root.safeText(root.preview.openLabel, 128).length > 0
+							? root.openLabel : qsTr("Open original")
+						Accessible.name: text + ": " + root.displayTitle
+						Accessible.description: qsTr("Open this item on the original provider")
+						onTriggered: root.externalOpenRequested(root.originalProviderUrl)
+					}
+					MenuSeparator {
+						visible: root.hasSizeActions
+					}
+					MenuItem {
+						objectName: "previewSizeCompactButton"
+						visible: root.hasSizeActions
+						text: qsTr("Compact card")
+						checkable: true
+						checked: root.effectiveSizePreset === "compact"
+						ButtonGroup.group: previewSizeGroup
+						Accessible.role: Accessible.RadioButton
+						Accessible.name: qsTr("Compact media card")
+						Accessible.checked: checked
+						onTriggered: root.setSizePreset("compact")
+					}
+					MenuItem {
+						objectName: "previewSizeStandardButton"
+						visible: root.hasSizeActions
+						text: qsTr("Standard card")
+						checkable: true
+						checked: root.effectiveSizePreset === "default"
+						ButtonGroup.group: previewSizeGroup
+						Accessible.role: Accessible.RadioButton
+						Accessible.name: qsTr("Standard media card")
+						Accessible.checked: checked
+						onTriggered: root.setSizePreset("default")
+					}
+					MenuItem {
+						objectName: "previewSizeLargeButton"
+						visible: root.hasSizeActions
+						text: qsTr("Large card")
+						checkable: true
+						checked: root.effectiveSizePreset === "large"
+						ButtonGroup.group: previewSizeGroup
+						Accessible.role: Accessible.RadioButton
+						Accessible.name: qsTr("Large media card")
+						Accessible.checked: checked
+						onTriggered: root.setSizePreset("large")
+					}
+					MenuItem {
+						objectName: "previewExpandButton"
+						visible: root.canExpand && !root.hasSizeActions
+						text: root.userExpanded ? qsTr("Less") : qsTr("More")
+						Accessible.name: root.userExpanded ? qsTr("Collapse preview") : qsTr("Expand preview")
+						onTriggered: root.userExpanded = !root.userExpanded
+					}
+				}
+			}
 		}
 
 		ColumnLayout {
@@ -1907,6 +2018,7 @@ Rectangle {
 				retainStaticVisual: root.staticTypedMediaCacheActive
 				animationsEnabled: root.animationsEnabled
 				mediaRequiresReveal: root.mediaRequiresReveal
+				posterPlaysEmbed: root.typedPosterPlaysEmbed
 				viewportVisible: !root.inlinePlaybackActive
 				viewportPreferredWidth: root.hasEmbedPreview
 					? root.embedMediaWidth : root.actionAvailableWidth
@@ -2126,7 +2238,9 @@ Rectangle {
                 Label {
 					textFormat: Text.PlainText
                     Layout.fillWidth: true
+					// A subtitle that only names the provider repeats the header row.
 					visible: root.metadataLine.length > 0 && !providerDetails.ownsHeader
+						&& !root.equivalentPreviewText(root.metadataLine, root.providerLabel)
                     text: root.metadataLine
                     color: Theme.textMuted
 					font.pixelSize: Theme.fontCaption
@@ -2493,14 +2607,14 @@ Rectangle {
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
 			spacing: Theme.space2
-			visible: root.previewState !== "loading" || root.hasFooterOriginalOpenAction
-				|| root.hasPrimaryOpenAction
+			// Only real actions keep the footer; the overflow menu sits in the header.
+			visible: root.hasFooterOriginalOpenAction || root.hasPrimaryOpenAction
+				|| root.hasPrimaryDirectAction || root.inlinePlaybackActive
 
 			ModernButton {
 				objectName: "previewEmbedOriginalButton"
 				visible: root.hasFooterOriginalOpenAction
-				Layout.maximumWidth: Math.max(1, root.actionAvailableWidth
-					- (previewOverflowButton.visible ? previewOverflowButton.implicitWidth + Theme.space2 : 0))
+				Layout.maximumWidth: Math.max(1, root.actionAvailableWidth)
 				Layout.fillWidth: root.narrowLayout
 				text: root.openLabel
 				dense: true
@@ -2558,8 +2672,7 @@ Rectangle {
             ModernButton {
 				objectName: "previewOpenButton"
 				visible: root.hasPrimaryOpenAction
-				Layout.maximumWidth: Math.max(1, root.actionAvailableWidth
-					- (previewOverflowButton.visible ? previewOverflowButton.implicitWidth + Theme.space2 : 0))
+				Layout.maximumWidth: Math.max(1, root.actionAvailableWidth)
 				Layout.fillWidth: root.narrowLayout
 				text: root.openLabel
 				dense: true
@@ -2575,8 +2688,7 @@ Rectangle {
 				id: previewDirectMediaButton
                 objectName: "previewDirectMediaButton"
 				visible: root.hasPrimaryDirectAction
-				Layout.maximumWidth: Math.max(1, root.actionAvailableWidth
-					- (previewOverflowButton.visible ? previewOverflowButton.implicitWidth + Theme.space2 : 0))
+				Layout.maximumWidth: Math.max(1, root.actionAvailableWidth)
 				Layout.fillWidth: root.narrowLayout
 				text: root.hasExternalImage ? qsTr("Open image") : root.hasExternalMedia ? qsTr("Open media")
 					: root.currentMediaKind === "audio" ? qsTr("Play audio in chat")
@@ -2591,105 +2703,6 @@ Rectangle {
 			Item {
 				Layout.fillWidth: true
 				Layout.preferredWidth: 1
-			}
-			ModernIconButton {
-				id: previewOverflowButton
-				objectName: "previewOverflowButton"
-				visible: root.previewState !== "loading" && root.hasOverflowActions
-				dense: true
-				iconName: "more"
-				Accessible.name: qsTr("Preview actions")
-				Accessible.description: root.inlineActionUsesPlaybackSemantics
-					? qsTr("Open secondary playback and preview actions")
-					: qsTr("Open secondary preview actions")
-				onClicked: previewOverflowMenu.open()
-
-				ModernMenu {
-					id: previewOverflowMenu
-					objectName: "previewOverflowMenu"
-					x: Math.min(0, previewOverflowButton.width - width)
-					y: previewOverflowButton.height
-					implicitWidth: 210
-
-					MenuItem {
-						objectName: "previewPopoutButton"
-						visible: root.hasPopoutAction
-						text: root.popoutActionLabel
-						Accessible.description: root.popoutActionDescription
-						onTriggered: {
-							if (root.hasEmbedPreview)
-								root.popoutPlayRequested(root.safeEmbedUrl, root.safeEmbedProvider)
-							else
-								root.requestCurrentDirectMediaPopout()
-						}
-					}
-					MenuItem {
-						objectName: "previewWatchTogetherButton"
-						visible: root.sharedPlaybackSupported
-						enabled: root.watchTogetherAvailable
-						text: root.watchTogetherAvailable ? qsTr("Watch together") : qsTr("Session active")
-						Accessible.description: root.watchTogetherAvailable
-							? qsTr("Start a synchronized media session")
-							: qsTr("End or leave the active media session first")
-						onTriggered: root.watchTogetherRequested(root.safeEmbedUrl,
-							root.safeEmbedProvider, root.displayTitle, root.normalizedEmbedAspect)
-					}
-					MenuItem {
-						objectName: "previewOpenOriginalButton"
-						visible: root.hasSecondaryOriginalOpenAction
-						text: root.preview && root.safeText(root.preview.openLabel, 128).length > 0
-							? root.openLabel : qsTr("Open original")
-						Accessible.name: text + ": " + root.displayTitle
-						Accessible.description: qsTr("Open this item on the original provider")
-						onTriggered: root.externalOpenRequested(root.originalProviderUrl)
-					}
-					MenuSeparator {
-						visible: root.hasSizeActions
-					}
-					MenuItem {
-						objectName: "previewSizeCompactButton"
-						visible: root.hasSizeActions
-						text: qsTr("Compact card")
-						checkable: true
-						checked: root.effectiveSizePreset === "compact"
-						ButtonGroup.group: previewSizeGroup
-						Accessible.role: Accessible.RadioButton
-						Accessible.name: qsTr("Compact media card")
-						Accessible.checked: checked
-						onTriggered: root.setSizePreset("compact")
-					}
-					MenuItem {
-						objectName: "previewSizeStandardButton"
-						visible: root.hasSizeActions
-						text: qsTr("Standard card")
-						checkable: true
-						checked: root.effectiveSizePreset === "default"
-						ButtonGroup.group: previewSizeGroup
-						Accessible.role: Accessible.RadioButton
-						Accessible.name: qsTr("Standard media card")
-						Accessible.checked: checked
-						onTriggered: root.setSizePreset("default")
-					}
-					MenuItem {
-						objectName: "previewSizeLargeButton"
-						visible: root.hasSizeActions
-						text: qsTr("Large card")
-						checkable: true
-						checked: root.effectiveSizePreset === "large"
-						ButtonGroup.group: previewSizeGroup
-						Accessible.role: Accessible.RadioButton
-						Accessible.name: qsTr("Large media card")
-						Accessible.checked: checked
-						onTriggered: root.setSizePreset("large")
-					}
-					MenuItem {
-						objectName: "previewExpandButton"
-						visible: root.canExpand && !root.hasSizeActions
-						text: root.userExpanded ? qsTr("Less") : qsTr("More")
-						Accessible.name: root.userExpanded ? qsTr("Collapse preview") : qsTr("Expand preview")
-						onTriggered: root.userExpanded = !root.userExpanded
-					}
-				}
 			}
         }
     }

@@ -3618,7 +3618,7 @@ TestCase {
 		compare(card.inlinePresentationProvider, "reddit")
 	}
 
-	function test_generic_link_uses_host_identity_mark_and_deduplicates_placeholder_copy() {
+	function test_generic_link_without_image_shows_no_identity_mark_and_deduplicates_copy() {
 		const card = previewLoader.item
 		card.preview = {
 			"state": "ready", "title": "example.com", "subtitle": "example.com",
@@ -3638,10 +3638,10 @@ TestCase {
 		compare(card.genericProviderMark, "EX")
 		compare(card.displayDescription, "")
 		compare(card.hasExpandedDescription, false)
-		tryCompare(compactVisual, "visible", true)
-		tryCompare(providerMark, "visible", true)
-		compare(providerMark.presentation, "mark")
-		compare(providerMark.badgeText, "EX")
+		// The card header names the provider; no initials tile stands in for an image.
+		compare(card.genericHeaderShowsIdentityMark, false)
+		compare(compactVisual.visible, false)
+		compare(providerMark.visible, false)
 		compare(description.visible, false)
 	}
 
@@ -4246,9 +4246,12 @@ TestCase {
 			verify(externalPrimary !== null && !externalPrimary.visible)
 			verify(overflow !== null && overflow.visible)
 			tryCompare(flow, "width", card.actionAvailableWidth)
-			verify(primary.x >= -0.5 && primary.x + primary.width <= overflow.x + 0.5)
-			verify(overflow.x + overflow.width <= flow.width + 0.5)
-			verify(Math.abs(primary.y - overflow.y) <= 1)
+			// The overflow menu sits in the card header, at its right edge.
+			const header = findChild(card, "previewHeaderRow")
+			verify(header !== null)
+			verify(overflow.parent === header)
+			verify(overflow.x + overflow.width <= header.width + 0.5)
+			verify(primary.x >= -0.5 && primary.x + primary.width <= flow.width + 0.5)
 			compare(primary.Accessible.role, Accessible.Link)
 			verify(primary.Accessible.name.length > 0)
 			verify(overflow.Accessible.name.length > 0)

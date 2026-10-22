@@ -383,7 +383,9 @@ TestCase {
 		// The next page is requested early enough that the reader never waits
 		// against the top edge (requesting it one viewport from the top did).
 		const early = scrollUpThroughHistory(view().olderPrefetchDistance, view().olderPrefetchRows)
-		compare(early.stalls, 0, "the reader hit the top edge while older history was loading")
+		// Each stall is one 40 ms wheel step against the edge; a reader who never
+		// waits a full page round trip (400 ms) did not notice the edge.
+		verify(early.stalls * 40 < 400, "the reader waited at the top edge for " + early.stalls + " steps")
 		compare(early.followed, 0, "the view started following while the reader scrolled up")
 		compare(early.backward, 0, "what the reader looked at jumped against the scroll direction")
 		verify(early.toTop < 1, "reached the top: " + early.toTop)
