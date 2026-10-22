@@ -62,6 +62,7 @@
 #include <QtCore/QProcess>
 #include <QtCore/QSaveFile>
 #include <QtGui/QAccessible>
+#include <QtQml/QQmlDebuggingEnabler>
 #include <QtGui/QDesktopServices>
 #if defined(Q_OS_WIN) && defined(MUMBLE_DELAYLOAD_WEBENGINE_QUICK)
 #	include <QtQuick/QQuickWindow>
@@ -475,6 +476,12 @@ int main(int argc, char **argv) {
 	// product lane delay-loads WebEngine until an explicit media action.
 	QtWebEngineQuick::initialize();
 #endif
+
+	// Development switch for profiling the QML shell with qmlprofiler or Qt
+	// Creator: with MUMBLE_QML_DEBUGGING=1 the client honours -qmljsdebugger.
+	if (qEnvironmentVariableIntValue("MUMBLE_QML_DEBUGGING") > 0) {
+		QQmlDebuggingEnabler::enableDebugging(true);
+	}
 
 	// Initialize application object.
 	MumbleApplication a(argc, argv);
