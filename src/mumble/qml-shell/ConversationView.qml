@@ -326,9 +326,14 @@ ListView {
 			}
 		}
 		playerDocked = true
-		playerHost.width = Math.min(360, Math.max(240, width * 0.4))
+		// At most 60% of the view's height: a portrait video docks narrower.
+		const maximumHeight = Math.max(160, height * 0.6) - 32
+		let dockWidth = Math.min(360, Math.max(200, width * 0.4))
+		while (dockWidth > 140 && playerHeightFor(dockWidth) > maximumHeight)
+			dockWidth -= 20
+		playerHost.width = dockWidth
 		playerHost.x = width - playerHost.width - Theme.space4
-		playerHost.y = height - playerHost.height - Theme.space4
+		playerHost.y = Math.max(Theme.space4, height - playerHost.height - Theme.space4)
 	}
 	// Ends playback this view started once its message has left the view.
 	function closePlaybackIfGone() {
