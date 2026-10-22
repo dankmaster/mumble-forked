@@ -15,8 +15,10 @@ import Mumble.Theme 1.0
 //   through layout the list does itself.
 // - While following, growth below eases the view down and ends with a snap.
 // - While reading history, the row at the reading point stays where it is on
-//   screen: whenever layout moves it (a row resizing or arriving anywhere),
-//   the view moves by the same amount in the same layout pass. Qt moves rows
+//   screen: whenever layout moves it or the view (a row resizing or arriving
+//   anywhere, Qt keeping the view near a growing top), the view moves back by
+//   the same amount in the same layout pass. Only the reader's own scrolling
+//   and the view's explicit jumps choose a new reading row. Qt moves rows
 //   differently depending on where the change is (a growing newest row inside
 //   the display margin shifts the rest by twice its growth), so the view
 //   measures the anchor instead of predicting the shift.
@@ -45,6 +47,8 @@ ListView {
 	// never compensated while held.
 	readonly property bool scrollbarDragging: verticalScrollBar.pressed
 	readonly property ListView rowView: view
+	// The row whose action menu is open keeps its action buttons.
+	readonly property string menuStableId: messageActions.targetId
 	// A message the reader jumped to (search match or replied message) is
 	// outlined briefly.
 	property string flashStableId: ""
@@ -62,10 +66,13 @@ ListView {
 	property string anchorStableId: ""
 	property real anchorScreenY: 0
 	property bool holdingAnchor: false
-	// Corrections left in this frame. Qt sometimes moves the rows along with
-	// contentY; the lock must give up then instead of chasing them, or layout
-	// never settles.
-	property int anchorHoldBudget: 4
+	// Set while the view itself jumps (search, reply, fixtures).
+	property bool repositioning: false
+	readonly property bool readerScrolling: moving || scrollbarDragging || scrollHandler.scrolling || repositioning
+	// Corrections left in this frame, so the lock can never keep layout from
+	// settling; when they run out it continues in the next frame.
+	readonly property int anchorHoldsPerFrame: 8
+	property int anchorHoldBudget: anchorHoldsPerFrame
 	property int previewHeightCount: 0
 
 	function tailY() {
@@ -80,6 +87,19 @@ ListView {
 	}
 	function arrivalActive(rowIndex) {
 		return rowIndex <= liveInsertLast && Date.now() - liveInsertAt < 400
+	}
+	// Explicit jumps that choose a new reading position.
+	function positionAt(y) {
+		repositioning = true
+		contentY = y
+		repositioning = false
+		pickAnchor()
+	}
+	function positionAtIndex(index, mode) {
+		repositioning = true
+		positionViewAtIndex(index, mode)
+		repositioning = false
+		pickAnchor()
 	}
 	function pickAnchor() {
 		if (holdingAnchor)
@@ -99,29 +119,32 @@ ListView {
 			return
 		}
 		const shift = anchorItem.y - contentY - anchorScreenY
-		if (Math.abs(shift) < 0.5)
+		if (Math.abs(shift) < 1)
 			return
-		if (anchorHoldBudget <= 0) {
-			if (anchorHoldBudget === 0) {
-				--anchorHoldBudget
-				console.warn("ConversationView: the reading position kept moving with the view; anchor released")
-			}
-			pickAnchor()
+		if (anchorHoldBudget <= 0)
 			return
-		}
-		if (anchorHoldBudget === 4)
+		if (anchorHoldBudget === anchorHoldsPerFrame)
 			Qt.callLater(resetAnchorHoldBudget)
 		--anchorHoldBudget
 		holdingAnchor = true
 		contentY += shift
 		holdingAnchor = false
-		// If the rows moved with the view, the reader's row did not come back:
-		// take where it is now as the new reading point.
-		if (Math.abs(anchorItem.y - contentY - anchorScreenY) >= 0.5)
-			pickAnchor()
+		// pixelAligned rounds contentY, so up to half a pixel may remain.
+		if (Math.abs(anchorItem.y - contentY - anchorScreenY) < 1.5)
+			return
+		// Layout has already moved the row, but Qt updates the content's edges
+		// (originY, contentHeight) a pass later, so the view stops at a stale
+		// edge. Keep the reading row and finish when the edges move.
+		if (atYBeginning || atYEnd)
+			return
+		// The rows moved with the view: take where the row is now.
+		pickAnchor()
 	}
 	function resetAnchorHoldBudget() {
-		anchorHoldBudget = 4
+		const exhausted = anchorHoldBudget <= 0
+		anchorHoldBudget = anchorHoldsPerFrame
+		if (exhausted)
+			holdAnchor()
 	}
 	function loadOlderIfNeeded() {
 		if (!visible || count === 0 || scrollbarDragging || !commands.canLoadOlder || commands.loadingOlder)
@@ -171,7 +194,7 @@ ListView {
 		if (row < 0 || row >= count)
 			return false
 		followTail = false
-		positionViewAtIndex(row, ListView.Center)
+		positionAtIndex(row, ListView.Center)
 		flashStableId = String(stableId || "")
 		flashTimer.restart()
 		return true
@@ -340,16 +363,26 @@ ListView {
 	}
 
 	onContentYChanged: {
-		pickAnchor()
+		// The reader's scrolling picks a new reading row; anything else moving
+		// the view is layout, which the lock undoes.
+		if (readerScrolling || followTail)
+			pickAnchor()
+		else
+			holdAnchor()
 		Qt.callLater(loadOlderIfNeeded)
 	}
 	onHeightChanged: pickAnchor()
+	onOriginYChanged: if (!readerScrolling) holdAnchor()
+	onContentHeightChanged: if (!readerScrolling) holdAnchor()
 	onCountChanged: {
 		Qt.callLater(loadOlderIfNeeded)
 		Qt.callLater(continuePendingReveal)
 	}
 	onMovementStarted: followTail = false
-	onMovementEnded: followTail = nearTail()
+	onMovementEnded: {
+		followTail = nearTail()
+		pickAnchor()
+	}
 	// Far jumps cut straight to the newest page; short distances ease in below.
 	onFollowTailChanged: {
 		if (followTail && tailY() - contentY > height * 2)
@@ -362,6 +395,7 @@ ListView {
 			followTail = false
 		} else {
 			followTail = nearTail()
+			pickAnchor()
 			Qt.callLater(loadOlderIfNeeded)
 		}
 	}
@@ -463,6 +497,7 @@ ListView {
 		onScrollingStarted: view.followTail = false
 		onScrollingEnded: {
 			view.followTail = view.nearTail()
+			view.pickAnchor()
 			Qt.callLater(view.loadOlderIfNeeded)
 		}
 	}

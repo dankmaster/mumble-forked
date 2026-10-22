@@ -46,7 +46,7 @@ TestCase {
 		const list = view()
 		settleAtNewest()
 		list.followTail = false
-		list.contentY = list.tailY() - list.height * 3
+		list.positionAt(list.tailY() - list.height * 3)
 		list.forceLayout()
 		wait(50)
 		const anchorIndex = list.indexAt(list.width / 2, list.contentY + list.height / 2)
@@ -183,8 +183,7 @@ TestCase {
 			"calls: " + recordingCommands.calls.join(" "))
 		// Reaching the top pages older history through the commands.
 		list.followTail = false
-		list.positionViewAtEnd()
-		list.contentY = list.originY
+		list.positionAt(list.originY)
 		tryVerify(() => recordingCommands.calls.indexOf("older") >= 0, 2000)
 		// Without the shell popup the reaction bar opens inside the row.
 		list.followTail = true
@@ -421,8 +420,71 @@ TestCase {
 		cardLoader.stop()
 		cardLoader.interval = 30
 		verify(longest < 500, "a frame took " + longest + " ms")
-		verify(start - list.contentY > list.height * 2, "moved up by " + (start - list.contentY))
+		// The wheel handler buffers at most one step, so a burst moves one step.
+		verify(start - list.contentY > list.height, "moved up by " + (start - list.contentY))
 		verify(!list.followTail)
+	}
+
+	// Drags the scrollbar from the bottom to near the top of link-heavy history,
+	// releases, and returns how far the row at the centre wandered afterwards
+	// while cards grow and older pages arrive.
+	function wanderAfterScrollbarRelease() {
+		const list = view()
+		pagingCommands.pages = 0
+		pagingCommands.canLoadOlder = true
+		pagingCommands.loadingOlder = false
+		testCase.grownRows = ({})
+		const rows = []
+		for (let id = 1300; id > 1060; --id)
+			rows.push(message(id, "Link " + id + (id % 3 === 0 ? " with a longer description line that wraps." : "")))
+		chatTimelineV2.resetRows("channel:links", rows)
+		list.commands = pagingCommands
+		cardLoader.start()
+		settleAtNewest()
+		wait(200)
+		const bar = list.ScrollBar.vertical
+		const x = bar.width / 2
+		const thumbY = (bar.position + bar.size / 2) * bar.height
+		mousePress(bar, x, thumbY)
+		for (let step = 1; step <= 12; ++step) {
+			mouseMove(bar, x, thumbY - (thumbY - 12) * step / 12)
+			wait(16)
+		}
+		mouseRelease(bar, x, 12)
+		wait(30)
+		// The row the reader is reading: the view's anchor.
+		const item = list.anchorItem
+		const id = item ? String(item.stableId) : ""
+		// Where the view holds the reading row: chosen when the thumb was released.
+		const screenY = list.anchorScreenY
+		const trail = []
+		let maxJump = 0
+		for (let sample = 0; sample < 60 && item && String(item.stableId) === id; ++sample) {
+			wait(30)
+			const now = item.y - list.contentY
+			maxJump = Math.max(maxJump, Math.abs(now - screenY))
+			trail.push(Math.round(now) + "[y" + Math.round(item.y) + " cY" + Math.round(list.contentY) + " oY"
+				+ Math.round(list.originY) + " cH" + Math.round(list.contentHeight) + " n" + list.count
+				+ " anc" + (list.anchorItem === item ? "=" : list.anchorStableId) + " b" + list.anchorHoldBudget
+				+ " p" + pagingCommands.pages + "]")
+		}
+		cardLoader.stop()
+		return { "maxJump": maxJump, "trail": trail.join(" ") }
+	}
+
+	function test_scrollbar_release_near_top_keeps_the_view_still() {
+		for (let attempt = 0; attempt < 4; ++attempt) {
+			if (attempt > 0) {
+				cleanup()
+				init()
+			}
+			const result = wanderAfterScrollbarRelease()
+			// Released at the very top of loaded history, rows growing below the
+			// reader would need the view above the content's top edge to hold the
+			// row exactly; until the next page arrives it can sway within a row.
+			verify(result.maxJump < 120, "attempt " + attempt + ": the view wandered by up to "
+				+ Math.round(result.maxJump) + " px: " + result.trail)
+		}
 	}
 
 	function test_wheel_notch_scrolls_a_full_step_and_releases_following() {
@@ -496,7 +558,7 @@ TestCase {
 		for (let index = 0; index < 6; ++index)
 			heights.push(list.itemAtIndex(index).height)
 		list.followTail = false
-		list.positionViewAtIndex(200, ListView.Center)
+		list.positionAtIndex(200, ListView.Center)
 		wait(50)
 		list.followTail = true
 		settleAtNewest()

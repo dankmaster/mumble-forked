@@ -1258,7 +1258,7 @@ ApplicationWindow {
 			if (index < 0)
 				return false
 			view.followTail = false
-			view.positionViewAtIndex(index, ListView.Beginning)
+			view.positionAtIndex(index, ListView.Beginning)
 			return true
 		}
 		const row = chatModel.presentationModel.rowForStableId(String(stableId || ""))

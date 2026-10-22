@@ -46,6 +46,7 @@ ChatMessageFrame {
 	readonly property bool hasActions: canReply || canReact || canDelete || deliveryCanRetry
 	property bool inlineReactionsOpen: false
 	readonly property bool actionsOpen: inlineReactionsOpen
+		|| (!!view && view.menuStableId === stableId)
 		|| (!!view && view.hostReactionPopup && !!host && host.quickReactionMessageId === stableId)
 	// Widths come from the frame's bindings, not from contentItem: its anchors
 	// resolve only after creation, and the first layout must already be final.
@@ -482,71 +483,82 @@ ChatMessageFrame {
 		}
 	}
 
-	// Hover actions float over the row and never take layout space.
-	Rectangle {
-		id: actionTray
-		visible: row.hasActions && !row.systemRow && (row.hovered || row.actionsOpen)
+	// Hover actions float over the row and never take layout space. They are
+	// created only while shown: rows are laid out a viewport ahead, and five
+	// buttons per row made fast scrolling stall.
+	Loader {
+		id: actionTrayLoader
+		active: row.hasActions && !row.systemRow && (row.hovered || row.actionsOpen)
 		anchors.right: parent.right
 		y: -Theme.space2
 		z: 5
-		width: actionButtons.implicitWidth + Theme.space1
-		height: 32
-		radius: height / 2
-		color: Theme.strip
-		border.color: Theme.divider
+		sourceComponent: actionTrayComponent
+	}
 
-		Row {
-			id: actionButtons
-			anchors.centerIn: parent
+	Component {
+		id: actionTrayComponent
 
-			QuickReactionBar {
-				visible: row.inlineReactionsOpen
-				anchors.verticalCenter: parent.verticalCenter
-				expanded: row.inlineReactionsOpen
-				activeReactions: row.reactionsForQuickBar()
-				onReactionRequested: emoji => {
-					row.view.commands.toggleReaction(row.stableId, emoji)
-					row.inlineReactionsOpen = false
+		Rectangle {
+			id: actionTray
+			width: actionButtons.implicitWidth + Theme.space1
+			height: 32
+			radius: height / 2
+			color: Theme.strip
+			border.color: Theme.divider
+
+			Row {
+				id: actionButtons
+				anchors.centerIn: parent
+
+				QuickReactionBar {
+					visible: row.inlineReactionsOpen
+					anchors.verticalCenter: parent.verticalCenter
+					expanded: row.inlineReactionsOpen
+					activeReactions: row.reactionsForQuickBar()
+					onReactionRequested: emoji => {
+						row.view.commands.toggleReaction(row.stableId, emoji)
+						row.inlineReactionsOpen = false
+					}
 				}
-			}
-			ModernIconButton {
-				visible: row.canReply
-				dense: true
-				iconName: "reply"
-				text: qsTr("Reply")
-				Accessible.name: text
-				onClicked: row.view.commands.reply(row.stableId)
-			}
-			ModernIconButton {
-				id: reactButton
-				visible: row.canReact
-				dense: true
-				iconName: "reaction"
-				selected: row.actionsOpen
-				text: selected ? qsTr("Close reactions") : qsTr("Add reaction")
-				Accessible.name: text
-				onClicked: {
-					if (!row.view.hostReactionPopup)
-						row.inlineReactionsOpen = !row.inlineReactionsOpen
-					else if (row.host)
-						row.host.toggleQuickReactions(row.stableId, -1, reactButton, row.reactionsForQuickBar())
+				ModernIconButton {
+					visible: row.canReply
+					dense: true
+					iconName: "reply"
+					text: qsTr("Reply")
+					Accessible.name: text
+					onClicked: row.view.commands.reply(row.stableId)
 				}
-			}
-			ModernIconButton {
-				visible: row.deliveryCanRetry
-				dense: true
-				iconName: "retry"
-				text: qsTr("Retry")
-				Accessible.name: text
-				onClicked: row.view.commands.retry(row.stableId)
-			}
-			ModernIconButton {
-				id: moreButton
-				dense: true
-				iconName: "more"
-				text: qsTr("More actions")
-				Accessible.name: text
-				onClicked: row.openActions(moreButton, 0, moreButton.height)
+				ModernIconButton {
+					id: reactButton
+					visible: row.canReact
+					dense: true
+					iconName: "reaction"
+					selected: row.actionsOpen
+					text: selected ? qsTr("Close reactions") : qsTr("Add reaction")
+					Accessible.name: text
+					onClicked: {
+						if (!row.view.hostReactionPopup)
+							row.inlineReactionsOpen = !row.inlineReactionsOpen
+						else if (row.host)
+							row.host.toggleQuickReactions(row.stableId, -1, reactButton, row.reactionsForQuickBar())
+					}
+				}
+				ModernIconButton {
+					visible: row.deliveryCanRetry
+					dense: true
+					iconName: "retry"
+					text: qsTr("Retry")
+					Accessible.name: text
+					onClicked: row.view.commands.retry(row.stableId)
+				}
+				ModernIconButton {
+					id: moreButton
+					dense: true
+					iconName: "more"
+					text: qsTr("More actions")
+					Accessible.name: text
+					onClicked: row.openActions(moreButton, 0, moreButton.height)
+				}
 			}
 		}
 	}
