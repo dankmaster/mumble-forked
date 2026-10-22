@@ -377,7 +377,12 @@ ChatMessageFrame {
 						"playing": card ? !!card.inlinePlaybackActive : false,
 						"stage": card ? !!card.inlineMediaStageVisible : false,
 						"stageHeight": card ? card.embedPanelHeight : 0,
-						"typed": card ? !!card.typedDocumentActive : false
+						"typed": card ? !!card.typedDocumentActive : false,
+						// Where the slot, the card and its media box sit in the row.
+						"slotY": Math.round(mapToItem(row, 0, 0).y),
+						"cardY": card ? Math.round(card.mapToItem(row, 0, 0).y) : -1,
+						"mediaY": card && card.mediaBox ? Math.round(card.mediaBox.mapToItem(row, 0, 0).y) : -1,
+						"bodyVisible": !row.bodyIsPreviewLink
 					}
 				}
 				visible: row.showPreviewCard || row.showPreviewPlaceholder
