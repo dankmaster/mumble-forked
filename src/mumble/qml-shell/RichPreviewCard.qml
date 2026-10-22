@@ -423,6 +423,9 @@ Rectangle {
 			|| (hasEmbedPreview && localPlaybackSupported && !embedPosterUnavailable)
 			|| hasDirectMedia)
 		&& (!typedDocumentUsesGallery || inlinePlaybackActive)
+		// A template that shows its own picture (Steam, articles) is the media;
+		// the stage appears only to play, and then the template hides its picture.
+		&& (!providerDetails.ownsMediaGallery || imageSource.length === 0 || inlinePlaybackActive)
 	readonly property string inlinePresentationProvider: hasEmbedPreview
 		? normalizedEmbedProvider
 		: String(providerDetails.providerToken || providerLabel || "").trim()
@@ -2590,6 +2593,7 @@ Rectangle {
 					expanded: root.expanded
 					steamMediaItems: root.mediaItems
 					steamMediaIndex: root.selectedMediaIndex
+					mediaStageActive: root.inlinePlaybackActive
 					onExternalOpenRequested: (url) => root.externalOpenRequested(url)
 					onSteamMediaSelectionRequested: (index) =>
 						root.selectedMediaIndex = index

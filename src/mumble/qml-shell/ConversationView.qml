@@ -251,8 +251,20 @@ ListView {
 				y += 8
 				continue
 			}
-			visibleRows.push({ "id": String(item.stableId || ""), "y": item.y - contentY, "height": item.height })
+			const row = { "id": String(item.stableId || ""), "y": item.y - contentY, "height": item.height }
+			if (item.previewGeometry)
+				row.preview = item.previewGeometry()
+			visibleRows.push(row)
 			y = item.y + item.height
+		}
+		// Rows laid over each other, or a row drawn taller than the list placed it.
+		const placed = contentItem.children.filter(child => child.visible && child.stableId !== undefined
+			&& child.y + child.height > contentY && child.y < contentY + height)
+			.sort((a, b) => a.y - b.y)
+		let overlappingRows = 0
+		for (let i = 1; i < placed.length; ++i) {
+			if (placed[i - 1].y + placed[i - 1].height > placed[i].y + 1)
+				++overlappingRows
 		}
 		const settled = !moving && !flicking && !tailFollower.running && hydrationQueue.length === 0
 		return {
@@ -273,6 +285,7 @@ ListView {
 			"contentY": contentY,
 			"followTail": followTail,
 			"visibleRows": visibleRows,
+			"overlappingRows": overlappingRows,
 			"visibleDeferredSummaryCount": 0,
 			"visibleBlankPresentationCount": 0,
 			"visibleBlankPreviewSurfaceCount": 0,

@@ -1670,6 +1670,10 @@ namespace {
 	}
 }
 
+namespace ModernChatPreview {
+	QVariantMap normalized(const QVariant &value) { return normalizedPreview(value); }
+}
+
 namespace ModernMotd {
 	namespace {
 		constexpr int MaxStoredServerStates = 64;

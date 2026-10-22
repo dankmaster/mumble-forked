@@ -30891,9 +30891,19 @@ void MainWindow::initializeChatTimelineV2Feed() {
 }
 
 
+namespace {
+	// Rows show previews the way the old timeline did, typed document included.
+	QVariantMap chatTimelineV2ExtrasState(QVariantMap state) {
+		const QVariant preview = state.contains(QStringLiteral("preview")) ? state.value(QStringLiteral("preview"))
+																		  : state.value(QStringLiteral("previewStub"));
+		state.insert(QStringLiteral("preview"), ModernChatPreview::normalized(preview));
+		return state;
+	}
+} // namespace
+
 void MainWindow::mirrorChatTimelineV2Extras(const QVariantMap &messageState) {
 	if (m_chatTimelineV2Feed && m_qmlShellHost) {
-		m_qmlShellHost->chatTimelineV2Model()->setExtras(messageState);
+		m_qmlShellHost->chatTimelineV2Model()->setExtras(chatTimelineV2ExtrasState(messageState));
 	}
 }
 
@@ -30909,6 +30919,7 @@ void MainWindow::mirrorChatTimelineV2DirectExtras(const ModernDirectMessageEntry
 	state.insert(QStringLiteral("messageId"), persistent ? entry.persistentMessage->message_id()
 														 : static_cast< quint32 >(entry.localID));
 	state.insert(QStringLiteral("stableId"), state.value(QStringLiteral("id")));
+	state = chatTimelineV2ExtrasState(std::move(state));
 	m_qmlShellHost->chatTimelineV2DirectModel()->setExtras(state);
 	if (mainView) {
 		m_qmlShellHost->chatTimelineV2Model()->setExtras(state);

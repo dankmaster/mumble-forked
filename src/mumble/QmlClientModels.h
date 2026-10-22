@@ -31,6 +31,12 @@ namespace ModernMotd {
 	QVariantList documentBlocks(const QString &html);
 }
 
+namespace ModernChatPreview {
+	// The preview a timeline row shows: known fields only, plus the typed embed
+	// document when the provider has one.
+	QVariantMap normalized(const QVariant &value);
+}
+
 namespace QmlVisualFixtureMutation {
 	inline constexpr char OverrideProperty[] = "_mumbleVisualFixtureOverride";
 	inline constexpr char WriteProperty[] = "_mumbleVisualFixtureWrite";

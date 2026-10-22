@@ -5344,6 +5344,9 @@ void TestQmlClientModels::chatTimelineNormalizesProviderMetadata() {
 void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	ChatTimelineModel model;
 	int sequence = 0;
+	// The v2 timeline mirrors previews through ModernChatPreview; it must carry
+	// the same typed document as the old timeline.
+	int v2DocumentMismatches = 0;
 	const auto normalizedDocument = [&](const QVariantMap &preview) {
 		const QString key = QStringLiteral("embed-document:%1").arg(++sequence);
 		if (!model.upsertMessage({
@@ -5352,9 +5355,13 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 			})) {
 			return QVariantMap {};
 		}
-		return model.get(model.rowCount() - 1)
-			.value(QStringLiteral("preview")).toMap()
-			.value(QStringLiteral("document")).toMap();
+		const QVariantMap document = model.get(model.rowCount() - 1)
+										 .value(QStringLiteral("preview")).toMap()
+										 .value(QStringLiteral("document")).toMap();
+		if (ModernChatPreview::normalized(preview).value(QStringLiteral("document")).toMap() != document) {
+			++v2DocumentMismatches;
+		}
+		return document;
 	};
 
 	const QString xSource = QStringLiteral("https://x.com/historyinmemes/status/2058971862265151767");
@@ -5903,6 +5910,7 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	QVERIFY(directDocument.value(QStringLiteral("commonPresentation")).toBool());
 	QCOMPARE(directDocument.value(QStringLiteral("provider")).toMap()
 				 .value(QStringLiteral("id")).toString(), QStringLiteral("direct"));
+	QCOMPARE(v2DocumentMismatches, 0);
 }
 
 void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {

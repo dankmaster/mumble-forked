@@ -22,6 +22,9 @@ FocusScope {
 	property bool expanded: false
 	property var steamMediaItems: []
 	property int steamMediaIndex: 0
+	// The card's stage is playing this media: the template's own picture of it
+	// steps aside so the media shows once.
+	property bool mediaStageActive: false
 	readonly property bool compactLayout: width < 440
 	readonly property string stableKind: normalizedStableKind()
 	readonly property string stableProvider: normalizedStableProvider()
@@ -1565,7 +1568,7 @@ FocusScope {
 						Layout.preferredWidth: visible ? (root.compactLayout ? 108 : 164) : 0
 						Layout.preferredHeight: visible ? (root.compactLayout ? 78 : 108) : 0
 						Layout.alignment: Qt.AlignTop
-						visible: root.managedPreviewImageSource.length > 0
+						visible: !root.mediaStageActive && root.managedPreviewImageSource.length > 0
 						radius: Theme.innerRadius
 						color: Theme.embedSurface
 						clip: true
@@ -2034,7 +2037,8 @@ FocusScope {
 					objectName: "providerSteamHero"
 					Layout.fillWidth: true
 					Layout.preferredHeight: visible ? (root.compactLayout ? 116 : 140) : 0
-					visible: root.safeManagedImageSource(root.previewImageSource).length > 0
+					visible: !root.mediaStageActive
+						&& root.safeManagedImageSource(root.previewImageSource).length > 0
 					radius: Theme.innerRadius
 					color: Theme.embedSurface
 					border.color: Theme.embedBorder

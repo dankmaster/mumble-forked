@@ -4577,6 +4577,11 @@ TestCase {
 		compare(second.Accessible.selected, true)
 		const counter = findChild(card, "providerSteamMediaCounter")
 		compare(counter.text, "2 / 3")
+		// With the trailer selected the template's hero shows it; the card's own
+		// stage stays hidden until playback, so the clip is not shown twice.
+		verify(card.hasDirectMedia)
+		compare(card.inlineMediaStageVisible, false)
+		verify(findChild(card, "providerSteamHero").visible)
 		const heroAction = findChild(card, "providerSteamHeroAction")
 		verify(heroAction !== null)
 		heroAction.clicked()

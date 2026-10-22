@@ -78,6 +78,10 @@ ChatMessageFrame {
 
 	// Arrival animation: paint only (opacity and a short rise), owned by the row so
 	// it starts and stops with the delegate and never moves the list itself.
+	function previewGeometry() {
+		return previewSlot.visible ? previewSlot.geometry() : null
+	}
+
 	function playArrival() {
 		arrival.stop()
 		if (view && view.arrivalActive(index)) {
@@ -328,6 +332,19 @@ ChatMessageFrame {
 
 			Item {
 				id: previewSlot
+				function geometry() {
+					const card = previewLoader.item
+					return {
+						"slot": height,
+						"cardImplicit": card ? card.implicitHeight : -1,
+						"card": card ? card.height : -1,
+						"cardContent": card ? card.childrenRect.height : -1,
+						"playing": card ? !!card.inlinePlaybackActive : false,
+						"stage": card ? !!card.inlineMediaStageVisible : false,
+						"stageHeight": card ? card.embedPanelHeight : 0,
+						"typed": card ? !!card.typedDocumentActive : false
+					}
+				}
 				visible: row.showPreviewCard || row.showPreviewPlaceholder
 				width: Math.min(row.columnWidth, Theme.chatRichMaximumWidth - Theme.avatarMedium - Theme.space2)
 				// A card seen before keeps its last height while it loads again, so a
