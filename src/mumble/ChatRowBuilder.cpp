@@ -390,10 +390,15 @@ ChatTimelineRow ChatRowBuilder::build(const MumbleProto::ChatMessage &message) c
 			card.title          = fromUtf8(embed.title());
 			card.description    = fromUtf8(embed.description());
 			card.previewAssetId = embed.preview_asset_id();
-			// Embeds carry no preview dimensions yet, so a thumbnail gets the fixed
-			// small slot; the image is fitted into it.
-			card.layout = card.previewAssetId > 0 ? ChatTimelineCard::Layout::SmallThumbnail
-												  : ChatTimelineCard::Layout::Compact;
+			card.previewWidth   = static_cast< int >(embed.preview_width());
+			card.previewHeight  = static_cast< int >(embed.preview_height());
+			// A wide preview of known size gets the large slot. Without a size (older
+			// servers) a thumbnail gets the fixed small slot and is fitted into it.
+			const bool wide = card.previewWidth >= 400 && card.previewHeight > 0
+							  && card.previewWidth * 10 >= card.previewHeight * 13;
+			card.layout = card.previewAssetId == 0 ? ChatTimelineCard::Layout::Compact
+						  : wide                   ? ChatTimelineCard::Layout::LargeThumbnail
+												   : ChatTimelineCard::Layout::SmallThumbnail;
 			row.kind    = ChatTimelineRowKind::LinkCard;
 			break;
 		}

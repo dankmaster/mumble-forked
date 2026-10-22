@@ -859,6 +859,10 @@ message ChatEmbedRef {
 	optional string site_name = 5;
 	optional uint32 preview_asset_id = 6;
 	optional string error_code = 7;
+	// Pixel size of the preview asset, so clients can lay out the card at its
+	// final size before the image arrives. Absent when unknown.
+	optional uint32 preview_width = 8;
+	optional uint32 preview_height = 9;
 }
 
 message ChatReactionAggregate {

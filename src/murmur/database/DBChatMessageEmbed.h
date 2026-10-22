@@ -25,6 +25,9 @@ namespace server {
 			std::string description                      = {};
 			std::string siteName                         = {};
 			std::string errorCode                        = {};
+			// Size of the preview asset; read with the embed, not stored with it.
+			unsigned int previewWidth                    = 0;
+			unsigned int previewHeight                   = 0;
 			ChatEmbedStatus status                       = ChatEmbedStatus::Pending;
 			std::chrono::system_clock::time_point fetchedAt = {};
 			std::chrono::system_clock::time_point expiresAt = {};

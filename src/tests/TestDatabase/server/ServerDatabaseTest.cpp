@@ -1734,8 +1734,11 @@ void ServerDatabaseTest::chatAssetTable_orphanRetention() {
 	const auto oldTime   = std::chrono::system_clock::time_point(std::chrono::seconds(100));
 	const auto freshTime = std::chrono::system_clock::time_point(std::chrono::seconds(1000));
 	auto addAsset = [&](unsigned int assetID, const std::string &storageKey,
-						const std::chrono::system_clock::time_point &createdAt) {
+						const std::chrono::system_clock::time_point &createdAt, unsigned int width = 0,
+						unsigned int height = 0) {
 		::msdb::DBChatAsset asset(serverID, assetID);
+		asset.width         = width;
+		asset.height        = height;
 		asset.sha256        = "hash-" + std::to_string(assetID);
 		asset.storageKey    = storageKey;
 		asset.mime          = "application/octet-stream";
@@ -1753,7 +1756,7 @@ void ServerDatabaseTest::chatAssetTable_orphanRetention() {
 	addAsset(6, "preview-key", oldTime);
 	addAsset(5, "parent-key", oldTime);
 	db.getChatAssetTable().updatePreviewAssetID(serverID, 5, 6);
-	addAsset(7, "embed-key", oldTime);
+	addAsset(7, "embed-key", oldTime, 1200, 630);
 	addAsset(8, "fresh-key", freshTime);
 
 	auto addMessage = [&](unsigned int messageID, const std::string &body) {
@@ -1788,6 +1791,11 @@ void ServerDatabaseTest::chatAssetTable_orphanRetention() {
 	embed.fetchedAt      = oldTime;
 	embed.expiresAt      = freshTime;
 	db.getChatMessageEmbedTable().setEmbeds(serverID, 3, { embed });
+	// Embeds are read with the size of their preview asset.
+	const std::vector< ::msdb::DBChatMessageEmbed > storedEmbeds = db.getChatMessageEmbedTable().getEmbeds(serverID, 3);
+	QCOMPARE(storedEmbeds.size(), static_cast< std::size_t >(1));
+	QCOMPARE(storedEmbeds.front().previewWidth, 1200U);
+	QCOMPARE(storedEmbeds.front().previewHeight, 630U);
 
 	const auto cutoff = std::chrono::system_clock::time_point(std::chrono::seconds(500));
 	std::vector< std::string > deletableKeys =

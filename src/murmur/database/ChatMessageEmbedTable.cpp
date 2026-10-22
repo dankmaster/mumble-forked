@@ -134,12 +134,17 @@ namespace server {
 				soci::row row;
 				::mdb::TransactionHolder transaction = ensureTransaction();
 				soci::statement stmt =
-					(m_sql.prepare << "SELECT \"" << column::url_hash << "\", \"" << column::canonical_url << "\", \""
-								   << column::title << "\", \"" << column::description << "\", \"" << column::site_name
-								   << "\", \"" << column::preview_asset_id << "\", \"" << column::status << "\", \""
-								   << column::fetched_at << "\", \"" << column::expires_at << "\", \""
-								   << column::error_code << "\" FROM \"" << NAME << "\" WHERE \"" << column::server_id
-								   << "\" = :serverID AND \"" << column::message_id << "\" = :messageID ORDER BY \""
+					(m_sql.prepare << "SELECT cme.\"" << column::url_hash << "\", cme.\"" << column::canonical_url
+								   << "\", cme.\"" << column::title << "\", cme.\"" << column::description << "\", cme.\""
+								   << column::site_name << "\", cme.\"" << column::preview_asset_id << "\", cme.\""
+								   << column::status << "\", cme.\"" << column::fetched_at << "\", cme.\""
+								   << column::expires_at << "\", cme.\"" << column::error_code << "\", ca.\""
+								   << ChatAssetTable::column::width << "\", ca.\"" << ChatAssetTable::column::height
+								   << "\" FROM \"" << NAME << "\" cme LEFT JOIN \"" << ChatAssetTable::NAME
+								   << "\" ca ON ca.\"" << ChatAssetTable::column::server_id << "\" = cme.\""
+								   << column::server_id << "\" AND ca.\"" << ChatAssetTable::column::asset_id
+								   << "\" = cme.\"" << column::preview_asset_id << "\" WHERE cme.\"" << column::server_id
+								   << "\" = :serverID AND cme.\"" << column::message_id << "\" = :messageID ORDER BY cme.\""
 								   << column::url_hash << "\" ASC",
 					 soci::use(serverID), soci::use(messageID), soci::into(row));
 
@@ -160,6 +165,10 @@ namespace server {
 					embed.expiresAt =
 						std::chrono::system_clock::time_point(std::chrono::seconds(row.get< long long >(8)));
 					embed.errorCode = row.get< std::string >(9);
+					if (row.get_indicator(10) == soci::i_ok && row.get_indicator(11) == soci::i_ok) {
+						embed.previewWidth  = static_cast< unsigned int >(row.get< int >(10));
+						embed.previewHeight = static_cast< unsigned int >(row.get< int >(11));
+					}
 					embeds.push_back(std::move(embed));
 				}
 

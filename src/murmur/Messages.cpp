@@ -1041,6 +1041,10 @@ MumbleProto::ChatEmbedRef protoEmbedRefFromDB(const msdb::DBChatMessageEmbed &em
 	if (!embed.errorCode.empty()) {
 		protoEmbed.set_error_code(embed.errorCode);
 	}
+	if (embed.previewAssetID && embed.previewWidth > 0 && embed.previewHeight > 0) {
+		protoEmbed.set_preview_width(embed.previewWidth);
+		protoEmbed.set_preview_height(embed.previewHeight);
+	}
 	return protoEmbed;
 }
 
@@ -3375,6 +3379,8 @@ void Server::applyChatEmbedFetchResult(unsigned int threadID, unsigned int messa
 	qhPendingChatEmbedAssists.remove(assistKey);
 
 	m_dbWrapper.setChatMessageEmbeds(iServerNum, messageID, embeds);
+	// Read them back so the state carries the preview sizes joined from the assets.
+	embeds = m_dbWrapper.getChatMessageEmbeds(iServerNum, messageID);
 	invalidateChatHistoryCache(message->threadID);
 
 	Channel *permissionChannel = qhChannels.value(permissionChannelID);

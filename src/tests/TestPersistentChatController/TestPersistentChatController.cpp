@@ -1211,6 +1211,16 @@ void TestPersistentChatController::rowBuilderClassifiesMediaAndCards() {
 	QVERIFY(card.card.layout == ChatTimelineCard::Layout::SmallThumbnail);
 	QCOMPARE(card.card.title, QStringLiteral("Article"));
 
+	// A wide preview of known size takes the large slot; a tall one stays small.
+	embed->set_preview_width(1200);
+	embed->set_preview_height(630);
+	const ChatTimelineRow wideCard = builder.build(linked);
+	QVERIFY(wideCard.card.layout == ChatTimelineCard::Layout::LargeThumbnail);
+	QCOMPARE(wideCard.card.previewWidth, 1200);
+	embed->set_preview_width(400);
+	embed->set_preview_height(600);
+	QVERIFY(builder.build(linked).card.layout == ChatTimelineCard::Layout::SmallThumbnail);
+
 	embed->set_status(MumbleProto::ChatEmbedStatusFailed);
 	QVERIFY(builder.build(linked).kind == ChatTimelineRowKind::Text);
 }
