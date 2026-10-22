@@ -850,6 +850,10 @@ ListView {
 			y: dockBar.height
 			width: parent.width
 			active: view.playingStableId.length > 0
+			// Incubated like the card's own player: a WebEngineView created in one
+			// synchronous pass gets its profile after the default one and crashes
+			// in QQuickWebEngineView::setProfile.
+			asynchronous: true
 			onLoaded: view.placePlayer()
 		}
 		FrameAnimation {

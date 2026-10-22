@@ -1258,6 +1258,27 @@ ApplicationWindow {
 		view.positionAtIndex(index, ListView.Beginning)
 		return true
 	}
+	// Automation: plays the card of the conversation's row at an index.
+	function playConversationRowAt(index) {
+		const view = conversationViewLoader.item
+		if (!positionConversationRowAt(index))
+			return false
+		view.forceLayout()
+		const row = view.itemAtIndex(index)
+		return !!row && view.startPlayback(row)
+	}
+	// Automation: opens the detail sheet of the conversation's row at an index.
+	function openConversationDetailsAt(index, mediaIndex) {
+		const view = conversationViewLoader.item
+		if (!positionConversationRowAt(index))
+			return false
+		view.forceLayout()
+		const row = view.itemAtIndex(index)
+		if (!row || !row.usesEmbedCard)
+			return false
+		view.openDetails(row, mediaIndex)
+		return true
+	}
 	function positionVisualFixtureTimelineAt(stableId) {
 		if (!root.visualFixtureOverrideActive)
 			return false

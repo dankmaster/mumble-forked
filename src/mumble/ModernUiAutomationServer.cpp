@@ -6788,6 +6788,20 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return okResponse();
 	}
 
+	if (command == QLatin1String("qmlPlayConversationRow") || command == QLatin1String("qmlOpenConversationDetails")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariant done;
+		const bool invoked = command == QLatin1String("qmlPlayConversationRow")
+			? QMetaObject::invokeMethod(host->window(), "playConversationRowAt", Q_RETURN_ARG(QVariant, done),
+										Q_ARG(QVariant, request.value(QStringLiteral("index")).toInt()))
+			: QMetaObject::invokeMethod(host->window(), "openConversationDetailsAt", Q_RETURN_ARG(QVariant, done),
+										Q_ARG(QVariant, request.value(QStringLiteral("index")).toInt()),
+										Q_ARG(QVariant, request.value(QStringLiteral("mediaIndex")).toInt()));
+		if (!invoked || !done.toBool()) return errorResponse(tr("The conversation row could not do that."));
+		return okResponse();
+	}
+
 	if (command == QLatin1String("qmlRunningAnimations")) {
 		// Animations that keep the render loop ticking, with where they are declared
 		// and whether their item can be seen at all.
