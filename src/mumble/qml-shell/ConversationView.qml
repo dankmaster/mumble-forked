@@ -56,6 +56,20 @@ ListView {
 	property int pendingRevealMessage: 0
 	property int pendingRevealPages: 0
 	property var previewHeights: ({})
+	// One player for the conversation's link cards: it covers the playing card's
+	// media box while that is on screen and docks in the corner while it is not.
+	readonly property var session: typeof mediaSession !== "undefined" ? mediaSession : null
+	// The session this view started; another card's session is not its own.
+	property string ownedSessionId: ""
+	property var playbackInfo: ({})
+	readonly property string playingStableId: ownedSessionId.length > 0 && !!session && session.active
+		&& !session.detached && String(session.sessionId || "") === ownedSessionId ? ownedSessionId : ""
+	property bool playerDocked: false
+	onPlayingStableIdChanged: {
+		if (playingStableId.length === 0 && !(session && session.active
+				&& String(session.sessionId || "") === ownedSessionId))
+			ownedSessionId = ""
+	}
 	// The next older page is requested this close to the top (in pixels or in
 	// rows), so a reader scrolling up does not stop against the edge while the
 	// page is on its way.
@@ -200,6 +214,108 @@ ListView {
 		messageActions.targetCanDelete = rowItem.canDelete
 		messageActions.targetCanRetry = rowItem.deliveryCanRetry
 		messageActions.popup(anchorItem, x, y)
+	}
+	// Starts the card's media in the view's player.
+	function startPlayback(rowItem) {
+		const card = rowItem ? rowItem.embedCard() : null
+		if (!card || !session)
+			return false
+		const preview = card.preview || ({})
+		const id = String(rowItem.stableId || "")
+		const mode = String(card.playback.mode || "none")
+		const metadata = preview.metadata || ({})
+		let started = false
+		let provider = String(card.playback.provider || card.providerId || "")
+		if (mode === "native") {
+			const direct = card.media.find(item => item.directPlayable
+				&& (item.kind === "video" || item.kind === "audio" || item.kind === "animated-image")) || ({})
+			const url = String(direct.url || preview.mediaUrl || "")
+			if (!/^https?:\/\//i.test(url) && !/^file:\/\//i.test(url))
+				return false
+			const pairedAudio = url === String(preview.mediaUrl || "") ? String(preview.mediaAudioUrl || "") : ""
+			started = session.openDirectInline(url, String(direct.mime || preview.mediaMime || ""), pairedAudio,
+				pairedAudio.length > 0 ? String(preview.mediaAudioMime || "") : "", id)
+			provider = "direct"
+		} else if (mode === "provider") {
+			const url = String(card.playback.url || preview.embedUrl || "")
+			if (!/^https:\/\//i.test(url))
+				return false
+			provider = String(preview.embedKind || provider)
+			started = session.openInline(url, provider, id)
+		}
+		if (!started)
+			return false
+		playbackInfo = {
+			"stableId": id,
+			"aspect": card.aspect,
+			"provider": provider,
+			"title": card.title || card.description || card.providerLabel,
+			"presentationMode": String(metadata.mediaPresentation || "") === "provider-post-card"
+				? "provider-post-card" : String(metadata.mediaPresentation || "")
+		}
+		// A new player for each media, set up for its shape and provider.
+		playerLoader.setSource(Qt.resolvedUrl("InlineMediaPlayer.qml"), {
+			"session": session,
+			"aspect": String(playbackInfo.aspect || "wide"),
+			"presentationProvider": String(playbackInfo.provider || ""),
+			"presentationMode": String(playbackInfo.presentationMode || ""),
+			"animationAutoPlayEnabled": true,
+			"mediaProfileFactory": typeof mediaProfiles !== "undefined" ? mediaProfiles : null,
+			"visualFixtureMode": host ? String(host.visualMediaFixtureMode || "") : ""
+		})
+		ownedSessionId = id
+		if (session.playbackControllable)
+			session.play()
+		return true
+	}
+	// The player's height at a width: its picture plus its controls.
+	function playerHeightFor(width) {
+		const player = playerLoader.item
+		if (!player)
+			return Math.round(width * 9 / 16)
+		return player.viewportHeightForWidth(width) + Math.max(0, player.implicitHeight - player.mediaViewportHeight)
+	}
+	function playingRow() {
+		const rows = contentItem.children
+		for (let i = 0; i < rows.length; ++i) {
+			if (rows[i].embedCard && String(rows[i].stableId) === playingStableId && rows[i].visible)
+				return rows[i]
+		}
+		return null
+	}
+	// Over the card while its box is on screen; docked in the corner otherwise.
+	function placePlayer() {
+		if (playingStableId.length === 0)
+			return
+		const row = playingRow()
+		const card = row ? row.embedCard() : null
+		const box = card ? card.mediaBox : null
+		if (box && box.height > 0) {
+			const at = box.mapToItem(view, 0, 0)
+			if (at.y + box.height > 0 && at.y < height) {
+				playerDocked = false
+				playerHost.x = at.x
+				playerHost.y = at.y
+				playerHost.width = box.width
+				return
+			}
+		}
+		playerDocked = true
+		playerHost.width = Math.min(360, Math.max(240, width * 0.4))
+		playerHost.x = width - playerHost.width - Theme.space4
+		playerHost.y = height - playerHost.height - Theme.space4
+	}
+	// Ends playback this view started once its message has left the view.
+	function closePlaybackIfGone() {
+		if (playingStableId.length > 0 && rowModel && rowModel.rowForStableId(playingStableId) < 0) {
+			session.close()
+			ownedSessionId = ""
+		}
+	}
+	function openLinkActions(rowItem, anchorItem, url) {
+		linkActions.targetUrl = String(url || "")
+		if (linkActions.targetUrl.length > 0)
+			linkActions.popup(anchorItem, 0, anchorItem.height)
 	}
 	function previewHeightFor(stableId) {
 		return Number(previewHeights[String(stableId)] || 0)
@@ -414,6 +530,7 @@ ListView {
 	onCountChanged: {
 		Qt.callLater(loadOlderIfNeeded)
 		Qt.callLater(continuePendingReveal)
+		Qt.callLater(closePlaybackIfGone)
 	}
 	onMovementStarted: followTail = false
 	onMovementEnded: {
@@ -603,6 +720,104 @@ ListView {
 			visible: messageActions.targetCanDelete
 			height: visible ? rowImplicitHeight : 0
 			onActionRequested: view.commands.remove(messageActions.targetId)
+		}
+	}
+
+	ModernMenu {
+		id: linkActions
+		objectName: "conversationLinkActions"
+		accessibleName: qsTr("Link actions")
+		property string targetUrl: ""
+
+		PayloadMenuItem {
+			payload: ({ "kind": "action", "id": "link.open", "label": qsTr("Open link"), "icon": "external" })
+			onActionRequested: Qt.openUrlExternally(linkActions.targetUrl)
+		}
+		PayloadMenuItem {
+			payload: ({ "kind": "action", "id": "link.copy", "label": qsTr("Copy link"), "icon": "copy" })
+			onActionRequested: {
+				clipboardHelper.text = linkActions.targetUrl
+				clipboardHelper.selectAll()
+				clipboardHelper.copy()
+				clipboardHelper.text = ""
+			}
+		}
+	}
+
+	// The conversation's player. It follows the playing card every frame while
+	// it plays, and docks in the corner when the card is off screen.
+	Item {
+		id: playerHost
+		objectName: "conversationPlayer"
+		parent: view
+		z: 20
+		visible: playerLoader.active
+		height: (view.playerDocked ? dockBar.height : 0) + (playerLoader.item ? playerLoader.item.implicitHeight : 0)
+
+		Rectangle {
+			anchors.fill: parent
+			anchors.margins: -1
+			visible: view.playerDocked
+			radius: Theme.innerRadius
+			color: Theme.surfaceRaised
+			border.color: Theme.surfaceBorder
+		}
+		Item {
+			id: dockBar
+			visible: view.playerDocked
+			width: parent.width
+			height: visible ? 32 : 0
+
+			Text {
+				anchors.left: parent.left
+				anchors.leftMargin: Theme.space2
+				anchors.right: dockReturn.left
+				anchors.verticalCenter: parent.verticalCenter
+				text: String(view.playbackInfo.title || "")
+				textFormat: Text.PlainText
+				elide: Text.ElideRight
+				color: Theme.textMain
+				font.pixelSize: Theme.fontCaption
+			}
+			ModernIconButton {
+				id: dockReturn
+				objectName: "conversationPlayerReturn"
+				anchors.right: dockClose.left
+				anchors.verticalCenter: parent.verticalCenter
+				dense: true
+				iconName: "chevron-up"
+				Accessible.name: qsTr("Show the message")
+				onClicked: {
+					const index = view.rowModel ? view.rowModel.rowForStableId(view.playingStableId) : -1
+					if (index >= 0)
+						view.positionAtIndex(index, ListView.Center)
+				}
+			}
+			ModernIconButton {
+				id: dockClose
+				objectName: "conversationPlayerClose"
+				anchors.right: parent.right
+				anchors.verticalCenter: parent.verticalCenter
+				dense: true
+				iconName: "close"
+				Accessible.name: qsTr("Close the player")
+				onClicked: {
+					if (view.session)
+						view.session.close()
+					view.ownedSessionId = ""
+				}
+			}
+		}
+		Loader {
+			id: playerLoader
+			y: dockBar.height
+			width: parent.width
+			active: view.playingStableId.length > 0
+			onLoaded: view.placePlayer()
+		}
+		FrameAnimation {
+			running: playerLoader.active
+			onTriggered: view.placePlayer()
 		}
 	}
 

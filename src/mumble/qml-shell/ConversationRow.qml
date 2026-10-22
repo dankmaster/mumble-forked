@@ -95,6 +95,14 @@ ChatMessageFrame {
 		return value.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "")
 	}
 
+	readonly property bool usesEmbedCard: !!preview && !!preview.document
+		&& Number(preview.document.schemaVersion || 0) === 1
+	// The new card in this row, if it shows one.
+	function embedCard() {
+		const item = previewLoader.item
+		return item && item.objectName === "embedCard" ? item : null
+	}
+
 	function previewPending() {
 		return previewLoader.active && previewLoader.status === Loader.Loading
 	}
@@ -437,45 +445,72 @@ ChatMessageFrame {
 					asynchronous: true
 					onActiveChanged: if (!active) asynchronous = true
 					opacity: status === Loader.Ready ? 1 : 0
-					sourceComponent: RichPreviewCard {
+					// Typed previews get the new card; the rest keep the old one until
+					// every provider has a typed document.
+					sourceComponent: row.usesEmbedCard ? embedCardComponent : richPreviewComponent
+				}
+
+				Component {
+					id: embedCardComponent
+
+					EmbedCard {
 						preview: row.preview
 						width: previewSlot.width
-						mediaSessionController: mediaSession
-						mediaProfileFactory: mediaProfiles
-						mediaSessionId: row.stableId
-						visualMediaFixtureMode: row.host ? row.host.visualMediaFixtureMode : ""
-						savedSizePreset: row.host ? row.host.richPreviewSizePreset(row.stableId) : ""
+						playing: !!row.view && row.view.playingStableId === row.stableId
+						playerHeight: playing && row.view ? row.view.playerHeightFor(mediaBox.width) : 0
 						animationsEnabled: !!row.view && !row.view.moving
 						hoverEffectsEnabled: row.hoverEffectsEnabled
-						previewIdentity: row.stableId + "|" + String(row.preview.url || row.preview.embedUrl
-							|| row.preview.mediaUrl || row.preview.title || "")
-						renderActive: !row.accessibilityPooled
-						watchTogetherAvailable: !mediaSession.sharedAvailable
-						onExternalOpenRequested: url => Qt.openUrlExternally(url)
+						onOpenRequested: url => Qt.openUrlExternally(url)
 						onImageOpenRequested: (source, title) => row.host && row.host.openManagedPreviewImage(
 							source, title, row.stableId)
 						onImageRefreshRequested: row.view && row.view.queueHydration(row.stableId, row, true)
-						onDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
-							if (mediaSession.openDirectInline(url, mime, audioUrl, audioMime, row.stableId))
-								mediaSession.play()
-						}
-						onPopoutDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
-							if (mediaSession.detachedPlaybackSupported
-									&& mediaSession.openDirect(url, mime, audioUrl, audioMime, row.stableId))
-								mediaSession.play()
-						}
-						onInlinePlayRequested: (url, provider) => {
-							if (mediaSession.openInline(url, provider, row.stableId) && mediaSession.playbackControllable)
-								mediaSession.play()
-						}
-						onPopoutPlayRequested: (url, provider) => {
-							if (mediaSession.detachedPlaybackSupported && mediaSession.open(url, provider, row.stableId)
-									&& mediaSession.playbackControllable)
-								mediaSession.play()
-						}
-						onWatchTogetherRequested: (url, provider, title, presentationAspect) =>
-							row.host && row.host.startWatchTogether(url, provider, title, presentationAspect)
-						onSizePresetRequested: preset => row.host && row.host.rememberRichPreviewSizePreset(row.stableId, preset)
+						onMenuRequested: anchor => row.view && row.view.openLinkActions(row, anchor, sourceUrl)
+						onPlayRequested: row.view && row.view.startPlayback(row)
+					}
+				}
+
+				Component {
+					id: richPreviewComponent
+
+					RichPreviewCard {
+							preview: row.preview
+							width: previewSlot.width
+							mediaSessionController: mediaSession
+							mediaProfileFactory: mediaProfiles
+							mediaSessionId: row.stableId
+							visualMediaFixtureMode: row.host ? row.host.visualMediaFixtureMode : ""
+							savedSizePreset: row.host ? row.host.richPreviewSizePreset(row.stableId) : ""
+							animationsEnabled: !!row.view && !row.view.moving
+							hoverEffectsEnabled: row.hoverEffectsEnabled
+							previewIdentity: row.stableId + "|" + String(row.preview.url || row.preview.embedUrl
+								|| row.preview.mediaUrl || row.preview.title || "")
+							renderActive: !row.accessibilityPooled
+							watchTogetherAvailable: !mediaSession.sharedAvailable
+							onExternalOpenRequested: url => Qt.openUrlExternally(url)
+							onImageOpenRequested: (source, title) => row.host && row.host.openManagedPreviewImage(
+								source, title, row.stableId)
+							onImageRefreshRequested: row.view && row.view.queueHydration(row.stableId, row, true)
+							onDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
+								if (mediaSession.openDirectInline(url, mime, audioUrl, audioMime, row.stableId))
+									mediaSession.play()
+							}
+							onPopoutDirectMediaRequested: (url, mime, audioUrl, audioMime, title) => {
+								if (mediaSession.detachedPlaybackSupported
+										&& mediaSession.openDirect(url, mime, audioUrl, audioMime, row.stableId))
+									mediaSession.play()
+							}
+							onInlinePlayRequested: (url, provider) => {
+								if (mediaSession.openInline(url, provider, row.stableId) && mediaSession.playbackControllable)
+									mediaSession.play()
+							}
+							onPopoutPlayRequested: (url, provider) => {
+								if (mediaSession.detachedPlaybackSupported && mediaSession.open(url, provider, row.stableId)
+										&& mediaSession.playbackControllable)
+									mediaSession.play()
+							}
+							onWatchTogetherRequested: (url, provider, title, presentationAspect) =>
+								row.host && row.host.startWatchTogether(url, provider, title, presentationAspect)
+							onSizePresetRequested: preset => row.host && row.host.rememberRichPreviewSizePreset(row.stableId, preset)
 					}
 				}
 			}

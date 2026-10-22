@@ -1159,6 +1159,9 @@ public slots:
 			QStringLiteral("controlledImageProvider"), controlledImageProvider);
 		engine->rootContext()->setContextProperty(QStringLiteral("uiTheme"), QVariant::fromValue< QObject * >(nullptr));
 		engine->rootContext()->setContextProperty(QStringLiteral("managedGifUrl"), ensureManagedGifFixture());
+		// tst_EmbedCard saves a picture of each card family here when it is set.
+		engine->rootContext()->setContextProperty(QStringLiteral("embedCardGalleryDirectory"),
+												 qEnvironmentVariable("MUMBLE_EMBED_CARD_GALLERY_DIR"));
 		QFile mainQmlSource(QStringLiteral(":/qml-shell/Main.qml"));
 		const QString mainQmlText = mainQmlSource.open(QIODevice::ReadOnly)
 			? QString::fromUtf8(mainQmlSource.readAll()) : QString();
