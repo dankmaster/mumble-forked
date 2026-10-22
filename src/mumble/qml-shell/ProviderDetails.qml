@@ -25,6 +25,9 @@ FocusScope {
 	// The card's stage is playing this media: the template's own picture of it
 	// steps aside so the media shows once.
 	property bool mediaStageActive: false
+	// A surface that names the product itself (the detail sheet) hides the
+	// template's own product heading.
+	property bool productHeadingVisible: true
 	readonly property bool compactLayout: width < 440
 	readonly property string stableKind: normalizedStableKind()
 	readonly property string stableProvider: normalizedStableProvider()
@@ -2020,6 +2023,7 @@ FocusScope {
 						Label {
 							objectName: "providerSteamProductName"
 							Layout.fillWidth: true
+							visible: root.productHeadingVisible
 							text: root.safeText(root.firstValue(["steamAppName"]), 256)
 								|| root.previewTitle || qsTr("Steam app")
 							textFormat: Text.PlainText

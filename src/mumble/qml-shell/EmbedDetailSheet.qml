@@ -464,8 +464,9 @@ Popup {
 						previewTitle: sheet.title
 						previewDescription: sheet.description
 						expanded: true
-						// The sheet shows the pictures itself.
+						// The sheet shows the pictures and names the product itself.
 						mediaStageActive: true
+						productHeadingVisible: false
 						onExternalOpenRequested: url => sheet.openRequested(url)
 					}
 				}
