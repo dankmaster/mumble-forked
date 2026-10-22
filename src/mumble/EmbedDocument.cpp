@@ -101,6 +101,10 @@ namespace {
 	}
 
 	QString providerLabel(const QString &provider, const QVariantMap &metadata, const QString &host) {
+		// X keeps its own name over older "Twitter/X" provider labels.
+		if (provider == QLatin1String("x")) {
+			return QStringLiteral("X");
+		}
 		const QString explicitLabel = firstText(metadata,
 			{ QStringLiteral("providerName"), QStringLiteral("gameStoreName"),
 			  QStringLiteral("articlePublisher"), QStringLiteral("forumProvider") }, 128);

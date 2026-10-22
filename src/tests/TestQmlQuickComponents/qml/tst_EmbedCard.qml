@@ -260,6 +260,20 @@ TestCase {
 		compare(findChild(cardFor(reddit), "embedCardHeader").text, "Reddit  ·  u/someone · r/pics")
 	}
 
+	function test_a_video_without_a_picture_gets_a_short_placeholder() {
+		const document = documentFor("media", "direct", "4chan", {
+			"content": { "type": "video", "title": "1785247201381165.mp4" },
+			"media": [{ "id": "media:0", "kind": "video", "url": "https://media.example/clip.mp4", "directPlayable": true }],
+			"playback": { "mode": "native", "provider": "direct" }
+		})
+		const card = cardFor(document)
+		compare(card.family, "video")
+		compare(card.title, "", "the file name is not a title")
+		verify(findChild(card, "embedCardMediaBox").height <= 200)
+		verify(findChild(card, "embedCardNoPicture").visible)
+		verify(findChild(card, "embedCardPlay").visible)
+	}
+
 	function test_a_link_to_a_picture_is_a_picture_card() {
 		const document = documentFor("link", "", "upload.wikimedia.org", {
 			"source": { "url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/JPEG_example_flower.jpg" },

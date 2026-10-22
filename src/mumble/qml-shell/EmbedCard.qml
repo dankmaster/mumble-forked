@@ -39,8 +39,10 @@ Rectangle {
 	readonly property string sourceUrl: safeExternalUrl(document.source ? document.source.url : preview.url)
 	readonly property string title: {
 		const value = String(content.title || "").trim()
-		// Neither the provider's name nor a picture's file name says anything new.
-		return value === providerLabel || /^[^\s/]+\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(value) ? "" : value
+		// Neither the provider's name nor a media file's name says anything new.
+		return value === providerLabel
+			|| /^[^\s/]+\.(jpe?g|png|gif|webp|avif|bmp|mp4|m4v|webm|mov|mkv|gifv|mp3|m4a|ogg|opus|wav|flac)$/i.test(value)
+			? "" : value
 	}
 	readonly property string description: String(content.description || "").trim()
 	// Who made it: the author, or the provider's own line (Reddit's subreddit).
@@ -157,6 +159,9 @@ Rectangle {
 			return 0
 		if (family === "post" && media.length > 1)
 			return Math.min(360, Math.round(width * 9 / 16))
+		// A video without a picture: a short placeholder, not a large black box.
+		if (family === "video" && imageSource.length === 0)
+			return Math.min(200, Math.round(width * 9 / 16))
 		if (aspect === "short")
 			return Math.min(420, Math.round(width * 1.25))
 		if (aspect === "square")
@@ -653,6 +658,16 @@ Rectangle {
 				}
 			}
 
+			Text {
+				objectName: "embedCardNoPicture"
+				anchors.horizontalCenter: parent.horizontalCenter
+				anchors.top: parent.verticalCenter
+				anchors.topMargin: 36
+				visible: root.family === "video" && root.imageSource.length === 0 && !root.playing
+				text: qsTr("Video")
+				color: Theme.mediaOverlayTextMuted
+				font.pixelSize: Theme.fontCaption
+			}
 			Rectangle {
 				objectName: "embedCardPlay"
 				anchors.centerIn: parent
