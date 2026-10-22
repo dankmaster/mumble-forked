@@ -473,7 +473,9 @@ ListView {
 			y = item.y + item.height
 		}
 		// Rows laid over each other, or a row drawn taller than the list placed it.
+		// Pooled rows keep their last place but are not drawn.
 		const placed = contentItem.children.filter(child => child.visible && child.stableId !== undefined
+			&& child.accessibilityPooled !== true
 			&& child.y + child.height > contentY && child.y < contentY + height)
 			.sort((a, b) => a.y - b.y)
 		let overlappingRows = 0
