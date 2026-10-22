@@ -17,7 +17,8 @@ Rectangle {
 	readonly property alias mediaBox: mediaBox
 
 	signal openRequested(string url)
-	signal playRequested()
+	// Play the media at an index in the view's player.
+	signal playRequested(int mediaIndex)
 	signal imageOpenRequested(string source, string title)
 	signal imageRefreshRequested()
 	signal menuRequested(Item anchor)
@@ -45,8 +46,15 @@ Rectangle {
 	readonly property string imageSource: stillSource(firstMedia)
 		|| managedImage(preview ? preview.thumbnailUrl : "")
 	readonly property string family: familyFor()
+	// A store's or gallery's lead picture is a picture: only a video in front plays.
 	readonly property bool canPlay: String(playback.mode || "none") !== "none"
-		&& (family === "video" || family === "audio" || family === "post" || family === "product")
+		&& (family === "video" || family === "audio" || family === "post"
+			|| (family === "product" && (firstMedia.kind === "video" || firstMedia.kind === "audio")))
+	// Further pictures as a row of thumbnails under the lead one.
+	readonly property bool showStrip: (family === "product" || family === "image") && media.length > 1
+	readonly property int stripCount: Math.min(media.length, 5)
+	readonly property real stripThumbWidth: (contentWidth - Theme.space1 * (stripCount - 1)) / stripCount
+	readonly property real stripHeight: showStrip ? Math.round(Math.min(72, stripThumbWidth * 0.62)) : 0
 	// More than the card shows: further pictures, a whole post or store page, or a
 	// provider with its own view.
 	readonly property bool hasDetails: media.length > 1 || family === "post" || family === "product"
@@ -388,7 +396,7 @@ Rectangle {
 					MouseArea {
 						anchors.fill: parent
 						cursorShape: Qt.PointingHandCursor
-						onClicked: root.playRequested()
+						onClicked: root.playRequested(0)
 					}
 				}
 			}
@@ -541,7 +549,7 @@ Rectangle {
 				anchors.margins: Theme.space2
 				objectName: "embedCardPictureCount"
 				z: 2
-				visible: root.family !== "post" && root.media.length > 1 && !root.playing
+				visible: root.family !== "post" && !root.showStrip && root.media.length > 1 && !root.playing
 				width: countText.implicitWidth + Theme.space2 * 2
 				height: countText.implicitHeight + Theme.space1
 				radius: height / 2
@@ -572,7 +580,7 @@ Rectangle {
 				cursorShape: Qt.PointingHandCursor
 				onClicked: {
 					if (root.canPlay)
-						root.playRequested()
+						root.playRequested(0)
 					else if (root.hasDetails)
 						root.detailsRequested(0)
 					else if (root.imageSource.length > 0)
@@ -598,6 +606,89 @@ Rectangle {
 					name: "play"
 					size: 24
 					color: Theme.mediaOverlayTextStrong
+				}
+			}
+		}
+
+		// The card's other pictures; a video plays in the card, a picture opens
+		// the detail sheet at it.
+		Row {
+			objectName: "embedCardStrip"
+			visible: root.showStrip
+			width: parent.width
+			height: root.stripHeight
+			spacing: Theme.space1
+
+			Repeater {
+				model: root.showStrip ? root.media.slice(0, root.stripCount) : []
+
+				Rectangle {
+					required property var modelData
+					required property int index
+					readonly property bool playable: (modelData.kind === "video" || modelData.kind === "audio")
+						&& !!modelData.directPlayable
+					readonly property bool more: index === root.stripCount - 1 && root.media.length > root.stripCount
+					objectName: "embedCardStripItem" + index
+					width: root.stripThumbWidth
+					height: root.stripHeight
+					radius: Theme.innerRadius - 6
+					color: Theme.mediaCanvas
+					border.color: thumbArea.containsMouse ? Theme.focus : "transparent"
+					border.width: 2
+					clip: true
+
+					Image {
+						anchors.fill: parent
+						anchors.margins: 2
+						source: root.managedImage(modelData.thumbnailUrl) || root.stillSource(modelData)
+						sourceSize: Qt.size(240, 150)
+						fillMode: Image.PreserveAspectCrop
+						asynchronous: true
+					}
+					Rectangle {
+						anchors.centerIn: parent
+						visible: parent.playable && !parent.more
+						width: 26
+						height: 26
+						radius: 13
+						color: Theme.withAlpha(Theme.mediaCanvas, 0.66)
+
+						ModernIcon {
+							anchors.centerIn: parent
+							anchors.horizontalCenterOffset: 1
+							name: "play"
+							size: 14
+							color: Theme.mediaOverlayTextStrong
+						}
+					}
+					Rectangle {
+						anchors.fill: parent
+						visible: parent.more
+						color: Theme.withAlpha(Theme.mediaCanvas, 0.6)
+
+						Text {
+							anchors.centerIn: parent
+							text: "+" + (root.media.length - root.stripCount + 1)
+							color: Theme.mediaOverlayTextStrong
+							font.pixelSize: Theme.fontBody
+							font.weight: Font.DemiBold
+						}
+					}
+					MouseArea {
+						id: thumbArea
+						anchors.fill: parent
+						hoverEnabled: root.hoverEffectsEnabled
+						cursorShape: Qt.PointingHandCursor
+						Accessible.role: Accessible.Button
+						Accessible.name: parent.playable ? qsTr("Play video %1").arg(index + 1)
+							: qsTr("Show picture %1").arg(index + 1)
+						onClicked: {
+							if (parent.playable && !parent.more)
+								root.playRequested(index)
+							else
+								root.detailsRequested(index)
+						}
+					}
 				}
 			}
 		}

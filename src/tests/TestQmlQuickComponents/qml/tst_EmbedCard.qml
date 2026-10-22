@@ -197,6 +197,25 @@ TestCase {
 		compare(box.height, 152)
 	}
 
+	// A store's pictures sit in a strip under its lead picture: a picture opens the
+	// detail sheet at it, a trailer plays in the card, and the lead picture is a
+	// picture, not a play button.
+	function test_product_strip_plays_trailers_and_opens_pictures() {
+		const card = cardFor(samples().product)
+		const playSpy = createTemporaryObject(spyComponent, testCase, { "target": card, "signalName": "playRequested" })
+		const detailsSpy = createTemporaryObject(spyComponent, testCase, { "target": card, "signalName": "detailsRequested" })
+		verify(card.showStrip)
+		verify(!card.canPlay)
+		verify(!findChild(card, "embedCardPlay").visible)
+		tryVerify(() => findChild(card, "embedCardStripItem1") !== null)
+		mouseClick(findChild(card, "embedCardStripItem1"))
+		compare(playSpy.count, 1)
+		compare(playSpy.signalArguments[0][0], 1)
+		mouseClick(findChild(card, "embedCardMediaBox"))
+		compare(detailsSpy.count, 1)
+		compare(detailsSpy.signalArguments[0][0], 0)
+	}
+
 	function test_product_leads_its_facts_with_the_price() {
 		const card = cardFor(samples().product)
 		compare(findChild(card, "embedCardFacts").text, "9,69€  ·  Developer Valve  ·  Reviews Overwhelmingly Positive")

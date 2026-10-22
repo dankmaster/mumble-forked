@@ -130,9 +130,10 @@ TestCase {
 		const detailsSpy = createTemporaryObject(spyComponent, testCase,
 			{ "target": store, "signalName": "detailsRequested" })
 		verify(store.hasDetails)
-		mouseClick(findChild(store, "embedCardPictureCount"))
+		tryVerify(() => findChild(store, "embedCardStripItem2") !== null)
+		mouseClick(findChild(store, "embedCardStripItem2"))
 		compare(detailsSpy.count, 1)
-		compare(detailsSpy.signalArguments[0][0], 0)
+		compare(detailsSpy.signalArguments[0][0], 2, "a picture in the strip opens the sheet at it")
 
 		const link = createTemporaryObject(cardComponent, testCase, { "y": 500, "preview": {
 			"url": "https://example.com/",
