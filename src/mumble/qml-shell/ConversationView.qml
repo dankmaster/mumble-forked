@@ -148,6 +148,9 @@ ListView {
 		holdingAnchor = true
 		contentY += shift
 		holdingAnchor = false
+		// Outside the list's layout pass here: the rows now in view finish their
+		// cards in this same turn.
+		finishCardsNearView()
 		// pixelAligned rounds contentY, so up to half a pixel may remain.
 		if (Math.abs(anchorItem.y - contentY - anchorScreenY) < 1.5)
 			return
@@ -168,6 +171,7 @@ ListView {
 		const rows = contentItem.children
 		let nearest = null
 		let nearestGap = margin
+		let finishedOnScreen = 0
 		for (let i = 0; i < rows.length; ++i) {
 			const row = rows[i]
 			if (!row.previewPending || !row.previewPending())
@@ -175,6 +179,7 @@ ListView {
 			const gap = Math.max(contentY - (row.y + row.height), row.y - (contentY + height), 0)
 			if (gap === 0) {
 				row.finishPreview()
+				++finishedOnScreen
 			} else if (gap < nearestGap) {
 				nearest = row
 				nearestGap = gap
@@ -182,6 +187,10 @@ ListView {
 		}
 		if (nearest)
 			nearest.finishPreview()
+		// Finished cards change their rows' heights, which can bring other rows on
+		// screen once the list lays them out; look again after that pass.
+		if (finishedOnScreen > 0)
+			Qt.callLater(finishCardsNearView)
 	}
 	function resetAnchorHoldBudget() {
 		const exhausted = anchorHoldBudget <= 0
@@ -608,7 +617,10 @@ ListView {
 		Qt.callLater(loadOlderIfNeeded)
 	}
 	onHeightChanged: pickAnchor()
-	onOriginYChanged: if (!readerScrolling) holdAnchor()
+	onOriginYChanged: {
+		if (!readerScrolling)
+			holdAnchor()
+	}
 	onContentHeightChanged: if (!readerScrolling) holdAnchor()
 	onCountChanged: {
 		Qt.callLater(loadOlderIfNeeded)
@@ -639,8 +651,13 @@ ListView {
 
 	Connections {
 		target: view.anchorItem
+		// The list moves the row while it handles a row's new height; moving the
+		// view from inside that leaves rows at stale places, drawn over each
+		// other. Hold the reading row right after it instead, before the frame.
+		// (The list's own edge and height changes come after its layout pass and
+		// are held at once.)
 		function onYChanged() {
-			view.holdAnchor()
+			Qt.callLater(view.holdAnchor)
 		}
 	}
 	Connections {

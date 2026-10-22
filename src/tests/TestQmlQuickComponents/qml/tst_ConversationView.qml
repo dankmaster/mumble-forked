@@ -589,12 +589,14 @@ TestCase {
 		list.followTail = false
 		let unfinished = 0
 		let checked = 0
-		// Jump through history; after each jump, once the jump's layout pass is
-		// over and before the next frame, every card on screen must be finished.
+		// Jump through history; after each jump, once the work queued right after
+		// the jump's layout pass has run (a few event turns, before the next
+		// frame), every card on screen must be finished.
 		for (let jump = 1; jump <= 6; ++jump) {
 			list.positionAt(list.tailY() - list.height * 4 * jump)
 			list.forceLayout()
-			wait(0)
+			for (let turn = 0; turn < 4; ++turn)
+				wait(0)
 			for (let y = list.contentY; y < list.contentY + list.height; y += 20) {
 				const index = list.indexAt(list.width / 2, y)
 				const item = index >= 0 ? list.itemAtIndex(index) : null
