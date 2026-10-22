@@ -466,6 +466,7 @@ ChatMessageFrame {
 						onImageRefreshRequested: row.view && row.view.queueHydration(row.stableId, row, true)
 						onMenuRequested: anchor => row.view && row.view.openLinkActions(row, anchor, sourceUrl)
 						onPlayRequested: row.view && row.view.startPlayback(row)
+						onDetailsRequested: index => row.view && row.view.openDetails(row, index)
 					}
 				}
 

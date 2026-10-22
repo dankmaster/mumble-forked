@@ -215,8 +215,31 @@ ListView {
 		messageActions.targetCanRetry = rowItem.deliveryCanRetry
 		messageActions.popup(anchorItem, x, y)
 	}
+	// Opens the detail sheet of a row's card at one of its pictures.
+	function openDetails(rowItem, mediaIndex) {
+		if (!rowItem || !rowItem.preview)
+			return
+		detailLoader.active = true
+		detailLoader.item.show(rowItem.preview, rowItem.stableId, mediaIndex)
+	}
+	// Plays a medium chosen in the detail sheet in its card, bringing the row
+	// into view first if it has scrolled away.
+	function playFromDetails(stableId, mediaIndex) {
+		const index = rowModel ? rowModel.rowForStableId(stableId) : -1
+		if (index < 0)
+			return
+		let rowItem = itemAtIndex(index)
+		if (!rowItem || rowItem.y + rowItem.height < contentY || rowItem.y > contentY + height) {
+			followTail = false
+			positionAtIndex(index, ListView.Center)
+			forceLayout()
+			rowItem = itemAtIndex(index)
+		}
+		if (rowItem)
+			startPlayback(rowItem, mediaIndex)
+	}
 	// Starts the card's media in the view's player.
-	function startPlayback(rowItem) {
+	function startPlayback(rowItem, mediaIndex) {
 		const card = rowItem ? rowItem.embedCard() : null
 		if (!card || !session)
 			return false
@@ -227,8 +250,10 @@ ListView {
 		let started = false
 		let provider = String(card.playback.provider || card.providerId || "")
 		if (mode === "native") {
-			const direct = card.media.find(item => item.directPlayable
-				&& (item.kind === "video" || item.kind === "audio" || item.kind === "animated-image")) || ({})
+			const playable = item => !!item && item.directPlayable
+				&& (item.kind === "video" || item.kind === "audio" || item.kind === "animated-image")
+			const chosen = card.media[Number(mediaIndex) || 0]
+			const direct = playable(chosen) ? chosen : (card.media.find(playable) || ({}))
 			const url = String(direct.url || preview.mediaUrl || "")
 			if (!/^https?:\/\//i.test(url) && !/^file:\/\//i.test(url))
 				return false
@@ -720,6 +745,18 @@ ListView {
 			visible: messageActions.targetCanDelete
 			height: visible ? rowImplicitHeight : 0
 			onActionRequested: view.commands.remove(messageActions.targetId)
+		}
+	}
+
+	Loader {
+		id: detailLoader
+		parent: view
+		active: false
+		sourceComponent: EmbedDetailSheet {
+			onOpenRequested: url => Qt.openUrlExternally(url)
+			onPlayRequested: (stableId, mediaIndex) => view.playFromDetails(stableId, mediaIndex)
+			onImageOpenRequested: (source, title, stableId) => view.host
+				&& view.host.openManagedPreviewImage(source, title, stableId)
 		}
 	}
 

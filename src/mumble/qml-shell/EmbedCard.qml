@@ -21,6 +21,8 @@ Rectangle {
 	signal imageOpenRequested(string source, string title)
 	signal imageRefreshRequested()
 	signal menuRequested(Item anchor)
+	// The detail sheet: every picture, the whole text and the provider's view.
+	signal detailsRequested(int mediaIndex)
 
 	readonly property var document: preview && preview.document ? preview.document : ({})
 	readonly property var providerInfo: document.provider || ({})
@@ -45,6 +47,10 @@ Rectangle {
 	readonly property string family: familyFor()
 	readonly property bool canPlay: String(playback.mode || "none") !== "none"
 		&& (family === "video" || family === "audio" || family === "post" || family === "product")
+	// More than the card shows: further pictures, a whole post or store page, or a
+	// provider with its own view.
+	readonly property bool hasDetails: media.length > 1 || family === "post" || family === "product"
+		|| ["steam", "flashback", "github", "twitch", "amazon", "blocket", "google", "stonks"].indexOf(providerId) >= 0
 	readonly property real contentWidth: Math.max(0, width - padding * 2)
 	readonly property int padding: Theme.space3
 
@@ -130,8 +136,13 @@ Rectangle {
 		id: hoverArea
 		anchors.fill: parent
 		hoverEnabled: root.hoverEffectsEnabled
-		cursorShape: root.sourceUrl.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
-		onClicked: if (root.sourceUrl.length > 0) root.openRequested(root.sourceUrl)
+		cursorShape: root.hasDetails || root.sourceUrl.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+		onClicked: {
+			if (root.hasDetails)
+				root.detailsRequested(0)
+			else if (root.sourceUrl.length > 0)
+				root.openRequested(root.sourceUrl)
+		}
 	}
 
 	Column {
@@ -501,6 +512,11 @@ Rectangle {
 							fillMode: Image.PreserveAspectCrop
 							asynchronous: true
 						}
+						MouseArea {
+							anchors.fill: parent
+							cursorShape: Qt.PointingHandCursor
+							onClicked: root.detailsRequested(index)
+						}
 						Rectangle {
 							anchors.fill: parent
 							visible: index === 3 && root.media.length > 4
@@ -523,11 +539,23 @@ Rectangle {
 				anchors.top: parent.top
 				anchors.right: parent.right
 				anchors.margins: Theme.space2
+				objectName: "embedCardPictureCount"
+				z: 2
 				visible: root.family !== "post" && root.media.length > 1 && !root.playing
 				width: countText.implicitWidth + Theme.space2 * 2
 				height: countText.implicitHeight + Theme.space1
 				radius: height / 2
-				color: Theme.withAlpha(Theme.mediaCanvas, 0.66)
+				color: countArea.containsMouse ? Theme.withAlpha(Theme.mediaCanvas, 0.85)
+					: Theme.withAlpha(Theme.mediaCanvas, 0.66)
+
+				MouseArea {
+					id: countArea
+					anchors.fill: parent
+					anchors.margins: -Theme.space1
+					hoverEnabled: true
+					cursorShape: Qt.PointingHandCursor
+					onClicked: root.detailsRequested(0)
+				}
 
 				Text {
 					id: countText
@@ -545,6 +573,8 @@ Rectangle {
 				onClicked: {
 					if (root.canPlay)
 						root.playRequested()
+					else if (root.hasDetails)
+						root.detailsRequested(0)
 					else if (root.imageSource.length > 0)
 						root.imageOpenRequested(root.imageSource, root.title || root.description)
 					else if (root.sourceUrl.length > 0)
