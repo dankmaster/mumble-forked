@@ -505,7 +505,10 @@ ListView {
 		horizontalEnabled: false
 		navigationEnabled: view.interactive && !view.scrollbarDragging
 		smoothWheelEnabled: true
-		wheelStep: Math.max(80, Math.min(112, view.height * 0.14))
+		// A quarter of the view per notch at Windows' default of three lines,
+		// scaled by the system's lines-per-notch setting.
+		wheelStep: Math.round(Math.max(120, Math.min(280, view.height * 0.25))
+			* Math.max(1, Qt.styleHints.wheelScrollLines) / 3)
 		onScrollingStarted: view.followTail = false
 		onScrollingEnded: {
 			view.followTail = view.nearTail()

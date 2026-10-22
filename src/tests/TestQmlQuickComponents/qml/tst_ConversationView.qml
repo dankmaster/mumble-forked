@@ -494,7 +494,9 @@ TestCase {
 		settleAtNewest()
 		const start = list.contentY
 		mouseWheel(list, list.width / 2, list.height / 2, 0, 120)
-		tryVerify(() => start - list.contentY >= 79, 2000, "moved: " + (start - list.contentY))
+		// At least a quarter of the view (and never under 120 px) per notch.
+		const step = Math.max(120, Math.min(280, list.height * 0.25)) * Math.max(1, Qt.styleHints.wheelScrollLines) / 3
+		tryVerify(() => start - list.contentY >= step - 1, 2000, "moved: " + (start - list.contentY))
 		wait(500)
 		verify(!list.followTail)
 		verify(!list.atLatest)
