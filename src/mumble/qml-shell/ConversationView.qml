@@ -503,6 +503,9 @@ ListView {
 			"followTail": followTail,
 			"visibleRows": visibleRows,
 			"overlappingRows": overlappingRows,
+			// Every drawn row in the view's neighbourhood, to find rows drawn twice.
+			"placedRows": placed.map(child => ({ "id": String(child.stableId), "index": child.index,
+				"y": Math.round(child.y - contentY), "height": Math.round(child.height) })),
 			"visibleDeferredSummaryCount": 0,
 			"visibleBlankPresentationCount": 0,
 			"visibleBlankPreviewSurfaceCount": 0,
