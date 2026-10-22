@@ -383,7 +383,11 @@ ChatMessageFrame {
 				Loader {
 					id: previewLoader
 					width: parent.width
-					active: row.showPreviewCard
+					// A pooled row drops its card instead of handing it to the next
+					// message: rebinding a card to another preview recomputes it in one
+					// frame (several reused rows cost 30-90 ms), while a new card
+					// incubates over several frames behind its remembered height.
+					active: row.showPreviewCard && !row.accessibilityPooled
 					asynchronous: true
 					opacity: status === Loader.Ready ? 1 : 0
 					sourceComponent: RichPreviewCard {
