@@ -111,6 +111,27 @@ TestCase {
 		fuzzyCompare(anchor.y - list.contentY, screenY, 1)
 	}
 
+	function test_scrollbar_drag_reaches_the_top_and_stays_there() {
+		const list = view()
+		settleAtNewest()
+		const bar = list.ScrollBar.vertical
+		verify(!!bar)
+		const x = bar.width / 2
+		const thumbY = (bar.position + bar.size / 2) * bar.height
+		mousePress(bar, x, thumbY)
+		for (let step = 1; step <= 10; ++step)
+			mouseMove(bar, x, thumbY - (thumbY - 1) * step / 10)
+		// Hold at the top: neither following, paging nor compensation may pull it away.
+		wait(300)
+		verify(!list.followTail)
+		verify(list.contentY - list.originY < list.height, "top reached: " + (list.contentY - list.originY))
+		const heldY = list.contentY
+		wait(200)
+		fuzzyCompare(list.contentY, heldY, 1)
+		mouseRelease(bar, x, 1)
+		verify(!list.followTail)
+	}
+
 	function test_row_height_is_stable_across_reuse() {
 		const list = view()
 		settleAtNewest()

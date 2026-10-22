@@ -28,6 +28,10 @@ ListView {
 	property var hydrationQueue: []
 	property bool hydrationHighPriority: false
 	readonly property bool atLatest: followTail || tailY() - contentY < 4
+	// Dragging the scrollbar sets contentY directly and starts no movement, so
+	// it gets its own intent handling: it never follows, never pages and is
+	// never compensated while held.
+	readonly property bool scrollbarDragging: verticalScrollBar.pressed
 	readonly property ListView rowView: view
 	readonly property bool localScope: String(chatTimelineV2.scopeToken || "").startsWith("local:")
 
@@ -41,7 +45,7 @@ ListView {
 		return rowIndex <= liveInsertLast && Date.now() - liveInsertAt < 400
 	}
 	function compensateRowResize(rowIndex, delta) {
-		if (followTail || delta === 0)
+		if (followTail || scrollbarDragging || delta === 0)
 			return
 		const anchorIndex = indexAt(width / 2, contentY + height / 2)
 		if (anchorIndex < 0 || rowIndex > anchorIndex)
@@ -51,7 +55,7 @@ ListView {
 		following = false
 	}
 	function loadOlderIfNeeded() {
-		if (!visible || count === 0 || localScope || !activeScope.canLoadOlder
+		if (!visible || count === 0 || localScope || scrollbarDragging || !activeScope.canLoadOlder
 				|| activeScope.loadingState === "older")
 			return
 		if (contentY - originY < height)
@@ -117,6 +121,14 @@ ListView {
 	// Far jumps cut straight to the newest page; short distances ease in below.
 	onFollowTailChanged: if (followTail && tailY() - contentY > height * 2) positionViewAtBeginning()
 	onAtLatestChanged: markReadTimer.restart()
+	onScrollbarDraggingChanged: {
+		if (scrollbarDragging) {
+			followTail = false
+		} else {
+			followTail = tailY() - contentY < 4
+			Qt.callLater(loadOlderIfNeeded)
+		}
+	}
 
 	Connections {
 		target: chatTimelineV2
@@ -189,7 +201,9 @@ ListView {
 		}
 	}
 
-	ScrollBar.vertical: ModernScrollBar {}
+	ScrollBar.vertical: ModernScrollBar {
+		id: verticalScrollBar
+	}
 
 	ModernMenu {
 		id: messageActions
