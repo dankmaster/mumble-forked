@@ -5913,7 +5913,7 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	// oEmbed providers carry their author in the subtitle line.
 	const QVariantMap soundCloudContent = normalizedDocument({
 		{ QStringLiteral("url"), QStringLiteral("https://soundcloud.com/forss/flickermood") },
-		{ QStringLiteral("title"), QStringLiteral("Flickermood") },
+		{ QStringLiteral("title"), QStringLiteral("Flickermood by Forss") },
 		{ QStringLiteral("subtitle"), QStringLiteral("SoundCloud by Forss") },
 		{ QStringLiteral("embedKind"), QStringLiteral("soundcloud") },
 		{ QStringLiteral("embedUrl"), QStringLiteral("https://w.soundcloud.com/player/?url=x") }
@@ -5921,6 +5921,7 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	QCOMPARE(soundCloudContent.value(QStringLiteral("author")).toMap().value(QStringLiteral("name")).toString(),
 			 QStringLiteral("Forss"));
 	QVERIFY(!soundCloudContent.contains(QStringLiteral("subtitle")));
+	QCOMPARE(soundCloudContent.value(QStringLiteral("title")).toString(), QStringLiteral("Flickermood"));
 	const QVariantMap redditContent = normalizedDocument({
 		{ QStringLiteral("url"), QStringLiteral("https://www.reddit.com/r/pics/comments/abc/title/") },
 		{ QStringLiteral("title"), QStringLiteral("A post") },

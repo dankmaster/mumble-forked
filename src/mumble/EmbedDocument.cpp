@@ -633,6 +633,13 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 			subtitle.clear();
 		}
 	}
+	// "Track by Artist" titles repeat the author the card shows anyway.
+	const QString authorName = contentAuthor.value(QStringLiteral("name")).toString();
+	if (!authorName.isEmpty() && title.endsWith(QStringLiteral(" by ") + authorName, Qt::CaseInsensitive)
+		&& title.size() > authorName.size() + 4) {
+		title.chop(authorName.size() + 4);
+		title = title.trimmed();
+	}
 	if (subtitle.compare(label, Qt::CaseInsensitive) == 0
 		|| subtitle == contentAuthor.value(QStringLiteral("name")).toString() || subtitle == title) {
 		subtitle.clear();

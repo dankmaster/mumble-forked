@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 
 // One card for every link preview (docs/embed-cards-redesign.md): one neutral
 // frame, a one-line header that names the source once, then the content of the
@@ -502,21 +503,22 @@ Rectangle {
 			color: Theme.mediaCanvas
 			clip: true
 
-			// A picture of another shape is fitted over a softened copy of itself.
-			Image {
+			// A picture of another shape is fitted over a blurred, dimmed copy of
+			// itself, scaled to cover the box. The blur renders once per picture.
+			MultiEffect {
 				id: backdrop
 				anchors.fill: parent
 				visible: still.visible && still.fillMode === Image.PreserveAspectFit && still.status === Image.Ready
-				source: visible ? still.source : ""
-				sourceSize: still.sourceSize
-				fillMode: Image.PreserveAspectFit
-				scale: paintedWidth > 0 && paintedHeight > 0
-					? Math.max(width / paintedWidth, height / paintedHeight) : 1
-				asynchronous: true
-				opacity: 0.45
-				layer.enabled: visible
-				layer.textureSize: Qt.size(48, 36)
-				layer.smooth: true
+				source: still
+				scale: still.paintedWidth > 0 && still.paintedHeight > 0
+					? Math.max(width / still.paintedWidth, height / still.paintedHeight) : 1
+				autoPaddingEnabled: false
+				blurEnabled: true
+				blur: 1.0
+				blurMax: 48
+				brightness: -0.2
+				saturation: -0.1
+				opacity: 0.55
 			}
 			Image {
 				id: still
