@@ -5928,6 +5928,13 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 		{ QStringLiteral("subtitle"), QStringLiteral("u/someone · r/pics") }
 	}).value(QStringLiteral("content")).toMap();
 	QCOMPARE(redditContent.value(QStringLiteral("subtitle")).toString(), QStringLiteral("u/someone · r/pics"));
+	const QVariantMap siteContent = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.wikipedia.org/") },
+		{ QStringLiteral("host"), QStringLiteral("www.wikipedia.org") },
+		{ QStringLiteral("title"), QStringLiteral("Wikipedia, the free encyclopedia") },
+		{ QStringLiteral("subtitle"), QStringLiteral("www.wikipedia.org") }
+	}).value(QStringLiteral("content")).toMap();
+	QVERIFY2(!siteContent.contains(QStringLiteral("subtitle")), "the site's address is not a subtitle");
 	QCOMPARE(v2DocumentMismatches, 0);
 }
 

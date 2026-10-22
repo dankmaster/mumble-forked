@@ -640,6 +640,16 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		title.chop(authorName.size() + 4);
 		title = title.trimmed();
 	}
+	QString bareSubtitle = subtitle;
+	if (bareSubtitle.startsWith(QStringLiteral("www."), Qt::CaseInsensitive)) {
+		bareSubtitle.remove(0, 4);
+	}
+	// A subtitle that is only the site's address says nothing the header does not.
+	if (bareSubtitle.compare(label, Qt::CaseInsensitive) == 0
+		|| bareSubtitle.compare(host.startsWith(QStringLiteral("www."), Qt::CaseInsensitive) ? host.mid(4) : host,
+								Qt::CaseInsensitive) == 0) {
+		subtitle.clear();
+	}
 	if (subtitle.compare(label, Qt::CaseInsensitive) == 0
 		|| subtitle == contentAuthor.value(QStringLiteral("name")).toString() || subtitle == title) {
 		subtitle.clear();
