@@ -58,6 +58,8 @@
 #include <QtGui/QWindow>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpServer>
+#include <QtQml/QQmlContext>
+#include <QtQml/qqml.h>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 #include <QtNetwork/QTcpSocket>
@@ -66,6 +68,7 @@
 
 #include <cmath>
 #include <atomic>
+#include <functional>
 #include <limits>
 #include <memory>
 
@@ -6770,6 +6773,42 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("probe"), m_scopeGeometryProbe);
+		return response;
+	}
+
+	if (command == QLatin1String("qmlRunningAnimations")) {
+		// Animations that keep the render loop ticking, with where they are declared
+		// and whether their item can be seen at all.
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QQuickWindow *window = host->window();
+		QVariantList running;
+		std::function< void(QQuickItem *) > visit = [&](QQuickItem *item) {
+			for (QObject *child : item->children()) {
+				if (!child->inherits("QQuickAbstractAnimation") && !child->inherits("QQuickFrameAnimation")) continue;
+				if (!child->property("running").toBool()) continue;
+				const QQmlContext *context = qmlContext(child);
+				const QRectF bounds = item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+				qreal opacity = 1;
+				for (const QQuickItem *ancestor = item; ancestor; ancestor = ancestor->parentItem())
+					opacity *= ancestor->opacity();
+				running.push_back(QVariantMap {
+					{ QStringLiteral("animation"), QString::fromLatin1(child->metaObject()->className()) },
+					{ QStringLiteral("file"), context ? context->baseUrl().toString() : QString() },
+					{ QStringLiteral("item"), QString::fromLatin1(item->metaObject()->className()) },
+					{ QStringLiteral("objectName"), item->objectName() },
+					{ QStringLiteral("visible"), item->isVisible() },
+					{ QStringLiteral("opacity"), opacity },
+					{ QStringLiteral("onScreen"), bounds.intersects(QRectF(0, 0, window->width(), window->height())) },
+					{ QStringLiteral("size"), QStringLiteral("%1x%2").arg(item->width()).arg(item->height()) }
+				});
+			}
+			for (QQuickItem *childItem : item->childItems())
+				visit(childItem);
+		};
+		visit(window->contentItem());
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("running"), running);
 		return response;
 	}
 
