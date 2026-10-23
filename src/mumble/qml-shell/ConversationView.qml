@@ -236,6 +236,10 @@ ListView {
 		detailLoader.active = true
 		detailLoader.item.show(rowItem.preview, rowItem.stableId, mediaIndex)
 	}
+	function closeDetails() {
+		if (detailLoader.item)
+			detailLoader.item.close()
+	}
 	// Plays a medium chosen in the detail sheet in its card, bringing the row
 	// into view first if it has scrolled away.
 	function playFromDetails(stableId, mediaIndex) {

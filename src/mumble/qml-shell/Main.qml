@@ -1270,6 +1270,11 @@ ApplicationWindow {
 	// Automation: opens the detail sheet of the conversation's row at an index.
 	function openConversationDetailsAt(index, mediaIndex) {
 		const view = conversationViewLoader.item
+		// A negative index closes the sheet.
+		if (view && index < 0) {
+			view.closeDetails()
+			return true
+		}
 		if (!positionConversationRowAt(index))
 			return false
 		view.forceLayout()
