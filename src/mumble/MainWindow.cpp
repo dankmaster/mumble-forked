@@ -10030,6 +10030,10 @@ QUrl redditVideoMetadataUrl(const QString &videoId) {
 	return url;
 }
 
+QUrl redditVideoPageUrl(const QString &videoId) {
+	return QUrl(QString::fromLatin1("https://www.reddit.com/video/%1").arg(videoId));
+}
+
 QUrl redditVideoDirectDashManifestUrl(const QString &videoId) {
 	return QUrl(QString::fromLatin1("https://v.redd.it/%1/DASHPlaylist.mpd").arg(videoId));
 }
@@ -37367,6 +37371,10 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 		}
 
 		if (!applied) {
+			if (requestPersistentChatRedditVideoPost(previewKey, *videoId, failureText)) {
+				publishPersistentChatPreviewUpdate(previewKey);
+				return;
+			}
 			if (requestPersistentChatRedditDashManifestPreview(previewKey, *videoId, failureText)) {
 				publishPersistentChatPreviewUpdate(previewKey);
 				return;
@@ -37392,6 +37400,55 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 		publishPersistentChatPreviewUpdate(previewKey);
 	});
 
+	return true;
+}
+
+bool MainWindow::requestPersistentChatRedditVideoPost(const QString &previewKey, const QString &videoId,
+													  const QString &metadataFailureText) {
+	// Reddit refuses its video JSON to anonymous clients, which left v.redd.it
+	// links with a bare player: no picture and no title. Its video page still
+	// redirects a link-preview crawler to the post, and the post's embed page
+	// carries the poster, title and the same DASH stream.
+	const QUrl pageUrl = redditVideoPageUrl(videoId);
+	if (previewKey.isEmpty() || !isValidRedditVideoId(videoId) || !Global::get().nam
+		|| !isSafePreviewTarget(pageUrl)) {
+		return false;
+	}
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
+		|| it->mediaKind == QLatin1String("video")) {
+		return false;
+	}
+	it->remoteMediaRequested = true;
+
+	QNetworkRequest request(pageUrl);
+	prepareSocialPreviewMetadataRequest(request);
+	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, videoId, metadataFailureText]() {
+		const QUrl postUrl = reply->url();
+		const bool success = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+		previewIt->remoteMediaRequested = false;
+		if (success && redditPostIdFromUrl(postUrl)
+			&& requestPersistentChatRedditPostPreview(previewKey, postUrl)) {
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+		if (requestPersistentChatRedditDashManifestPreview(previewKey, videoId, metadataFailureText)) {
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+		previewIt->remoteMediaFinished  = true;
+		previewIt->thumbnailFinished    = true;
+		previewIt->siteSnapshotFinished = true;
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
 	return true;
 }
 

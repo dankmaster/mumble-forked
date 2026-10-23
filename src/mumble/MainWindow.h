@@ -626,6 +626,8 @@ public:
 	bool requestPersistentChatTenorMediaPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditPostPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatRedditVideoPost(const QString &previewKey, const QString &videoId,
+											  const QString &metadataFailureText);
 	bool requestPersistentChatRedditDashManifestPreview(const QString &previewKey, const QString &videoId,
 														const QString &metadataFailureText = QString());
 	bool requestPersistentChatRedditVideoAudioPreview(const QString &previewKey, const QUrl &dashManifestUrl);
