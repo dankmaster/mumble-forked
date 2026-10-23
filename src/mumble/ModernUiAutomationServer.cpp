@@ -6789,7 +6789,27 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		if (!host->themeController()->applyVisualGateAppearance(theme, QStringLiteral("regular"), QString())) {
 			return errorResponse(tr("Unknown theme '%1'.").arg(theme));
 		}
-		return okResponse();
+		// The theme's base colors, for contrast checks of what the shell derives.
+		QmlThemeController *colors = host->themeController();
+		QVariantMap tokens;
+		const auto put = [&tokens](const char *name, const QColor &color) {
+			tokens.insert(QString::fromLatin1(name), color.name(QColor::HexArgb));
+		};
+		put("shellBackground", colors->shellBackground());
+		put("panel", colors->panel());
+		put("surfaceRaised", colors->surfaceRaised());
+		put("surfaceHover", colors->surfaceHover());
+		put("surfaceBorder", colors->surfaceBorder());
+		put("mediaCanvas", colors->mediaCanvas());
+		put("strip", colors->strip());
+		put("textStrong", colors->textStrong());
+		put("textMain", colors->textMain());
+		put("textMuted", colors->textMuted());
+		put("accent", colors->accent());
+		put("focus", colors->focus());
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("tokens"), tokens);
+		return response;
 	}
 
 	if (command == QLatin1String("qmlPositionConversationRow")) {
