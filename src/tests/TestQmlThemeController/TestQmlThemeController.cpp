@@ -6,6 +6,9 @@
 #include <QtCore/QTemporaryDir>
 #include <QtTest>
 
+#include <algorithm>
+#include <cmath>
+
 class TestQmlThemeController : public QObject {
 	Q_OBJECT
 
@@ -13,6 +16,7 @@ private slots:
 	void appliesBuiltInTokenMappingIdempotently();
 	void appliesCustomManifestMetrics();
 	void appliesVisualGateAppearance();
+	void everyBuiltInThemeKeepsTextReadable();
 	void exposesCompleteDistinctBuiltInThemes();
 	void appliesProductDensityAccentAndTypedState();
 	void autoAccentTracksThemeAndManualOverridesRemainStable();
@@ -108,6 +112,29 @@ void TestQmlThemeController::appliesVisualGateAppearance() {
 	QVERIFY(controller.applyVisualGateAppearance(QStringLiteral("gruvbox"), QStringLiteral("regular")));
 	QCOMPARE(controller.themeId(), QStringLiteral("gruvbox"));
 	QVERIFY(!controller.applyVisualGateAppearance(QStringLiteral("unknown"), QStringLiteral("regular")));
+}
+
+void TestQmlThemeController::everyBuiltInThemeKeepsTextReadable() {
+	const auto luminance = [](const QColor &color) {
+		const auto channel = [](const qreal value) {
+			return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+		};
+		return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF()) + 0.0722 * channel(color.blueF());
+	};
+	const auto contrast = [&luminance](const QColor &first, const QColor &second) {
+		const qreal a = luminance(first);
+		const qreal b = luminance(second);
+		return (std::max(a, b) + 0.05) / (std::min(a, b) + 0.05);
+	};
+	QmlThemeController controller;
+	for (const QString &theme : Mumble::ModernTheme::builtInThemeIds()) {
+		QVERIFY2(controller.applyVisualGateAppearance(theme, QStringLiteral("regular")), qPrintable(theme));
+		// Body text on raised surfaces (cards, popups), muted text there and on the page.
+		QVERIFY2(contrast(controller.textMain(), controller.surfaceRaised()) >= 4.5, qPrintable(theme));
+		QVERIFY2(contrast(controller.textMuted(), controller.surfaceRaised()) >= 3.5, qPrintable(theme));
+		QVERIFY2(contrast(controller.textMuted(), controller.panel()) >= 4.5, qPrintable(theme));
+		QVERIFY2(contrast(controller.textStrong(), controller.surfaceRaised()) >= 4.5, qPrintable(theme));
+	}
 }
 
 void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {

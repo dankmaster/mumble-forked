@@ -7,6 +7,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -36,6 +37,34 @@ namespace {
 
 	qreal linearColorChannel(const qreal channel) {
 		return channel <= 0.04045 ? channel / 12.92 : std::pow((channel + 0.055) / 1.055, 2.4);
+	}
+
+	qreal relativeLuminance(const QColor &color) {
+		return 0.2126 * linearColorChannel(color.redF()) + 0.7152 * linearColorChannel(color.greenF())
+			+ 0.0722 * linearColorChannel(color.blueF());
+	}
+
+	qreal contrastRatio(const QColor &first, const QColor &second) {
+		const qreal a = relativeLuminance(first);
+		const qreal b = relativeLuminance(second);
+		return (std::max(a, b) + 0.05) / (std::min(a, b) + 0.05);
+	}
+
+	// Moves text towards the theme's strongest text color until it reaches the
+	// contrast against a background; text that already reads is unchanged.
+	QColor withContrast(const QColor &text, const QColor &strongest, const QColor &background,
+						const qreal minimumRatio) {
+		if (!text.isValid() || !strongest.isValid() || !background.isValid()
+			|| contrastRatio(text, background) >= minimumRatio) {
+			return text;
+		}
+		for (int step = 1; step <= 100; ++step) {
+			const QColor candidate = mixColors(text, strongest, step / 100.0);
+			if (contrastRatio(candidate, background) >= minimumRatio) {
+				return candidate;
+			}
+		}
+		return strongest;
 	}
 
 	QColor contrastTextColor(const QColor &background) {
@@ -240,11 +269,17 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 		: mixColors(tokens.accent, tokens.text, 0.18);
 	const QColor nextSelected = tokens.accentSubtle.isValid() ? tokens.accentSubtle
 													 : uiThemeColorWithAlpha(tokens.accent, 0.16);
+	// Some palettes (Catppuccin's above all) put their secondary text too close to
+	// their raised surfaces to read. Body text keeps 4.5:1 on raised surfaces;
+	// muted text 3.5:1 there and 4.5:1 on the page.
+	const QColor nextTextMain = withContrast(tokens.subtext0, tokens.text, nextSurfaceRaised, 4.5);
+	const QColor nextTextMuted = withContrast(
+		withContrast(tokens.overlay0, tokens.text, nextSurfaceRaised, 3.5), tokens.text, tokens.base, 4.5);
 	const bool changed = m_shellBackground != nextShell || m_panel != tokens.base
 		|| m_surfaceRaised != nextSurfaceRaised || m_surfaceHover != nextSurfaceHover
 		|| m_surfaceBorder != nextSurfaceBorder || m_mediaCanvas != nextMediaCanvas || m_rail != tokens.mantle
 		|| m_strip != tokens.crust || m_divider != tokens.border || m_textStrong != tokens.text
-		|| m_textMain != tokens.subtext0 || m_textMuted != tokens.overlay0 || m_accent != tokens.accent
+		|| m_textMain != nextTextMain || m_textMuted != nextTextMuted || m_accent != tokens.accent
 		|| m_accentHover != nextAccentHover || m_accentSubtle != nextSelected
 		|| m_selected != nextSelected || m_danger != tokens.danger || m_success != tokens.success
 		|| m_warning != tokens.warning || m_focus != tokens.focusAccent || m_shellRadius != metrics.shellRadius
@@ -263,8 +298,8 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 	m_strip = tokens.crust;
 	m_divider = tokens.border;
 	m_textStrong = tokens.text;
-	m_textMain = tokens.subtext0;
-	m_textMuted = tokens.overlay0;
+	m_textMain = nextTextMain;
+	m_textMuted = nextTextMuted;
 	m_accent = tokens.accent;
 	m_accentHover = nextAccentHover;
 	m_accentSubtle = nextSelected;
