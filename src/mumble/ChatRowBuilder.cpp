@@ -288,19 +288,23 @@ ChatRowBuilder::ChatRowBuilder(Options options) : m_options(std::move(options)) 
 }
 
 ChatRowBuilder::Body ChatRowBuilder::buildBody(const QString &text, bool markdown) {
-	const QString normalized = normalizedText(text).left(MaxBodyCharacters);
 	Body body;
-	if (normalized.trimmed().isEmpty()) {
+	if (text.trimmed().isEmpty()) {
 		return body;
 	}
 	if (markdown) {
+		const QString normalized = normalizedText(text).left(MaxBodyCharacters);
 		body.blocks    = markdownBlocks(normalized);
 		body.plainText = normalized;
 		return body;
 	}
-	if (Qt::mightBeRichText(normalized)) {
-		return legacyHtmlBody(normalized);
+	// A legacy picture message carries the picture inline and runs to hundreds of
+	// KiB. Cut it only once the picture is out (legacyHtmlBody does), or the cut
+	// lands inside the picture and its base64 shows as text.
+	if (Qt::mightBeRichText(text)) {
+		return legacyHtmlBody(normalizedText(text));
 	}
+	const QString normalized = normalizedText(text).left(MaxBodyCharacters);
 	body.plainText = normalized;
 	body.blocks << (normalized.contains(QLatin1String("http"), Qt::CaseInsensitive)
 						? block(QStringLiteral("p"), QStringLiteral("styled"), linkedPlainTextHtml(normalized))

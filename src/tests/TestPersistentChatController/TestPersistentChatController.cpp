@@ -231,6 +231,7 @@ private slots:
 	void rowBuilderSplitsMarkdownIntoBlocks();
 	void rowBuilderSanitizesLinks();
 	void rowBuilderKeepsLegacyFormattingAndSplitsInlineImages();
+	void rowBuilderSplitsLegacyImagesLargerThanTheBodyLimit();
 	void rowBuilderClassifiesMediaAndCards();
 	void rowBuilderMarksSystemAndOwnMessages();
 	void rowBuilderDecoratesAcrossPageBoundaries();
@@ -1166,6 +1167,28 @@ void TestPersistentChatController::rowBuilderKeepsLegacyFormattingAndSplitsInlin
 	QVERIFY(row.media.first().kind == ChatTimelineMedia::Kind::InlineImage);
 	QVERIFY(!row.media.first().geometryKnown);
 	QVERIFY(row.kind == ChatTimelineRowKind::Media);
+}
+
+void TestPersistentChatController::rowBuilderSplitsLegacyImagesLargerThanTheBodyLimit() {
+	// Older clients send a picture as one <img> whose base64 is percent-encoded
+	// in 72-character lines; a screenshot runs to hundreds of KiB.
+	QStringList lines;
+	for (int i = 0; i < 4000; ++i) {
+		lines << QStringLiteral("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk%2BM%2FwHwAE");
+	}
+	MumbleProto::ChatMessage message = makeMessage(
+		5, 501, MumbleProto::Channel, 1,
+		QStringLiteral("look<img src=\"data:image/png;base64,%1\" style=\"border:none;\" />")
+			.arg(lines.join(QLatin1Char('\n'))));
+	message.set_body_format(MumbleProto::ChatBodyFormatPlainText);
+	QVERIFY(message.body_text().size() > 200000);
+	const ChatTimelineRow row = ChatRowBuilder().build(message);
+
+	QVERIFY(!row.plainText.contains(QStringLiteral("base64")));
+	QVERIFY(!row.plainText.contains(QStringLiteral("iVBOR")));
+	QCOMPARE(row.plainText, QStringLiteral("look"));
+	QCOMPARE(row.media.size(), 1);
+	QVERIFY(row.media.first().kind == ChatTimelineMedia::Kind::InlineImage);
 }
 
 void TestPersistentChatController::rowBuilderClassifiesMediaAndCards() {
