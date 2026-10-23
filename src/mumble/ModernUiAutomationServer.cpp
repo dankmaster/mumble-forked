@@ -6776,6 +6776,22 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("qmlPreviewTheme")) {
+		// Shows the live client in a theme without touching the saved settings;
+		// "restore" goes back to them.
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->themeController()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		const QString theme = request.value(QStringLiteral("theme")).toString().trimmed().toLower();
+		if (theme == QLatin1String("restore")) {
+			host->themeController()->refresh();
+			return okResponse();
+		}
+		if (!host->themeController()->applyVisualGateAppearance(theme, QStringLiteral("regular"), QString())) {
+			return errorResponse(tr("Unknown theme '%1'.").arg(theme));
+		}
+		return okResponse();
+	}
+
 	if (command == QLatin1String("qmlPositionConversationRow")) {
 		QmlShellHost *host = m_mainWindow->qmlShellHost();
 		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));

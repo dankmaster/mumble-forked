@@ -104,6 +104,9 @@ void TestQmlThemeController::appliesVisualGateAppearance() {
 	QCOMPARE(controller.themeId(), QStringLiteral("visual-custom"));
 	QCOMPARE(controller.mediaCanvas(), QColor(QStringLiteral("#050b12")));
 	QCOMPARE(controller.accent(), QColor(QStringLiteral("#ff8aa0")));
+	// Every built-in theme can be shown for screenshots.
+	QVERIFY(controller.applyVisualGateAppearance(QStringLiteral("gruvbox"), QStringLiteral("regular")));
+	QCOMPARE(controller.themeId(), QStringLiteral("gruvbox"));
 	QVERIFY(!controller.applyVisualGateAppearance(QStringLiteral("unknown"), QStringLiteral("regular")));
 }
 

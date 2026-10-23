@@ -1,6 +1,7 @@
 #include "QmlThemeController.h"
 
 #include "Global.h"
+#include "ModernTheme.h"
 #include "QmlClientModels.h"
 
 #include <QtCore/QCoreApplication>
@@ -284,8 +285,8 @@ bool QmlThemeController::applyVisualGateAppearance(const QString &theme, const Q
 	const QString normalizedTheme = theme.trimmed().toLower();
 	const QString normalizedLayout = layout.trimmed().toLower();
 	const QString normalizedDensity = density.trimmed().toLower();
-	if ((normalizedTheme != QLatin1String("light") && normalizedTheme != QLatin1String("dark")
-		 && normalizedTheme != QLatin1String("custom"))
+	// Every built-in theme, plus a deterministic synthetic custom one.
+	if ((!Mumble::ModernTheme::isBuiltInThemeId(normalizedTheme) && normalizedTheme != QLatin1String("custom"))
 		|| (normalizedLayout != QLatin1String("regular") && normalizedLayout != QLatin1String("compact"))
 		|| (!normalizedDensity.isEmpty() && normalizedDensity != QLatin1String("compact")
 			&& normalizedDensity != QLatin1String("comfortable")
