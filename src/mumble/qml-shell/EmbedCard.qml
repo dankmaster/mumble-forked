@@ -462,7 +462,9 @@ Rectangle {
 			width: audioPlayRow.implicitWidth + Theme.space3 * 2
 			height: 30
 			radius: 15
-			color: audioPlayArea.containsMouse ? Theme.surfaceHover : Theme.withAlpha(Theme.surfaceHover, 0.7)
+			// The page's own color stands out from the raised card in light and
+			// dark themes alike.
+			color: audioPlayArea.containsMouse ? Theme.surfaceHover : Theme.panel
 			border.color: Theme.surfaceBorder
 			Accessible.role: Accessible.Button
 			Accessible.name: qsTr("Play")
