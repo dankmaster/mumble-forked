@@ -328,11 +328,36 @@ bool installerFallbackWasRequested(const QJsonObject &info) {
 #endif
 }
 
+bool appDirectoryAcceptsPackageUpdates() {
+#ifdef Q_OS_WIN
+	// The updater applies a package only where this user can write without
+	// elevation; it refuses machine-wide installs (Program Files) and leaves
+	// them to the MSI. Probe the same way once so such installs go straight
+	// to the MSI instead of failing the package first.
+	static const bool accepts = [] {
+		const QString probePath = QDir(QCoreApplication::applicationDirPath())
+									  .filePath(QStringLiteral(".mumble-update-write-test-%1.tmp")
+													.arg(QCoreApplication::applicationPid()));
+		HANDLE file = CreateFileW(reinterpret_cast< const wchar_t * >(QDir::toNativeSeparators(probePath).utf16()),
+								  GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+								  FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+		if (file == INVALID_HANDLE_VALUE) {
+			return false;
+		}
+		CloseHandle(file);
+		return true;
+	}();
+	return accepts;
+#else
+	return true;
+#endif
+}
+
 QString selectedUpdateMode(const QJsonObject &info) {
 	if (installerFallbackWasRequested(info)) {
 		return QStringLiteral("installer");
 	}
-	if (canUsePackageUpdate(info)) {
+	if (canUsePackageUpdate(info) && appDirectoryAcceptsPackageUpdates()) {
 		return QStringLiteral("package");
 	}
 	if (canUseInstallerUpdate(info)) {
