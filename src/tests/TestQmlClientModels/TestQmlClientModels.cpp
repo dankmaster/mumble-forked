@@ -2520,8 +2520,20 @@ void TestQmlClientModels::stonksRequiresNegotiatedRootAclPermission() {
 	QVERIFY(roomState.contains(QStringLiteral("canUseStonks")));
 	QVERIFY(roomState.contains(QStringLiteral("modernShellStonksAllowed()")));
 	QVERIFY(roomState.contains(QStringLiteral("if (stonksRoom && !canUseStonks)")));
-	QVERIFY(roomState.contains(QStringLiteral("activeStonksRoom")));
+	QVERIFY(roomState.contains(QStringLiteral("stonksRoomSelected()")));
 	QVERIFY(roomState.contains(QStringLiteral("modernShellStonksPresentationState")));
+
+	// Room updates leave the ticker out, so quotes must reach the shell through
+	// the Stonks publisher or the ticker stays on "Loading".
+	const QString publishQuotes = methodBody(
+		QStringLiteral("void MainWindow::publishStonksTickerQuotes()"),
+		QStringLiteral("bool MainWindow::stonksRoomSelected()"));
+	QVERIFY(!publishQuotes.isEmpty());
+	QVERIFY(publishQuotes.contains(QStringLiteral("publishQmlStonksState()")));
+	const QString publishStonks = methodBody(
+		QStringLiteral("void MainWindow::publishQmlStonksState()"),
+		QStringLiteral("void MainWindow::openModernDeveloperConsoleDialog()"));
+	QVERIFY(publishStonks.contains(QStringLiteral("setStonks(")));
 
 	const QString actions = methodBody(
 		QStringLiteral("bool MainWindow::handleModernShellAppActionPayload"),

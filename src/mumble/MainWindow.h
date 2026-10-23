@@ -922,6 +922,8 @@ public:
 	void requestStonksTickerQuote(const QString &symbol);
 	void finishStonksTickerQuote(const QString &symbol, quint64 requestToken, QVariantMap quote);
 	void publishStonksTickerQuotes();
+	void publishQmlStonksState();
+	bool stonksRoomSelected() const;
 	QVariantMap modernSettingsStonksContext() const;
 	QVariantMap modernSettingsMotdContext() const;
 	QVariantMap buildModernStonksDialog(const QString &initialTab = QString()) const;

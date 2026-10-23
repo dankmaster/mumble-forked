@@ -19178,6 +19178,7 @@ void MainWindow::handleStonksPermissionUpdate() {
 		publishModernDialogState(m_modernDialogController->state());
 	}
 	scheduleQmlRoomStateUpdate();
+	publishQmlStonksState();
 }
 
 void MainWindow::refreshStonksTickerQuotes(const bool force) {
@@ -19377,11 +19378,33 @@ void MainWindow::publishStonksTickerQuotes() {
 		quotes.insert(it.key(), it.value());
 	}
 	m_stonksState.insert(QStringLiteral("tickerQuotes"), quotes);
-	scheduleQmlRoomStateUpdate();
+	publishQmlStonksState();
 	if (m_modernDialogController
 		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 		openModernGenericDialog(buildModernStonksDialog());
 	}
+}
+
+bool MainWindow::stonksRoomSelected() const {
+	if (!m_persistentChatSelectedScopeValue.has_value()
+		|| *m_persistentChatSelectedScopeValue != static_cast< int >(MumbleProto::TextChannel)) {
+		return false;
+	}
+	const auto textChannelIt = m_persistentTextChannels.constFind(m_persistentChatSelectedScopeID);
+	return (Global::get().uiStonksTextChannelID > 0
+			&& m_persistentChatSelectedScopeID == Global::get().uiStonksTextChannelID)
+		   || (textChannelIt != m_persistentTextChannels.cend()
+			   && normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks"));
+}
+
+void MainWindow::publishQmlStonksState() {
+	// Room updates leave the ticker out (it would rebuild every ticker placement on
+	// each room change), so Stonks changes reach the shell only through here.
+	if (!m_qmlShellHost || !m_qmlShellHost->window()) {
+		return;
+	}
+	m_qmlShellHost->sessionController()->setStonks(
+		modernShellStonksPresentationState(m_stonksState, stonksRoomSelected()));
 }
 
 void MainWindow::openModernDeveloperConsoleDialog() {
@@ -19438,7 +19461,7 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 				normalizedStonksTickerSpeed(payload.value(QStringLiteral("tickerSpeed")).toString());
 		}
 		Global::get().s.save();
-		scheduleQmlRoomStateUpdate();
+		publishQmlStonksState();
 		refreshStonksTickerQuotes();
 		return true;
 	}
@@ -27114,18 +27137,8 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
-	bool activeStonksRoom = false;
-	if (m_persistentChatSelectedScopeValue.has_value()
-		&& *m_persistentChatSelectedScopeValue == static_cast< int >(MumbleProto::TextChannel)) {
-		const auto textChannelIt = m_persistentTextChannels.constFind(m_persistentChatSelectedScopeID);
-		activeStonksRoom =
-			(Global::get().uiStonksTextChannelID > 0
-			 && m_persistentChatSelectedScopeID == Global::get().uiStonksTextChannelID)
-			|| (textChannelIt != m_persistentTextChannels.cend()
-				&& normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks"));
-	}
 	appState.insert(QStringLiteral("stonks"),
-					modernShellStonksPresentationState(m_stonksState, activeStonksRoom));
+					modernShellStonksPresentationState(m_stonksState, stonksRoomSelected()));
 	appState.insert(QStringLiteral("collapsedNavigationSections"),
 					Global::get().s.qslModernShellCollapsedNavigationSections);
 	const QVariantMap motdViewState = modernMotdServerViewState();
