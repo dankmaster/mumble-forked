@@ -3883,6 +3883,22 @@ std::optional< QString > streamableShortcodeFromUrl(const QUrl &url) {
 	return s_shortcodePattern.match(shortcode).hasMatch() ? std::optional< QString >(shortcode) : std::nullopt;
 }
 
+// An unlisted video plays only with its hash: vimeo.com/<id>/<hash> or ?h=<hash>.
+QString vimeoUnlistedHashFromUrl(const QUrl &url, const QString &videoId) {
+	static const QRegularExpression s_hashPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[0-9a-f]{6,24}")));
+	const QString queryHash = QUrlQuery(url).queryItemValue(QStringLiteral("h"));
+	if (s_hashPattern.match(queryHash).hasMatch()) {
+		return queryHash;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	const qsizetype index      = segments.indexOf(videoId);
+	if (index >= 0 && index + 1 < segments.size() && s_hashPattern.match(segments.at(index + 1)).hasMatch()) {
+		return segments.at(index + 1);
+	}
+	return {};
+}
+
 std::optional< QString > vimeoVideoIdFromUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (host != QLatin1String("vimeo.com") && host != QLatin1String("player.vimeo.com")) {
@@ -4178,6 +4194,9 @@ std::optional< PersistentChatPreviewEmbedTarget > previewEmbedTargetForUrl(const
 		query.addQueryItem(QStringLiteral("byline"), QStringLiteral("0"));
 		query.addQueryItem(QStringLiteral("portrait"), QStringLiteral("0"));
 		query.addQueryItem(QStringLiteral("autoplay"), QStringLiteral("1"));
+		if (const QString hash = vimeoUnlistedHashFromUrl(url, *videoId); !hash.isEmpty()) {
+			query.addQueryItem(QStringLiteral("h"), hash);
+		}
 		embedUrl.setQuery(query);
 		return PersistentChatPreviewEmbedTarget { QStringLiteral("vimeo"), embedUrl, QStringLiteral("wide") };
 	}
@@ -4313,6 +4332,22 @@ std::optional< QString > imgurSingleMediaIdFromUrl(const QUrl &url) {
 	static const QRegularExpression s_idPattern(
 		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9]{5,16}")));
 	return s_idPattern.match(id).hasMatch() ? std::optional< QString >(id) : std::nullopt;
+}
+
+// 4chan keeps a JPEG thumbnail beside every upload (<board>/<time>s.jpg). This
+// Qt build cannot decode VP8/VP9, so a .webm gets its picture from there.
+QUrl fourChanThumbnailUrl(const QUrl &url) {
+	if (normalizedPreviewHost(url.host()) != QLatin1String("i.4cdn.org")) {
+		return {};
+	}
+	static const QRegularExpression s_mediaPath(
+		QRegularExpression::anchoredPattern(QLatin1String(R"(/([a-z0-9]{1,8})/([0-9]{6,20})\.(?:webm|mp4|gif))")),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_mediaPath.match(url.path());
+	if (!match.hasMatch()) {
+		return {};
+	}
+	return QUrl(QStringLiteral("https://i.4cdn.org/%1/%2s.jpg").arg(match.captured(1), match.captured(2)));
 }
 
 bool isSteamStoreHost(const QString &host) {
@@ -9992,6 +10027,17 @@ QUrl redditPosterUrlFromEmbedHtml(const QString &html) {
 		: QUrl();
 }
 
+// The embed page's <title> is Reddit's own; the post's title is its <h1>.
+QString redditTitleFromEmbedHtml(const QString &html) {
+	static const QRegularExpression s_redditTitlePattern(QLatin1String(R"(<h1[^>]*>([\s\S]{1,2000}?)</h1>)"),
+														 QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_redditTitlePattern.match(html);
+	if (!match.hasMatch()) {
+		return {};
+	}
+	return QTextDocumentFragment::fromHtml(match.captured(1)).toPlainText().simplified().left(300);
+}
+
 QUrl redditPrimaryMediaUrlFromEmbedHtml(const QString &html) {
 	static const QRegularExpression s_screenviewDataPattern(
 		QLatin1String(R"(<shreddit-screenview-data\b[^>]*\bdata=(["'])([\s\S]*?)\1)"),
@@ -11316,7 +11362,11 @@ QByteArray previewImageAcceptHeader() {
 
 void preparePreviewRequest(QNetworkRequest &request) {
 	Network::prepareRequest(request);
-	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_previewBrowserUserAgent);
+	// Flashback answers browser user agents with a JavaScript cookie challenge
+	// but serves link-preview crawlers the thread itself.
+	request.setRawHeader(QByteArrayLiteral("User-Agent"), isFlashbackPreviewUrl(request.url())
+															  ? s_socialPreviewMetadataUserAgent
+															  : s_previewBrowserUserAgent);
 	request.setRawHeader(QByteArrayLiteral("Accept"), s_previewAcceptHeader);
 	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_previewAcceptLanguageHeader);
 }
@@ -12760,15 +12810,58 @@ QString instagramBestImageUrl(const QJsonObject &object) {
 	return instagramSafeMediaUrl(object.value(QStringLiteral("display_uri")).toString());
 }
 
+bool instagramVideoUrlHasSound(const QString &url);
+
 QString instagramBestVideoUrl(const QJsonObject &object) {
+	QString first;
 	for (const QJsonValue &value : object.value(QStringLiteral("video_versions")).toArray()) {
 		const QString url =
 			instagramSafeMediaUrl(value.toObject().value(QStringLiteral("url")).toString());
-		if (!url.isEmpty()) {
+		if (url.isEmpty()) {
+			continue;
+		}
+		if (instagramVideoUrlHasSound(url)) {
 			return url;
 		}
+		if (first.isEmpty()) {
+			first = url;
+		}
 	}
-	return QString();
+	return first;
+}
+
+// Instagram encodes what a video URL carries in its efg parameter; a
+// progressive file has its sound, a DASH representation only the picture.
+bool instagramVideoUrlHasSound(const QString &url) {
+	const QString efg = QUrlQuery(QUrl(url)).queryItemValue(QStringLiteral("efg"), QUrl::FullyDecoded);
+	return QByteArray::fromBase64(efg.toLatin1(), QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals)
+		.contains("progressive");
+}
+
+// The embed page keeps the post's JSON in a JavaScript string, so its URLs are
+// escaped twice ("https:\\\/\\\/...").
+QString instagramEmbedPageUrl(const QString &html, const QRegularExpression &pattern) {
+	const QRegularExpressionMatch match = pattern.match(html);
+	if (!match.hasMatch()) {
+		return {};
+	}
+	QString url = match.captured(1);
+	for (int pass = 0; pass < 3 && url.contains(QLatin1Char('\\')); ++pass) {
+		url.replace(QLatin1String("\\/"), QLatin1String("/"));
+		url.replace(QLatin1String("\\\\"), QLatin1String("\\"));
+	}
+	url.replace(QLatin1String("\\u0026"), QLatin1String("&"));
+	return url.contains(QLatin1Char('\\')) ? QString() : instagramSafeMediaUrl(url);
+}
+
+QString instagramEmbedPageVideoUrl(const QString &html) {
+	static const QRegularExpression s_pattern(QLatin1String(R"(video_url\\+"\s*:\s*\\+"(https:[^"]{1,4096}?)\\+")"));
+	return instagramEmbedPageUrl(html, s_pattern);
+}
+
+QString instagramEmbedPageDisplayUrl(const QString &html) {
+	static const QRegularExpression s_pattern(QLatin1String(R"(display_url\\+"\s*:\s*\\+"(https:[^"]{1,4096}?)\\+")"));
+	return instagramEmbedPageUrl(html, s_pattern);
 }
 
 std::vector< MainWindow::PersistentChatPreviewMediaItem >
@@ -33271,6 +33364,11 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 								previewKey, QUrl(parsed.instagramMetadata->posterUrl), QStringLiteral("image/jpeg"));
 						}
 					}
+					requestPersistentChatInstagramEmbedVideo(previewKey, requestUrl);
+					previewIt = m_persistentChatPreviews.find(previewKey);
+					if (previewIt == m_persistentChatPreviews.end()) {
+						return;
+					}
 					previewIt->metadataFinished = true;
 					ensurePersistentChatPreviewSiteSnapshot(previewKey);
 					publishPersistentChatPreviewUpdate(previewKey);
@@ -33299,6 +33397,67 @@ bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &pr
 		publishPersistentChatPreviewUpdate(previewKey);
 	});
 
+	return true;
+}
+
+bool MainWindow::requestPersistentChatInstagramEmbedVideo(const QString &previewKey, const QUrl &previewUrl) {
+	// The post page often leaves out the media, or offers only a video without
+	// sound, which left reels silent or shown as Instagram's own embed inside
+	// the card. The embed page carries the progressive video and its cover.
+	const std::optional< InstagramPreviewTarget > target = instagramPreviewTargetFromUrl(previewUrl);
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (!target || it == m_persistentChatPreviews.end() || !Global::get().nam) {
+		return false;
+	}
+	const auto isVideo = [](const PersistentChatPreviewMediaItem &item) {
+		return item.kind == QLatin1String("video");
+	};
+	const bool hasVideoWithSound =
+		std::any_of(it->mediaItems.cbegin(), it->mediaItems.cend(), [&isVideo](const PersistentChatPreviewMediaItem &item) {
+			return isVideo(item) && instagramVideoUrlHasSound(item.url);
+		});
+	const bool videoKind = target->kind == QLatin1String("reel") || target->kind == QLatin1String("tv")
+						   || std::any_of(it->mediaItems.cbegin(), it->mediaItems.cend(), isVideo);
+	if (hasVideoWithSound || (!videoKind && !it->mediaItems.empty())) {
+		return false;
+	}
+
+	QUrl embedPage = instagramEmbedUrl(*target);
+	embedPage.setPath(embedPage.path() + QStringLiteral("captioned/"));
+	if (!isSafePreviewTarget(embedPage)) {
+		return false;
+	}
+	QNetworkRequest request(embedPage);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Sec-Fetch-Dest"), QByteArrayLiteral("iframe"));
+	request.setRawHeader(QByteArrayLiteral("Sec-Fetch-Mode"), QByteArrayLiteral("navigate"));
+	request.setRawHeader(QByteArrayLiteral("Sec-Fetch-Site"), QByteArrayLiteral("cross-site"));
+	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	const QString expectedPreviewSource = it->canonicalUrl;
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, expectedPreviewSource]() {
+		const QString html =
+			reply->error() == QNetworkReply::NoError ? QString::fromUtf8(reply->readAll()) : QString();
+		reply->deleteLater();
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (html.isEmpty() || previewIt == m_persistentChatPreviews.end()
+			|| previewIt->canonicalUrl != expectedPreviewSource) {
+			return;
+		}
+		const QString videoUrl   = instagramEmbedPageVideoUrl(html);
+		const QString displayUrl = instagramEmbedPageDisplayUrl(html);
+		if (videoUrl.isEmpty()) {
+			return;
+		}
+		previewIt->mediaItems = { PersistentChatPreviewMediaItem { videoUrl, QStringLiteral("video/mp4"),
+																   QStringLiteral("video"), QString(), QString(),
+																   displayUrl, displayUrl } };
+		previewIt->metadata.insert(QStringLiteral("instagramMediaCount"), 1);
+		if (!displayUrl.isEmpty()) {
+			requestPersistentChatPreviewPosterImage(previewKey, QUrl(displayUrl), QStringLiteral("image/jpeg"));
+		}
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
 	return true;
 }
 
@@ -33546,6 +33705,9 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 							!= RICH_PREVIEW_METADATA_VERSION
 						|| cached.metadata.value(QStringLiteral("richPreviewClientHydrationVersion")).toInt()
 							   != RICH_PREVIEW_METADATA_VERSION))
+				// Reddit videos cached before the post fallback have no picture and a
+				// placeholder title; read them again.
+				|| (redditVideoIdFromUrl(cachedUrl) && cached.thumbnailImage.isNull())
 				|| (redditPostIdFromUrl(cachedUrl)
 					&& (cached.metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
 							!= RICH_PREVIEW_METADATA_VERSION
@@ -36722,6 +36884,12 @@ bool MainWindow::requestPersistentChatRedditPostPreview(const QString &previewKe
 				const QString videoId = redditVideoIdFromEmbedHtml(html);
 				const QUrl posterUrl = redditPosterUrlFromEmbedHtml(html);
 				const QUrl primaryMediaUrl = redditPrimaryMediaUrlFromEmbedHtml(html);
+				const QString postTitle = redditTitleFromEmbedHtml(html);
+				if (!postTitle.isEmpty()
+					&& (previewIt->title.trimmed().isEmpty() || previewIt->title == tr("Reddit video")
+						|| redditTextLooksLikeAccessGate(previewIt->title))) {
+					previewIt->title = postTitle;
+				}
 				QVariantMap resolvedMetadata = previewIt->metadata;
 				if (success && !html.isEmpty()) {
 					resolvedMetadata.insert(QStringLiteral("richPreviewClientHydrationVersion"),
@@ -37757,6 +37925,9 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			requestPersistentChatPreviewPosterImage(
 				previewKey, QUrl(QStringLiteral("https://i.imgur.com/%1h.jpg").arg(*imgurId)),
 				QStringLiteral("image/jpeg"));
+		}
+		if (const QUrl fourChanThumbnail = fourChanThumbnailUrl(previewUrl); fourChanThumbnail.isValid()) {
+			requestPersistentChatPreviewPosterImage(previewKey, fourChanThumbnail, QStringLiteral("image/jpeg"));
 		}
 		requestPersistentChatInstagramMetadataPreview(previewKey, previewUrl);
 		requestPersistentChatTikTokMetadataPreview(previewKey, previewUrl);

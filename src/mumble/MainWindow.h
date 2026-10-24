@@ -610,6 +610,7 @@ public:
 	bool applyYahooFinanceQuotePreviewFallback(PersistentChatPreview &preview, const QUrl &url) const;
 	bool requestPersistentChatFinancePreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatInstagramMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatInstagramEmbedVideo(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatTikTokMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatFacebookMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl);

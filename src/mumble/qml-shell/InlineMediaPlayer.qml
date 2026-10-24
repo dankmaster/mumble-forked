@@ -1478,7 +1478,16 @@ Rectangle {
 				const generation = loadGeneration
 				if (!inlinePlayer.session || generation !== inlinePlayer.mediaGeneration)
 					return
-				if (request.status === WebEngineView.LoadFailedStatus) {
+				// A provider page answering 401/403/429 is often a bot check (Vimeo's
+				// Cloudflare page) that reloads the player once it passes; tearing the
+				// view down would kill it. The page shows its own message otherwise.
+				const providerHttpRefusal = request.status === WebEngineView.LoadFailedStatus
+					&& !inlinePlayer.isolatedMediaDocument
+					&& request.errorDomain === WebEngineView.HttpErrorDomain
+					&& [401, 403, 429].indexOf(request.errorCode) >= 0
+				if (providerHttpRefusal) {
+					inlinePlayer.session.reportLoadProgress(99)
+				} else if (request.status === WebEngineView.LoadFailedStatus) {
 					if (inlinePlayer.failMediaDocument(generation))
 						inlinePlayer.session.reportError(request.errorString || qsTr("The media provider could not be loaded."))
 				} else if (request.status === WebEngineView.LoadSucceededStatus) {
