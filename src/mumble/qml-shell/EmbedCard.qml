@@ -274,7 +274,6 @@ Rectangle {
 				anchors.verticalCenter: parent.verticalCenter
 				width: visible ? 24 : 0
 				height: 20
-				opacity: hoverArea.containsMouse || openArea.containsMouse || menuArea.containsMouse ? 1 : 0.55
 				Accessible.role: Accessible.Button
 				Accessible.name: qsTr("Open in browser")
 				Accessible.onPressAction: root.openRequested(root.sourceUrl)
@@ -283,7 +282,10 @@ Rectangle {
 					anchors.centerIn: parent
 					name: "external"
 					size: 15
-					color: openArea.containsMouse ? Theme.textStrong : Theme.textMuted
+					// Dimmed by its color: a Shape icon under item opacity did not draw.
+					color: openArea.containsMouse ? Theme.textStrong
+						: hoverArea.containsMouse || menuArea.containsMouse ? Theme.textMuted
+						: Theme.withAlpha(Theme.textMuted, 0.6)
 				}
 				MouseArea {
 					id: openArea
