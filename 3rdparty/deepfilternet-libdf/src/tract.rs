@@ -401,6 +401,31 @@ impl DfTract {
         };
     }
 
+    /// Returns to the streaming state of a freshly constructed instance.
+    ///
+    /// The already optimized model plans are reused; only fresh run states,
+    /// normalization states and buffers are created. This is equivalent to
+    /// `DfTract::new` with the same parameters without parsing and optimizing
+    /// the models again. Attenuation limit and post-filter settings are kept.
+    pub fn reset(&mut self) -> Result<()> {
+        self.enc = SimpleState::new(self.enc.plan().clone())?;
+        self.erb_dec = SimpleState::new(self.erb_dec.plan().clone())?;
+        self.df_dec = SimpleState::new(self.df_dec.plan().clone())?;
+        let mut state = DFState::new(
+            self.sr,
+            self.fft_size,
+            self.hop_size,
+            self.nb_erb,
+            self.min_nb_erb_freqs,
+        );
+        state.init_norm_states(self.nb_df);
+        self.df_states = vec![state];
+        self.rolling_spec_buf_y.clear();
+        self.rolling_spec_buf_x.clear();
+        self.skip_counter = 0;
+        self.init()
+    }
+
     pub fn init(&mut self) -> Result<()> {
         let ch = self.ch;
         let spec_shape = [ch, 1, 1, self.n_freqs, 2];

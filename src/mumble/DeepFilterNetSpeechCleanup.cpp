@@ -43,6 +43,7 @@ namespace {
 	using DfSetAttenLimFn       = void (*)(DFState *state, float limitDb);
 	using DfSetPostFilterBetaFn = void (*)(DFState *state, float beta);
 	using DfFreeFn              = void (*)(DFState *state);
+	using DfResetFn             = int (*)(DFState *state);
 
 	struct DeepFilterNetProfile {
 		QString modelId;
@@ -142,6 +143,8 @@ public:
 		m_setAttenLim       = reinterpret_cast< DfSetAttenLimFn >(m_library.resolve("df_set_atten_lim"));
 		m_setPostFilterBeta = reinterpret_cast< DfSetPostFilterBetaFn >(m_library.resolve("df_set_post_filter_beta"));
 		m_free              = reinterpret_cast< DfFreeFn >(m_library.resolve("df_free"));
+		// Optional: older runtimes without df_reset recreate the state instead.
+		m_resetState = reinterpret_cast< DfResetFn >(m_library.resolve("df_reset"));
 
 		if (!m_create || !m_getFrameLength || !m_getLatency || !m_processFrameV2 || !m_setAttenLim
 			|| !m_setPostFilterBeta || !m_free) {
@@ -188,8 +191,7 @@ public:
 			return;
 		}
 
-		releaseState();
-		m_ready = initializeState();
+		m_ready = resetState();
 #endif
 	}
 
@@ -450,7 +452,24 @@ private:
 		if (!m_state) {
 			return false;
 		}
+		return initializeAdapter();
+	}
 
+	/// Returns the existing model state to its freshly created stream state.
+	/// Parsing and optimizing the model dominates df_create, and Pipeline
+	/// resets every processor twice during preparation, so reuse the loaded
+	/// model whenever the runtime offers df_reset.
+	bool resetState() {
+		if (m_state && m_resetState) {
+			if (m_resetState(m_state) == DeepFilterNetRealtimeWorker::statusOk) {
+				return initializeAdapter();
+			}
+		}
+		releaseState();
+		return initializeState();
+	}
+
+	bool initializeAdapter() {
 		m_frameLength = m_getFrameLength(m_state);
 		const std::size_t algorithmicLatency = m_getLatency(m_state);
 		const std::size_t maximumAdapterLatency =
@@ -513,6 +532,7 @@ private:
 	DfSetAttenLimFn m_setAttenLim = nullptr;
 	DfSetPostFilterBetaFn m_setPostFilterBeta = nullptr;
 	DfFreeFn m_free = nullptr;
+	DfResetFn m_resetState = nullptr;
 	std::size_t m_frameLength = 0;
 	std::vector< float > m_inputFrame;
 	std::vector< float > m_outputFrame;

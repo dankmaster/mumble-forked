@@ -164,6 +164,26 @@ pub unsafe extern "C" fn df_create(
     }
 }
 
+/// Reset a DeepFilterNet state to the streaming state of a fresh `df_create`.
+///
+/// The loaded and optimized model is reused, so this is much cheaper than
+/// freeing and creating the state again. Attenuation limit and post-filter
+/// settings are kept.
+///
+/// Returns DF_PROCESS_STATUS_OK on success. On any other status the state must
+/// not be used for processing and should be freed.
+#[no_mangle]
+pub unsafe extern "C" fn df_reset(st: *mut DFState) -> c_int {
+    let Some(state) = st.as_mut() else {
+        return DF_PROCESS_STATUS_INVALID_ARGUMENT;
+    };
+    match catch_unwind(AssertUnwindSafe(|| state.m.reset())) {
+        Ok(Ok(())) => DF_PROCESS_STATUS_OK,
+        Ok(Err(_)) => DF_PROCESS_STATUS_PROCESS_ERROR,
+        Err(_) => DF_PROCESS_STATUS_PANIC,
+    }
+}
+
 /// Get DeepFilterNet frame size in samples.
 #[no_mangle]
 pub unsafe extern "C" fn df_get_frame_length(st: *mut DFState) -> usize {
@@ -402,6 +422,77 @@ mod tests {
                 df_process_frame_v2(fake_state, input.as_ptr(), output.as_mut_ptr(), null_mut(),),
                 DF_PROCESS_STATUS_INVALID_ARGUMENT
             );
+        }
+    }
+
+    #[test]
+    fn reset_rejects_null_state() {
+        assert_eq!(unsafe { df_reset(null_mut()) }, DF_PROCESS_STATUS_INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn reset_matches_a_freshly_created_state() {
+        let model = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../src/mumble/deepfilternet/DeepFilterNet3_ll_onnx.tar.gz");
+        assert!(model.exists(), "missing test model {}", model.display());
+        let model = CString::new(model.to_str().unwrap()).unwrap();
+
+        unsafe {
+            let fresh = df_create(model.as_ptr(), 48.0, null());
+            let reused = df_create(model.as_ptr(), 48.0, null());
+            assert!(!fresh.is_null() && !reused.is_null());
+            let frame_length = df_get_frame_length(fresh);
+
+            let mut seed = 0x2545_f491u32;
+            let input: Vec<f32> = (0..frame_length * 24)
+                .map(|index| {
+                    seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    let noise = ((seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5) * 0.05;
+                    noise + 0.2 * (index as f32 * 0.031).sin()
+                })
+                .collect();
+            let mut output = vec![0.0f32; frame_length];
+            let mut local_snr = 0.0f32;
+
+            // Leave model, normalization and rolling buffers in a used state.
+            for frame in input.chunks(frame_length) {
+                let status = df_process_frame_v2(
+                    reused,
+                    frame.as_ptr(),
+                    output.as_mut_ptr(),
+                    &mut local_snr,
+                );
+                assert_eq!(status, DF_PROCESS_STATUS_OK);
+            }
+            assert_eq!(df_reset(reused), DF_PROCESS_STATUS_OK);
+
+            let mut fresh_output = vec![0.0f32; frame_length];
+            let mut fresh_snr = 0.0f32;
+            for frame in input.chunks(frame_length) {
+                assert_eq!(
+                    df_process_frame_v2(
+                        fresh,
+                        frame.as_ptr(),
+                        fresh_output.as_mut_ptr(),
+                        &mut fresh_snr,
+                    ),
+                    DF_PROCESS_STATUS_OK
+                );
+                assert_eq!(
+                    df_process_frame_v2(
+                        reused,
+                        frame.as_ptr(),
+                        output.as_mut_ptr(),
+                        &mut local_snr,
+                    ),
+                    DF_PROCESS_STATUS_OK
+                );
+                assert_eq!(fresh_output, output);
+                assert_eq!(fresh_snr.to_bits(), local_snr.to_bits());
+            }
+
+            df_free(fresh);
+            df_free(reused);
         }
     }
 
