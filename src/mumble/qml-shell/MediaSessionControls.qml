@@ -275,11 +275,15 @@ Rectangle {
 			ModernSlider {
 				id: embeddedSeekSlider
 				objectName: "mediaEmbeddedSeekSlider"
+				// A portrait player (a YouTube Short) is about 200 px wide: there the
+				// slider gives way, so play, volume and close stay on one row instead
+				// of wrapping below the card.
 				visible: root.embedded && root.transportControlsVisible
+					&& transportActions.width - root.embeddedTransportReservedWidth >= 48
 				// Give seeking the space left by the visible transport cluster. This
 				// keeps the card player on one row without relying on translated label
 				// widths or a brittle per-breakpoint estimate.
-				width: Math.max(72, transportActions.width - root.embeddedTransportReservedWidth)
+				width: Math.max(48, transportActions.width - root.embeddedTransportReservedWidth)
 				from: 0
 				to: Math.max(1, Number(session.duration || 0))
 				value: Number(session.position || 0)
