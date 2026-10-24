@@ -265,6 +265,7 @@ public:
 	GlobalShortcut *gsMoveBack;
 	GlobalShortcut *gsCycleListenerAttenuationMode, *gsListenerAttenuationUp, *gsListenerAttenuationDown;
 	GlobalShortcut *gsAdaptivePush;
+	GlobalShortcut *gsToggleScreenShare;
 
 
 	MumbleProto::Reject_RejectType rtLast;
@@ -1625,6 +1626,7 @@ public slots:
 	void on_gsListenerAttenuationUp_triggered(bool, QVariant);
 	void on_gsListenerAttenuationDown_triggered(bool, QVariant);
 	void on_gsAdaptivePush_triggered(bool, QVariant);
+	void on_gsToggleScreenShare_triggered(bool, QVariant);
 
 	void on_Reconnect_timeout();
 	void serverConnected();

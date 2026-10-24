@@ -10,6 +10,7 @@
 #include "ScreenShareHelperClient.h"
 #include "ScreenShareOperationTracker.h"
 
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QObject>
@@ -125,6 +126,8 @@ public slots:
 signals:
 	void sessionUpdated(const QString &streamID);
 	void sessionStopped(const QString &streamID);
+	// A share in the user's room became watchable and is not opened automatically.
+	void remoteShareAvailable(const QString &streamID, const QString &ownerName);
 
 private:
 	// A relay token is only presented when a helper runtime joins the relay, so an expired token must
@@ -143,6 +146,7 @@ private:
 	bool shouldAutoViewSession(const ScreenShareSession &session) const;
 	bool restartExternalViewSession(const ScreenShareSession &session);
 	void retryExternalViewSession(const QString &streamID);
+	void recoverStalledViewSession(const QString &streamID);
 	void ensureViewBackend(const ScreenShareSession &session, qint64 processID);
 	void updateViewBackendIdentity(ScreenShareViewBackend *backend, const ScreenShareSession &session) const;
 	void startLocalPublishSession(const ScreenShareSession &session);
@@ -159,6 +163,7 @@ private:
 	void persistExternalViewAudioPreference(const QString &streamID);
 	void flushExternalViewAudioPreferenceSaves();
 	void logRemoteViewAvailability(const ScreenShareSession &session);
+	QString ownerLabel(unsigned int ownerSession) const;
 	void stopLocalHelperSessions(const QString &streamID);
 	void notifyServerShareStopped(const QString &streamID);
 	quint64 nextHelperOperationGeneration(HelperOperationKind kind, const QString &streamID);
@@ -178,6 +183,10 @@ private:
 	QHash< QString, qint64 > m_externalViewProcessIDs;
 	QHash< QString, int > m_externalPublishRestartAttempts;
 	QHash< QString, int > m_externalViewRestartAttempts;
+	// When each runtime last started. A runtime that stays healthy long enough earns its automatic
+	// restarts back, so two crashes hours apart do not exhaust them for the rest of the session.
+	QHash< QString, QElapsedTimer > m_publishRuntimeStarted;
+	QHash< QString, QElapsedTimer > m_viewRuntimeStarted;
 	QHash< QString, ScreenShareViewBackend * > m_viewBackends;
 	QHash< QString, QPointer< QObject > > m_qmlViewWindows;
 	QSet< QString > m_externalViewAudioMuted;

@@ -38,6 +38,7 @@
 namespace {
 constexpr int kExternalRuntimeWatchdogIntervalMsec = 3000;
 constexpr int kExternalRuntimeRestartLimit         = 2;
+constexpr qint64 kStableRuntimeRestartResetMsec     = 2 * 60 * 1000;
 
 bool envFlagEnabled(const char *name) {
 	const QString value = qEnvironmentVariable(name).trimmed().toLower();
@@ -713,6 +714,8 @@ void ScreenShareManager::resetState() {
 	m_externalViewProcessIDs.clear();
 	m_externalPublishRestartAttempts.clear();
 	m_externalViewRestartAttempts.clear();
+	m_publishRuntimeStarted.clear();
+	m_viewRuntimeStarted.clear();
 	m_announcedViewableSessions.clear();
 	m_sessions.clear();
 	m_lastLoggedAvailabilityContext.clear();
@@ -1083,6 +1086,7 @@ void ScreenShareManager::applyHelperOperationResult(const HelperOperationResult 
 		if (result.success) {
 			m_activePublishSessions.insert(result.streamID);
 			m_externalPublishProcessIDs.insert(result.streamID, result.processID);
+			m_publishRuntimeStarted[result.streamID].start();
 			updateExternalRuntimeWatchdog();
 		} else {
 			requestStopShare(result.streamID);
@@ -1110,6 +1114,7 @@ void ScreenShareManager::applyHelperOperationResult(const HelperOperationResult 
 	m_manualViewRetryRequired.remove(result.streamID);
 	m_activeViewSessions.insert(result.streamID);
 	m_externalViewProcessIDs.insert(result.streamID, result.processID);
+	m_viewRuntimeStarted[result.streamID].start();
 	ensureViewBackend(currentSession, result.processID);
 	backend = m_viewBackends.value(result.streamID);
 	if (backend) {
@@ -1181,6 +1186,51 @@ void ScreenShareManager::retryExternalViewSession(const QString &streamID) {
 	emit sessionUpdated(streamID);
 }
 
+void ScreenShareManager::recoverStalledViewSession(const QString &streamID) {
+	if (!m_activeViewSessions.contains(streamID) || m_pausedExternalViewSessions.contains(streamID)
+		|| m_pendingViewRestarts.contains(streamID)) {
+		return;
+	}
+
+	// Recovery shares the crash-restart budget, so a source that never delivers frames ends in the
+	// manual Retry state instead of restarting forever.
+	const auto sessionIt     = m_sessions.constFind(streamID);
+	const int restartAttempt = m_externalViewRestartAttempts.value(streamID, 0) + 1;
+	const bool canRestart    = sessionIt != m_sessions.cend() && restartAttempt <= kExternalRuntimeRestartLimit
+							&& canViewSession(sessionIt.value());
+	const QString owner = sessionIt != m_sessions.cend() ? ownerLabel(sessionIt.value().ownerSession) : streamID;
+	if (Global::get().l) {
+		Global::get().l->log(Log::Warning,
+							 canRestart ? tr("%1's screen share stopped delivering video; restarting the viewer "
+											 "(%2/%3).")
+											  .arg(owner.toHtmlEscaped(), QString::number(restartAttempt),
+												   QString::number(kExternalRuntimeRestartLimit))
+										: tr("%1's screen share stopped delivering video. Use Retry to start a "
+											 "fresh viewer.")
+											  .arg(owner.toHtmlEscaped()));
+	}
+	if (!canRestart) {
+		return;
+	}
+
+	m_externalViewRestartAttempts.insert(streamID, restartAttempt);
+	m_activeViewSessions.remove(streamID);
+	m_externalViewProcessIDs.remove(streamID);
+	m_viewRuntimeStarted.remove(streamID);
+	m_pendingViewRestarts.insert(streamID);
+	if (ScreenShareViewBackend *backend = m_viewBackends.value(streamID)) {
+		backend->setProcessId(0);
+		backend->setNativeFrameTransport({}, 0);
+		backend->setOperationState(QStringLiteral("loading"), {}, true);
+	}
+	ScreenShareSession stopSession;
+	stopSession.streamID = streamID;
+	scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
+							nextHelperOperationGeneration(HelperOperationKind::StopView, streamID));
+	updateExternalRuntimeWatchdog();
+	emit sessionUpdated(streamID);
+}
+
 void ScreenShareManager::ensureViewBackend(const ScreenShareSession &session, const qint64 processID) {
 	ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID, nullptr);
 	if (!backend) {
@@ -1214,6 +1264,8 @@ void ScreenShareManager::ensureViewBackend(const ScreenShareSession &session, co
 		});
 		connect(backend, &ScreenShareViewBackend::retryRequested, this,
 				&ScreenShareManager::retryExternalViewSession);
+		connect(backend, &ScreenShareViewBackend::frameStallPersisted, this,
+				&ScreenShareManager::recoverStalledViewSession);
 		connect(backend, &ScreenShareViewBackend::pauseToggled, this,
 				&ScreenShareManager::setExternalViewPaused);
 		connect(backend, &ScreenShareViewBackend::audioMuteToggled, this,
@@ -1280,6 +1332,7 @@ void ScreenShareManager::stopLocalPublishSession(const QString &streamID) {
 	m_activePublishSessions.remove(streamID);
 	m_externalPublishProcessIDs.remove(streamID);
 	m_externalPublishRestartAttempts.remove(streamID);
+	m_publishRuntimeStarted.remove(streamID);
 	updateExternalRuntimeWatchdog();
 }
 
@@ -1305,6 +1358,7 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 	m_activeViewSessions.remove(streamID);
 	m_externalViewProcessIDs.remove(streamID);
 	m_externalViewRestartAttempts.remove(streamID);
+	m_viewRuntimeStarted.remove(streamID);
 	updateExternalRuntimeWatchdog();
 }
 
@@ -1324,6 +1378,10 @@ void ScreenShareManager::checkExternalRuntimeLiveness() {
 	for (const QString &streamID : activePublishSessions) {
 		const qint64 processID = m_externalPublishProcessIDs.value(streamID, 0);
 		if (externalProcessIsRunning(processID)) {
+			const QElapsedTimer started = m_publishRuntimeStarted.value(streamID);
+			if (started.isValid() && started.hasExpired(kStableRuntimeRestartResetMsec)) {
+				m_externalPublishRestartAttempts.remove(streamID);
+			}
 			continue;
 		}
 
@@ -1368,6 +1426,12 @@ void ScreenShareManager::checkExternalRuntimeLiveness() {
 	for (const QString &streamID : activeViewSessions) {
 		const qint64 processID = m_externalViewProcessIDs.value(streamID, 0);
 		if (externalProcessIsRunning(processID)) {
+			const ScreenShareViewBackend *backend = m_viewBackends.value(streamID, nullptr);
+			const QElapsedTimer started            = m_viewRuntimeStarted.value(streamID);
+			if (started.isValid() && started.hasExpired(kStableRuntimeRestartResetMsec)
+				&& (!backend || backend->operationStatus() != QLatin1String("stalled"))) {
+				m_externalViewRestartAttempts.remove(streamID);
+			}
 			continue;
 		}
 
@@ -1438,10 +1502,10 @@ void ScreenShareManager::setExternalViewAudioMuted(const QString &streamID, cons
 		m_externalViewAudioMuted.remove(streamID);
 	}
 
+	// The viewer binds to the backend's audio properties; the room state does not show them, so a
+	// mute or volume change must not rebuild it.
 	if (ScreenShareViewBackend *backend = m_viewBackends.value(streamID, nullptr)) backend->setAudioMuted(muted);
 	scheduleExternalViewAudioPreferenceSave(streamID);
-
-	emit sessionUpdated(streamID);
 }
 
 void ScreenShareManager::setExternalViewAudioVolume(const QString &streamID, const int percent) {
@@ -1449,7 +1513,6 @@ void ScreenShareManager::setExternalViewAudioVolume(const QString &streamID, con
 	if (!m_sessions.contains(streamID) || !m_viewBackends.contains(streamID)) return;
 
 	scheduleExternalViewAudioPreferenceSave(streamID);
-	emit sessionUpdated(streamID);
 }
 
 QString ScreenShareManager::externalViewAudioPreferenceKey(const ScreenShareSession &session) const {
@@ -1510,7 +1573,6 @@ void ScreenShareManager::setExternalViewPaused(const QString &streamID, const bo
 	// native frame transport, external window, and watchdog registration intact
 	// so resume cannot race a stop/start cycle or change surface identity.
 	if (host) host->setPaused(paused);
-	emit sessionUpdated(streamID);
 }
 
 void ScreenShareManager::logRemoteViewAvailability(const ScreenShareSession &session) {
@@ -1519,13 +1581,17 @@ void ScreenShareManager::logRemoteViewAvailability(const ScreenShareSession &ses
 	}
 
 	m_announcedViewableSessions.insert(session.streamID);
-	const ClientUser *owner  = ClientUser::get(session.ownerSession);
-	const QString ownerLabel = owner ? owner->qsName.toHtmlEscaped()
-									 : tr("session %1").arg(QString::number(session.ownerSession).toHtmlEscaped());
+	const QString owner = ownerLabel(session.ownerSession);
 	Global::get().l->log(Log::Information,
-						 tr("Screen share %1 from %2 is available in this channel. Enable auto-open in Settings > "
-							"Screen Sharing or set MUMBLE_SCREENSHARE_AUTOVIEW=1 to open it automatically.")
-							 .arg(session.streamID.toHtmlEscaped(), ownerLabel));
+						 tr("%1 is sharing their screen in this channel. Enable auto-open in Settings > Screen "
+							"Sharing to open shares automatically.")
+							 .arg(owner.toHtmlEscaped()));
+	emit remoteShareAvailable(session.streamID, owner);
+}
+
+QString ScreenShareManager::ownerLabel(const unsigned int ownerSession) const {
+	const ClientUser *owner = ClientUser::get(ownerSession);
+	return owner ? owner->qsName : tr("session %1").arg(QString::number(ownerSession));
 }
 
 void ScreenShareManager::handleScreenShareState(const MumbleProto::ScreenShareState &msg) {
@@ -1580,7 +1646,8 @@ void ScreenShareManager::reconcileSession(const ScreenShareSession &session) {
 		} else if (shouldAutoViewSession(session)) {
 			startLocalViewSession(session);
 			m_announcedViewableSessions.remove(session.streamID);
-		} else {
+		} else if (!m_dismissedViewSessions.contains(session.streamID)) {
+			// A viewer the user closed must not be announced again on every state refresh.
 			logRemoteViewAvailability(session);
 		}
 	} else {
@@ -1598,6 +1665,10 @@ void ScreenShareManager::reconcileSessionsAfterCapabilityRefresh() {
 	for (const QString &streamID : streamIDs) {
 		const auto sessionIt = m_sessions.constFind(streamID);
 		if (sessionIt == m_sessions.cend()) continue;
+		// Capabilities only gate new starts. A runtime that is already publishing or viewing proved the
+		// runtime works; a later probe that fails or times out must not tear it down. A runtime that
+		// really dies is caught by the liveness watchdog.
+		if (hasLocalPublishRuntime(streamID) || hasLocalViewRuntime(streamID)) continue;
 		reconcileSession(sessionIt.value());
 		emit sessionUpdated(streamID);
 	}
@@ -1619,23 +1690,24 @@ void ScreenShareManager::handleScreenShareStop(const MumbleProto::ScreenShareSto
 
 	const QString streamID = u8(msg.stream_id());
 	const QString reason   = msg.has_reason() ? u8(msg.reason()) : QString();
+	const unsigned int ownerSession =
+		msg.has_owner_session() ? msg.owner_session() : m_sessions.value(streamID).ownerSession;
+	const QString endedLabel = ownerSession == Global::get().uiSession
+								   ? tr("Your screen share")
+								   : tr("%1's screen share").arg(ownerLabel(ownerSession));
 	m_locallyTerminatedPublishSessions.remove(streamID);
 	m_announcedViewableSessions.remove(streamID);
 	m_dismissedViewSessions.remove(streamID);
 	stopLocalHelperSessions(streamID);
+	if (!reason.isEmpty() && Global::get().l) {
+		Global::get().l->log(Log::Information,
+							 tr("%1 ended: %2").arg(endedLabel.toHtmlEscaped(), reason.toHtmlEscaped()));
+	}
 	if (!m_sessions.contains(streamID)) {
-		if (!reason.isEmpty() && Global::get().l) {
-			Global::get().l->log(Log::Information,
-								 tr("Screen share %1 ended: %2").arg(streamID.toHtmlEscaped(), reason.toHtmlEscaped()));
-		}
 		return;
 	}
 
 	m_sessions.remove(streamID);
-	if (!reason.isEmpty() && Global::get().l) {
-		Global::get().l->log(Log::Information,
-							 tr("Screen share %1 ended: %2").arg(streamID.toHtmlEscaped(), reason.toHtmlEscaped()));
-	}
 	emit sessionStopped(streamID);
 }
 

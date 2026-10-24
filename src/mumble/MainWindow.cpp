@@ -14205,6 +14205,12 @@ MainWindow::MainWindow(QObject *p)
 					 [this](const QString &) { scheduleQmlRoomStateUpdate(); });
 	QObject::connect(m_screenShareManager.get(), &ScreenShareManager::sessionStopped, this,
 					 [this](const QString &) { scheduleQmlRoomStateUpdate(); });
+	QObject::connect(m_screenShareManager.get(), &ScreenShareManager::remoteShareAvailable, this,
+					 [this](const QString &, const QString &ownerName) {
+						 publishModernToast(QStringLiteral("info"), tr("Screen share"),
+											tr("%1 is sharing their screen").arg(ownerName),
+											QStringLiteral("screenShare.watchCurrentRoom"), tr("Watch"), 8000);
+					 });
 	QObject::connect(&m_screenShareManager->helperClient(), &ScreenShareHelperClient::capabilitiesChanged, this,
 					 [this]() {
 						 scheduleQmlRoomStateUpdate();
@@ -16240,6 +16246,13 @@ void MainWindow::createActions() {
 	gsAdaptivePush->qsToolTip = tr("When using the push-to-talk transmission mode, this will act as the push-to-talk "
 								   "action. Otherwise, it will act as a push-to-mute action.",
 								   "Global Shortcut");
+
+	gsToggleScreenShare =
+		new GlobalShortcut(this, GlobalShortcutType::ToggleScreenShare, tr("Toggle screen share", "Global Shortcut"));
+	gsToggleScreenShare->setObjectName(QLatin1String("gsToggleScreenShare"));
+	gsToggleScreenShare->qsWhatsThis = tr("This stops your screen share, or opens the screen-share picker for the "
+										  "room you are in when you are not sharing",
+										  "Global Shortcut");
 }
 
 void MainWindow::setupGui() {
@@ -26530,13 +26543,14 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 			? tr("Starting your screen share…") : tr("You are sharing in this room"));
 		shareState.insert(QStringLiteral("statusTone"), publishPending || usingFallback
 			? QStringLiteral("warning") : QStringLiteral("success"));
-		setPrimaryAction(QStringLiteral("screenShareOpenWindow"),
-						 publishPending ? tr("Starting share…") : tr("Manage share"), !publishPending,
-						 publishPending ? tr("The bundled screen-share runtime is starting.")
-										: tr("View your active screen-share status."),
-						 publishPending || usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
+		// Stopping is the action a sharer looks for, so it is the primary button, also while the share is
+		// still starting; the status view moves to the overflow menu.
+		setPrimaryAction(QStringLiteral("screenShareStop"), tr("Stop sharing"), true,
+						 publishPending ? tr("Cancel the screen share that is starting.")
+										: tr("Stop sharing your screen with this room."),
+						 QStringLiteral("danger"));
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(
-			QStringLiteral("screenShareStop"), tr("Stop sharing"), true, false, QStringLiteral("danger")));
+			QStringLiteral("screenShareOpenWindow"), tr("Manage share"), !publishPending, false));
 	} else if (viewing || viewPending) {
 		const bool viewerWindowOpen = viewing;
 		shareState.insert(QStringLiteral("mode"),
@@ -29927,6 +29941,14 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		return true;
 	} else if (actionId == QLatin1String("configure.settings")) {
 		openModernSettingsDialog();
+		return true;
+	} else if (actionId == QLatin1String("screenShare.watchCurrentRoom")) {
+		const ClientUser *self = ClientUser::get(Global::get().uiSession);
+		const QString streamID = self && self->cChannel ? screenShareStreamForChannel(self->cChannel) : QString();
+		if (!streamID.isEmpty()) {
+			openScreenShareWindowOrStatus(streamID);
+			scheduleQmlRoomStateUpdate();
+		}
 		return true;
 	} else if (actionId == QLatin1String("configure.screenShare")) {
 		openModernSettingsDialog(QStringLiteral("ScreenShareConfig"));
@@ -44742,6 +44764,32 @@ void MainWindow::on_gsListenerAttenuationDown_triggered(bool down, QVariant) {
 	}
 
 	Global::get().s.listenerAttenuationFactor = std::max(Global::get().s.listenerAttenuationFactor - 0.1f, 0.0f);
+}
+
+void MainWindow::on_gsToggleScreenShare_triggered(bool down, QVariant) {
+	if (!down || !m_screenShareManager) {
+		return;
+	}
+
+	const QHash< QString, ScreenShareSession > &sessions = m_screenShareManager->sessions();
+	for (auto it = sessions.cbegin(); it != sessions.cend(); ++it) {
+		if (it.value().ownerSession == Global::get().uiSession) {
+			m_screenShareManager->requestStopShare(it.key());
+			return;
+		}
+	}
+
+	ClientUser *self = ClientUser::get(Global::get().uiSession);
+	if (!self || !self->cChannel) {
+		return;
+	}
+	if (!m_screenShareManager->canOpenLocalShareSetup()) {
+		publishModernToast(QStringLiteral("error"), tr("Screen share"),
+						   m_screenShareManager->localShareUnavailableReason());
+		return;
+	}
+
+	openModernScreenShareDialog(self->cChannel);
 }
 
 void MainWindow::on_gsAdaptivePush_triggered(bool down, QVariant variant) {
