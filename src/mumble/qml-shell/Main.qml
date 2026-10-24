@@ -698,6 +698,27 @@ ApplicationWindow {
 		return true
 	}
 
+	// The conversation view's rows carry their own attachments: when a row's
+	// full-resolution picture arrives, swap it into the open viewer.
+	function refreshOpenAttachmentFromRow(messageId, candidates) {
+		const current = attachmentViewerPayload
+		if (!current || String(current.hydrationMessageId || "") !== String(messageId || ""))
+			return false
+		const identity = attachmentIdentity(current)
+		const list = normalizedModelList(candidates)
+		for (let index = 0; index < list.length; ++index) {
+			const candidate = list[index]
+			if (attachmentIdentity(candidate) !== identity)
+				continue
+			const nextFullSource = safeRenderImageSource(candidate.url)
+			if (nextFullSource.length === 0 || nextFullSource === String(current.url || ""))
+				return false
+			return openAttachment(candidate, current.alt || current.name, messageId,
+				attachmentViewerHydrationModel)
+		}
+		return false
+	}
+
 	function refreshOpenAttachmentFromModel() {
 		const current = attachmentViewerPayload
 		if (!current)

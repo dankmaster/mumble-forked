@@ -31,6 +31,8 @@ ChatMessageFrame {
 	required property bool deliveryCanRetry
 	required property string avatarUrl
 	required property var attachments
+	onAttachmentsChanged: if (host && host.attachmentViewerPayload)
+		host.refreshOpenAttachmentFromRow(stableId, attachments)
 	required property var preview
 	required property bool canReply
 	required property bool canReact
