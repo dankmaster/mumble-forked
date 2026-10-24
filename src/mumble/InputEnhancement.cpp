@@ -58,10 +58,11 @@ namespace {
 		if (profile == Profile::Quality) {
 			// The frozen low-latency product curve stays inside the two validated
 			// tuning anchors. The normal UI defaults (30 reduction, 50 clear) map
-			// exactly to the selected 0.75 wet mix, while the full qualified control
-			// surface interpolates monotonically from 0.70 to 0.95. Keep the
-			// lower/default portion unchanged; only explicitly high controls enter
-			// the stronger range that cleared the paired Quality objective gates.
+			// exactly to the selected 0.75 wet mix, while the full control surface
+			// interpolates monotonically from 0.70 to 0.98. Since mix curve 8 the
+			// speech gate makes pauses fully wet, so this value governs only the
+			// noise left under speech. High controls, including the 92/80
+			// selection preset, therefore extend to near-fully-wet suppression.
 			// Public defaults 30/50 are first mapped by validatedControlsForProfile
 			// to 45/63. Express the anchor in that validated coordinate system.
 			constexpr int defaultValidatedReduction = 45;
@@ -75,20 +76,19 @@ namespace {
 									: 0.25f + ((control - nominalControl) / (1.0f - nominalControl)) * 0.75f;
 			return normalizedMix <= 0.25f
 				? 0.70f + (0.20f * normalizedMix)
-				: 0.75f + (0.20f * ((normalizedMix - 0.25f) / 0.75f));
+				: 0.75f + (0.23f * ((normalizedMix - 0.25f) / 0.75f));
 		}
 		if (profile == Profile::VoiceFocus) {
-			// Voice Focus is intentionally aggressive and explicit-only. Its normal
-			// defaults use the validated 0.90 mix; only controls above that anchor
-			// increase wet mix towards the explicit fully-wet endpoint. Voice Focus
-			// is never selected by Auto and remains subject to the clean, WER and
-			// catastrophe gates before this endpoint can be frozen.
+			// Voice Focus is intentionally aggressive and explicit-only. Its
+			// moderate controls keep 0.95 of the model output under speech; only
+			// controls above that anchor increase wet mix towards the explicit
+			// fully-wet endpoint. Voice Focus is never selected by Auto.
 			constexpr float nominalControl = (0.75f * 0.30f) + (0.25f * 0.50f);
 			const float control = weightedProfileControl(controls, 70, 100, 40, 100);
 			const float normalizedMix = control <= nominalControl
 									? 0.0f
 									: (control - nominalControl) / (1.0f - nominalControl);
-			return 0.90f + (0.10f * normalizedMix);
+			return 0.95f + (0.05f * normalizedMix);
 		}
 		const float reduction = static_cast< float >(controls.noiseReduction) / 100.0f;
 		const float character = static_cast< float >(controls.naturalCrisp) / 100.0f;
@@ -320,12 +320,14 @@ CpuClass manualProfileCpuClassForMetrics(const ManualProfileCapabilityMetrics &m
 	if (!metrics.deepFilterNetAvailable || !metrics.qualityPipelineReady || metrics.workerFrames == 0) {
 		return CpuClass::Standard;
 	}
+	// A single scheduler outlier is not a capability verdict: the realtime
+	// worker absorbs it by emitting one dry frame. The class instead requires a
+	// sustainable p99 and at most a couple of late frames in the paced probe.
 	constexpr std::uint64_t qualifiedP99Nanoseconds = 8'000'000;
-	constexpr std::uint64_t catastropheNanoseconds  = 10'000'000;
+	constexpr std::uint64_t tolerableLateFrames     = 2;
 	return metrics.callbackP99Nanoseconds <= qualifiedP99Nanoseconds
 			   && metrics.workerP99Nanoseconds <= qualifiedP99Nanoseconds
-			   && metrics.callbackMaximumNanoseconds <= catastropheNanoseconds
-			   && metrics.workerMaximumNanoseconds <= catastropheNanoseconds
+			   && metrics.workerLateFrames <= tolerableLateFrames
 		   ? CpuClass::High
 		   : CpuClass::Standard;
 }
@@ -652,7 +654,7 @@ bool Pipeline::configure(const Recipe &recipe, const QString &authorizedModelSha
 	m_fallbackReason       = FallbackReason::None;
 	resetCounters();
 	resetSpeechEdgeProtection();
-	resetBalancedVoiceActivity();
+	resetVoiceActivityGate();
 	resetClassicMix();
 
 	if (!recipe.usesNeuralProcessor()) {
@@ -884,8 +886,9 @@ bool Pipeline::processFrame(float *samples, unsigned int sampleCount, float mixF
 		return elapsedNanoseconds;
 	};
 	float protectedMixFactor = speechEdgeProtectedMixFactor(mixFactor);
-	if (m_recipe->effectiveProfile() == Profile::Balanced) {
-		protectedMixFactor = balancedVoiceActivityMixFactor(protectedMixFactor);
+	if (m_recipe->effectiveProfile() == Profile::Balanced || m_recipe->effectiveProfile() == Profile::Quality
+		|| m_recipe->effectiveProfile() == Profile::VoiceFocus) {
+		protectedMixFactor = voiceActivityGatedMixFactor(protectedMixFactor);
 	}
 	try {
 		m_processor->processInPlace(samples, frameSamples, protectedMixFactor);
@@ -1065,26 +1068,27 @@ float Pipeline::speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept 
 	return boundedMixFactor;
 }
 
-void Pipeline::resetBalancedVoiceActivity() noexcept {
-	m_balancedSpeechProbabilities.fill(0.0f);
-	m_balancedSpeechProbabilityPosition = 0;
-	m_balancedSpeechHoldFrames          = 0;
-	m_balancedWetMix                    = -1.0f;
+void Pipeline::resetVoiceActivityGate() noexcept {
+	m_voiceActivityProbabilities.fill(0.0f);
+	m_voiceActivityProbabilityPosition = 0;
+	m_voiceActivityHoldFrames          = 0;
+	m_voiceActivityWetMix                    = -1.0f;
 }
 
-float Pipeline::balancedVoiceActivityMixFactor(float edgeProtectedMixFactor) noexcept {
-	// The recipe's Balanced mix keeps a large delayed-dry share because stronger
-	// RNNoise candidates lost clean utterance ends. Applied to every frame, that
-	// share also keeps most of the room noise between words. RNNoise reports a
-	// speech probability for its newest analysed frame, which is two frames ahead
-	// of the delayed frame mixed here. Use it to confine the dry share to speech
-	// and its tail: the speech-time mix (including the energy onset ramp and the
-	// quiet-room release guard) is unchanged, while pauses become fully wet.
+float Pipeline::voiceActivityGatedMixFactor(float edgeProtectedMixFactor) noexcept {
+	// Product recipes keep a delayed-dry share because stronger candidates lost
+	// clean utterance ends. Applied to every frame, that share also keeps room
+	// noise between words, and the energy onset ramp let every keyboard click
+	// through dry. RNNoise reports a speech probability and DeepFilterNet a local
+	// SNR for their newest analysed frame, which runs ahead of the delayed frame
+	// mixed here. Use it to confine the dry share to speech and its tail: the
+	// speech-time mix (including the energy onset ramp and the quiet-room release
+	// guard) is unchanged, while pauses become fully wet.
 	const float speechProbability = m_processor ? m_processor->lastSpeechProbability() : -1.0f;
 	if (!(speechProbability >= 0.0f)) {
 		// Engines without voice activity, and the first frame after reset, keep
 		// the speech-time mix and its edge protection.
-		m_balancedWetMix = edgeProtectedMixFactor;
+		m_voiceActivityWetMix = edgeProtectedMixFactor;
 		return edgeProtectedMixFactor;
 	}
 
@@ -1097,32 +1101,32 @@ float Pipeline::balancedVoiceActivityMixFactor(float edgeProtectedMixFactor) noe
 	// it at a frame boundary.
 	constexpr float wetMixRisePerFrame = 0.08f;
 
-	m_balancedSpeechProbabilities[m_balancedSpeechProbabilityPosition] = std::min(speechProbability, 1.0f);
-	m_balancedSpeechProbabilityPosition =
-		(m_balancedSpeechProbabilityPosition + 1) % balancedVoiceActivityHistoryFrames;
+	m_voiceActivityProbabilities[m_voiceActivityProbabilityPosition] = std::min(speechProbability, 1.0f);
+	m_voiceActivityProbabilityPosition =
+		(m_voiceActivityProbabilityPosition + 1) % voiceActivityHistoryFrames;
 	const float nearbySpeechProbability =
-		*std::max_element(m_balancedSpeechProbabilities.cbegin(), m_balancedSpeechProbabilities.cend());
+		*std::max_element(m_voiceActivityProbabilities.cbegin(), m_voiceActivityProbabilities.cend());
 
 	if (nearbySpeechProbability >= speechProbabilityThreshold) {
-		m_balancedSpeechHoldFrames = tailHoldFrames;
-	} else if (m_balancedSpeechHoldFrames > 0) {
-		--m_balancedSpeechHoldFrames;
+		m_voiceActivityHoldFrames = tailHoldFrames;
+	} else if (m_voiceActivityHoldFrames > 0) {
+		--m_voiceActivityHoldFrames;
 	}
 	// A weak estimate is treated as possible speech, so an uncertain consonant
 	// keeps the qualified speech-time protection rather than being removed.
 	const bool speechContext =
-		nearbySpeechProbability >= weakSpeechProbabilityThreshold || m_balancedSpeechHoldFrames > 0;
+		nearbySpeechProbability >= weakSpeechProbabilityThreshold || m_voiceActivityHoldFrames > 0;
 	const float targetMix = speechContext ? edgeProtectedMixFactor : 1.0f;
 
 	// Within speech the qualified mix and its edge ramps apply exactly. Moving
 	// towards dry is immediate: the speech estimate runs ahead of this frame, so
 	// speech never arrives during the transition.
-	if (speechContext || m_balancedWetMix < 0.0f || targetMix <= m_balancedWetMix) {
-		m_balancedWetMix = targetMix;
+	if (speechContext || m_voiceActivityWetMix < 0.0f || targetMix <= m_voiceActivityWetMix) {
+		m_voiceActivityWetMix = targetMix;
 	} else {
-		m_balancedWetMix = std::min(targetMix, m_balancedWetMix + wetMixRisePerFrame);
+		m_voiceActivityWetMix = std::min(targetMix, m_voiceActivityWetMix + wetMixRisePerFrame);
 	}
-	return m_balancedWetMix;
+	return m_voiceActivityWetMix;
 }
 
 bool Pipeline::processFrame(std::array< float, frameSamples > &samples) noexcept {
@@ -1407,6 +1411,10 @@ unsigned int Pipeline::workerSchedulingDelayFrames() const noexcept {
 
 unsigned int Pipeline::workerSchedulingSlackFrames() const noexcept {
 	return m_processor ? m_processor->workerSchedulingSlackFrames() : 0;
+}
+
+std::uint64_t Pipeline::workerLateFrames() const noexcept {
+	return m_processor ? m_processor->workerLateFrames() : 0;
 }
 
 std::uint64_t Pipeline::frameDeadlineNanoseconds() const noexcept {

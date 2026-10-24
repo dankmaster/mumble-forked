@@ -101,6 +101,11 @@ public:
 	virtual unsigned int workerSchedulingSlackFrames() const noexcept {
 		return 0;
 	}
+	/// Frames whose asynchronous result missed its deadline and were emitted as
+	/// aligned dry audio instead.
+	virtual std::uint64_t workerLateFrames() const noexcept {
+		return 0;
+	}
 };
 
 std::unique_ptr< SpeechCleanupProcessor > createSpeechCleanupProcessor(

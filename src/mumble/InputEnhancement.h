@@ -34,8 +34,8 @@ inline constexpr unsigned int crispLatencyBudgetSamples = qualityLatencyBudgetSa
 // persisted execution fingerprint. Any change to recipe execution, the
 // qualified mix curve, or callback-safe adaptation policy must increment the
 // corresponding value.
-inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 8;
-inline constexpr std::uint32_t qualifiedMixCurveVersion        = 7;
+inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 9;
+inline constexpr std::uint32_t qualifiedMixCurveVersion        = 8;
 inline constexpr std::uint32_t adaptationPolicyVersion         = 1;
 
 inline QString productRecipeCatalogRevision() {
@@ -67,6 +67,8 @@ struct ManualProfileCapabilityMetrics final {
 	std::uint64_t workerFrames = 0;
 	std::uint64_t workerP99Nanoseconds = 0;
 	std::uint64_t workerMaximumNanoseconds = 0;
+	/// Frames whose result missed the realtime deadline during the paced probe.
+	std::uint64_t workerLateFrames = 0;
 };
 
 CpuClass manualProfileCpuClassForMetrics(const ManualProfileCapabilityMetrics &metrics) noexcept;
@@ -412,6 +414,8 @@ public:
 	unsigned int workerPendingFrames() const noexcept;
 	unsigned int workerSchedulingDelayFrames() const noexcept;
 	unsigned int workerSchedulingSlackFrames() const noexcept;
+	/// Frames emitted as aligned dry audio because the worker result was late.
+	std::uint64_t workerLateFrames() const noexcept;
 	std::uint64_t frameDeadlineNanoseconds() const noexcept;
 	Diagnostics diagnostics() const;
 
@@ -422,13 +426,13 @@ private:
 	void resetCounters() noexcept;
 	void resetSpeechEdgeProtection() noexcept;
 	float speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept;
-	void resetBalancedVoiceActivity() noexcept;
-	float balancedVoiceActivityMixFactor(float edgeProtectedMixFactor) noexcept;
+	void resetVoiceActivityGate() noexcept;
+	float voiceActivityGatedMixFactor(float edgeProtectedMixFactor) noexcept;
 	void resetClassicMix() noexcept;
 	static constexpr std::uint64_t processingHistogramBucketNanoseconds = 10'000;
 	static constexpr std::size_t processingHistogramBucketCount         = 2'001;
 	static constexpr unsigned int deepFilterOnsetRampFrames             = 8;
-	static constexpr unsigned int balancedVoiceActivityHistoryFrames    = 3;
+	static constexpr unsigned int voiceActivityHistoryFrames            = 3;
 
 	ProcessorFactory m_processorFactory;
 	NanosecondClock m_clock;
@@ -470,10 +474,10 @@ private:
 	unsigned int m_speechEdgeBelowReleaseFrames                                      = 0;
 	unsigned int m_speechEdgeProtectionFrame                                         = deepFilterOnsetRampFrames;
 	bool m_speechEdgeActive                                                          = false;
-	std::array< float, balancedVoiceActivityHistoryFrames > m_balancedSpeechProbabilities = {};
-	unsigned int m_balancedSpeechProbabilityPosition                                 = 0;
-	unsigned int m_balancedSpeechHoldFrames                                          = 0;
-	float m_balancedWetMix                                                           = -1.0f;
+	std::array< float, voiceActivityHistoryFrames > m_voiceActivityProbabilities     = {};
+	unsigned int m_voiceActivityProbabilityPosition                                  = 0;
+	unsigned int m_voiceActivityHoldFrames                                           = 0;
+	float m_voiceActivityWetMix                                                      = -1.0f;
 	bool m_fallbackActive                                                             = false;
 };
 

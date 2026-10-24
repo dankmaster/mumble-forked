@@ -90,6 +90,7 @@ private slots:
 	void deepFilterNetOutputIsIndependentOfInputChunking();
 	void deepFilterNetModelDomainNormalizationRemainsContinuousAcrossFrameGainChanges();
 	void deepFilterNetRealtimeTimelineMatchesReportedLatency();
+	void neuralProcessorsReportSpeechProbability();
 	void deepFilterNetDryWetMixUsesTheProcessedTimeline();
 	void deepFilterNetResetRestoresTheStreamingTimeline();
 	void deepFilterNetSanitizesNonFiniteInputWithoutPoisoningItsState();
@@ -1123,6 +1124,61 @@ void TestSpeechCleanup::deepFilterNetModelDomainNormalizationRemainsContinuousAc
 				 qPrintable(QStringLiteral("DeepFilterNet normalized gain boundary discontinuity at frame %1: %2")
 							.arg(frame)
 							.arg(delta, 0, 'g', 9)));
+	}
+}
+
+void TestSpeechCleanup::neuralProcessorsReportSpeechProbability() {
+	// The product pipeline confines its delayed-dry share to speech using each
+	// engine's own estimate. Without one it silently falls back to dry pauses,
+	// so both shipped engines must report a bounded estimate after processing
+	// and none after reset.
+	constexpr unsigned int FRAME_SAMPLES = 480;
+	std::vector< float > noise(FRAME_SAMPLES * 40);
+	std::uint32_t seed = 0x2545F491u;
+	for (float &sample : noise) {
+		seed   = seed * 1664525u + 1013904223u;
+		sample = (static_cast< float >(seed >> 8) / static_cast< float >(1u << 24) - 0.5f) * 0.1f;
+	}
+
+	for (const Settings::SpeechCleanupBackend backend :
+		 { Settings::RNNoiseBackend, Settings::DeepFilterNetBackend }) {
+		auto processor = createSpeechCleanupProcessor(embeddedSelection(backend));
+		if (!processor || !processor->isReady()) {
+			if (backend == Settings::DeepFilterNetBackend) {
+#ifdef TEST_EXPECT_DEEPFILTERNET
+				QFAIL("DeepFilterNet was enabled but its runtime/model test payload is unavailable");
+#endif
+			} else {
+#ifdef TEST_EXPECT_RNNOISE
+				QFAIL("RNNoise was enabled but is unavailable");
+#endif
+			}
+			continue;
+		}
+		QVERIFY(processor->lastSpeechProbability() < 0.0f);
+		const bool realtime = backend == Settings::DeepFilterNetBackend;
+		if (realtime) {
+			QVERIFY(processor->prepareRealtime());
+		}
+		std::vector< float > signal = noise;
+		for (std::size_t offset = 0; offset < signal.size(); offset += FRAME_SAMPLES) {
+			if (realtime) {
+				QVERIFY(processor->prepareOfflineFrame());
+			}
+			processor->processInPlace(signal.data() + offset, FRAME_SAMPLES, 1.0f);
+			QVERIFY(processor->isReady());
+		}
+		if (realtime) {
+			QVERIFY(processor->finishOfflineProcessing());
+		}
+		const float probability = processor->lastSpeechProbability();
+		QVERIFY2(probability >= 0.0f && probability < 0.5f,
+				 qPrintable(QStringLiteral("backend %1 reported %2 for broadband noise")
+								.arg(static_cast< int >(backend))
+								.arg(probability)));
+		QCOMPARE(processor->workerLateFrames(), std::uint64_t{ 0 });
+		processor->reset();
+		QVERIFY(processor->lastSpeechProbability() < 0.0f);
 	}
 }
 

@@ -27,6 +27,7 @@ public:
 	QString activeModelId() const override;
 	QString activeModelPath() const override;
 	bool usedFallback() const override;
+	float lastSpeechProbability() const noexcept override;
 	std::uint64_t workerProcessingFrames() const noexcept override;
 	std::uint64_t lastWorkerProcessingNanoseconds() const noexcept override;
 	std::uint64_t workerTotalProcessingNanoseconds() const noexcept override;
@@ -35,6 +36,7 @@ public:
 	unsigned int workerPendingFrames() const noexcept override;
 	unsigned int workerSchedulingDelayFrames() const noexcept override;
 	unsigned int workerSchedulingSlackFrames() const noexcept override;
+	std::uint64_t workerLateFrames() const noexcept override;
 
 private:
 	class Implementation;

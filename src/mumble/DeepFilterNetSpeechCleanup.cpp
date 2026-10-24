@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -33,6 +34,7 @@ namespace {
 	constexpr float modelDomainNominalGain = 8.0f; // +18.06 dB
 	constexpr float modelDomainTargetPeak  = 0.0630957344f; // -24 dBFS
 	constexpr float modelDomainPeakLimit   = 0.95f;
+	constexpr float modelDomainEnvelopeReleasePerFrame = 0.891250938f; // -1 dB per 10 ms frame
 
 	using DfCreateFn            = DFState *(*)(const char *path, float attenLim, const char *logLevel);
 	using DfGetFrameLengthFn    = std::size_t (*)(DFState *state);
@@ -180,6 +182,7 @@ public:
 #ifdef USE_DEEPFILTERNET
 		m_realtimeWorker.stop();
 		m_realtimePrepared = false;
+		m_lastLocalSnr.store(std::numeric_limits< float >::quiet_NaN(), std::memory_order_release);
 		if (!m_library.isLoaded()) {
 			m_ready = false;
 			return;
@@ -262,6 +265,10 @@ public:
 			if (m_inputFrameSize == m_frameLength) {
 				float localSnr   = std::numeric_limits< float >::quiet_NaN();
 				const int status = processModelFrame(m_inputFrame.data(), m_outputFrame.data(), &localSnr);
+				m_lastLocalSnr.store(status == DeepFilterNetRealtimeWorker::statusOk
+										 ? localSnr
+										 : std::numeric_limits< float >::quiet_NaN(),
+									 std::memory_order_release);
 				m_inputFrameSize = 0;
 				m_outputFramePosition = 0;
 				if (status != DeepFilterNetRealtimeWorker::statusOk) {
@@ -328,14 +335,34 @@ public:
 		return m_realtimePrepared ? m_realtimeWorker.schedulingSlackFrames() : 0;
 	}
 
+	std::uint64_t workerLateFrames() const noexcept {
+		return m_realtimePrepared ? m_realtimeWorker.lateFrames() : 0;
+	}
+
+	float lastSpeechProbability() const noexcept {
+		// DeepFilterNet's local SNR estimate drives its own stage selection: below
+		// -10 dB it applies a pure noise mask. Map -10..+10 dB onto 0..1 so the
+		// shared speech gate treats roughly 0 dB local SNR as confident speech.
+		const float localSnr = m_lastLocalSnr.load(std::memory_order_acquire);
+		if (!std::isfinite(localSnr)) {
+			return -1.0f;
+		}
+		return std::clamp((localSnr + 10.0f) / 20.0f, 0.0f, 1.0f);
+	}
+
 private:
 	static int processRealtimeFrame(void *context, const float *input, float *output) noexcept {
 		auto *self = static_cast< Implementation * >(context);
 		if (!self || !self->m_state || !self->m_processFrameV2) {
 			return 1;
 		}
-		float localSnr = std::numeric_limits< float >::quiet_NaN();
-		return self->processModelFrame(input, output, &localSnr);
+		float localSnr   = std::numeric_limits< float >::quiet_NaN();
+		const int status = self->processModelFrame(input, output, &localSnr);
+		self->m_lastLocalSnr.store(status == DeepFilterNetRealtimeWorker::statusOk
+									   ? localSnr
+									   : std::numeric_limits< float >::quiet_NaN(),
+								   std::memory_order_release);
+		return status;
 	}
 
 	int processModelFrame(const float *input, float *output, float *localSnr) noexcept {
@@ -354,7 +381,13 @@ private:
 			const float sample = std::isfinite(input[index]) ? std::clamp(input[index], -1.0f, 1.0f) : 0.0f;
 			peak               = std::max(peak, std::abs(sample));
 		}
-		const float targetGain = peak > 0.0f ? modelDomainTargetPeak / peak : modelDomainNominalGain;
+		// Follow a peak envelope instead of each frame's peak. The deep filter
+		// combines several past frames, so a gain that jumps per frame cannot be
+		// inverted exactly and modulates quiet noise at the frame rate. Attack is
+		// immediate (clipping protection); the gain recovers by 1 dB per frame.
+		m_modelDomainEnvelope  = std::max(peak, m_modelDomainEnvelope * modelDomainEnvelopeReleasePerFrame);
+		const float targetGain = m_modelDomainEnvelope > 0.0f ? modelDomainTargetPeak / m_modelDomainEnvelope
+															  : modelDomainNominalGain;
 		const float inputGain  = std::clamp(targetGain, 1.0f, modelDomainNominalGain);
 
 		for (std::size_t index = 0; index < m_frameLength; ++index) {
@@ -384,12 +417,14 @@ private:
 		for (unsigned int i = 0; i < sampleCount; ++i) {
 			samples[i] = std::isfinite(samples[i]) ? std::clamp(samples[i], -1.0f, 1.0f) : 0.0f;
 		}
-		if (!m_realtimeWorker.processFrame(samples, m_realtimeOutputFrame.data(), sampleCount)) {
+		bool outputLate = false;
+		if (!m_realtimeWorker.processFrame(samples, m_realtimeOutputFrame.data(), sampleCount, &outputLate)) {
 			std::fill(samples, samples + sampleCount, 0.0f);
 			return;
 		}
 
-		mixFactor = std::clamp(mixFactor, 0.0f, 1.0f);
+		// A late result is replaced by the dry signal on the same timeline.
+		mixFactor = outputLate ? 0.0f : std::clamp(mixFactor, 0.0f, 1.0f);
 		const float dryFactor = 1.0f - mixFactor;
 		for (unsigned int i = 0; i < sampleCount; ++i) {
 			const float inputSample = samples[i];
@@ -441,6 +476,7 @@ private:
 		m_modelOutputInverseGain.assign(m_modelDomainNormalization ? m_frameLength : 0, 1.0f);
 		m_modelGainDelay.assign(m_modelDomainNormalization ? algorithmicLatency : 0, 1.0f);
 		m_modelGainDelayPosition = 0;
+		m_modelDomainEnvelope    = 0.0f;
 		m_inputFrameSize = 0;
 		m_outputFramePosition = m_frameLength;
 		m_dryDelay.assign(m_latencySamples, 0.0f);
@@ -484,6 +520,8 @@ private:
 	std::vector< float > m_modelOutputInverseGain;
 	std::vector< float > m_modelGainDelay;
 	std::size_t m_modelGainDelayPosition = 0;
+	/// Worker-thread-only peak envelope driving the model-domain gain.
+	float m_modelDomainEnvelope = 0.0f;
 	std::size_t m_inputFrameSize = 0;
 	std::size_t m_outputFramePosition = 0;
 	std::vector< float > m_dryDelay;
@@ -493,6 +531,8 @@ private:
 	unsigned int m_synchronousLatencySamples = 0;
 	unsigned int m_realtimeLatencySamples = 0;
 	unsigned int m_latencySamples = 0;
+	/// Written by whichever thread runs inference, read by the capture callback.
+	std::atomic< float > m_lastLocalSnr{ std::numeric_limits< float >::quiet_NaN() };
 	bool m_usedFallback = false;
 	bool m_ready = false;
 	bool m_realtimePrepared = false;
@@ -586,4 +626,12 @@ unsigned int DeepFilterNetSpeechCleanup::workerSchedulingDelayFrames() const noe
 
 unsigned int DeepFilterNetSpeechCleanup::workerSchedulingSlackFrames() const noexcept {
 	return m_impl ? m_impl->workerSchedulingSlackFrames() : 0;
+}
+
+std::uint64_t DeepFilterNetSpeechCleanup::workerLateFrames() const noexcept {
+	return m_impl ? m_impl->workerLateFrames() : 0;
+}
+
+float DeepFilterNetSpeechCleanup::lastSpeechProbability() const noexcept {
+	return m_impl ? m_impl->lastSpeechProbability() : -1.0f;
 }

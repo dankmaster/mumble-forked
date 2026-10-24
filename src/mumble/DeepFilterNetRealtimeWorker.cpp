@@ -24,7 +24,7 @@ bool DeepFilterNetRealtimeWorker::start(void *context, ProcessFunction processFu
 	stop();
 	if (delayFrames < schedulingDelayFrames || delayFrames > maximumSchedulingDelayFrames) return false;
 	m_delayFrames = delayFrames;
-	m_activeSlotCount = std::max(slotCount, delayFrames + 2);
+	m_activeSlotCount = std::max(slotCount, delayFrames + 2 + lateFrameToleranceFrames);
 	try {
 		m_extraSlots = m_activeSlotCount > slotCount ? std::make_unique< Slot[] >(m_activeSlotCount - slotCount) : nullptr;
 	} catch (...) {
@@ -35,6 +35,9 @@ bool DeepFilterNetRealtimeWorker::start(void *context, ProcessFunction processFu
 	m_context         = context;
 	m_process         = processFunction;
 	m_submittedFrames = 0;
+	m_releasedFrames  = 0;
+	m_lateFrameDebt   = 0;
+	m_lateFrames.store(0, std::memory_order_relaxed);
 	m_pendingFrames.store(0, std::memory_order_relaxed);
 	m_completedFrames.store(0, std::memory_order_relaxed);
 	m_workGeneration.store(0, std::memory_order_relaxed);
@@ -69,7 +72,11 @@ void DeepFilterNetRealtimeWorker::stop() noexcept {
 	}
 }
 
-bool DeepFilterNetRealtimeWorker::processFrame(const float *input, float *output, unsigned int sampleCount) noexcept {
+bool DeepFilterNetRealtimeWorker::processFrame(const float *input, float *output, unsigned int sampleCount,
+											   bool *outputLate) noexcept {
+	if (outputLate) {
+		*outputLate = false;
+	}
 	if (output && sampleCount == frameSamples) {
 		std::fill_n(output, frameSamples, 0.0f);
 	}
@@ -88,14 +95,39 @@ bool DeepFilterNetRealtimeWorker::processFrame(const float *input, float *output
 	const std::uint64_t sequence = m_submittedFrames;
 	if (sequence >= m_delayFrames) {
 		const std::uint64_t outputSequence = sequence - m_delayFrames;
-		Slot &outputSlot                   = slotForSequence(outputSequence);
-		const auto state                   = static_cast< SlotState >(outputSlot.state.load(std::memory_order_acquire));
-		if (state != SlotState::OutputReady || outputSlot.sequence != outputSequence) {
-			latchFailure(statusOutputNotReady);
-			return false;
+		auto slotCompleted = [this](std::uint64_t completedSequence) noexcept {
+			Slot &slot = slotForSequence(completedSequence);
+			return static_cast< SlotState >(slot.state.load(std::memory_order_acquire)) == SlotState::OutputReady
+				   && slot.sequence == completedSequence;
+		};
+		// Results of earlier late frames were replaced by dry audio. The worker
+		// completes frames in order, so free them as soon as they are done.
+		while (m_releasedFrames < outputSequence && slotCompleted(m_releasedFrames)) {
+			slotForSequence(m_releasedFrames)
+				.state.store(static_cast< unsigned char >(SlotState::Empty), std::memory_order_release);
+			++m_releasedFrames;
 		}
-		std::copy(outputSlot.output.cbegin(), outputSlot.output.cend(), output);
-		outputSlot.state.store(static_cast< unsigned char >(SlotState::Empty), std::memory_order_release);
+
+		if (m_releasedFrames == outputSequence && slotCompleted(outputSequence)) {
+			Slot &outputSlot = slotForSequence(outputSequence);
+			std::copy(outputSlot.output.cbegin(), outputSlot.output.cend(), output);
+			outputSlot.state.store(static_cast< unsigned char >(SlotState::Empty), std::memory_order_release);
+			++m_releasedFrames;
+			m_lateFrameDebt = m_lateFrameDebt > 0 ? m_lateFrameDebt - 1 : 0;
+		} else {
+			// A single scheduler stall must not disable cleanup for the rest of
+			// the session. Keep feeding the model so its state stays continuous;
+			// this frame alone falls back to the caller's aligned dry signal.
+			m_lateFrames.fetch_add(1, std::memory_order_release);
+			m_lateFrameDebt += lateFrameDebt;
+			if (m_lateFrameDebt > lateFrameDebtLimit) {
+				latchFailure(statusOutputNotReady);
+				return false;
+			}
+			if (outputLate) {
+				*outputLate = true;
+			}
+		}
 	}
 
 	Slot &inputSlot = slotForSequence(sequence);
@@ -213,10 +245,55 @@ unsigned int DeepFilterNetRealtimeWorker::schedulingSlackFrames() const noexcept
 	return pending < m_delayFrames ? m_delayFrames - pending : 0;
 }
 
+#ifdef Q_OS_WIN
+namespace {
+	/// Registers the worker with MMCSS like the WASAPI capture thread. Without it
+	/// a busy game preempts inference at normal priority and frames miss their
+	/// two-callback deadline. avrt.dll is resolved at runtime so this helper does
+	/// not add a link dependency to the targets that compile the worker.
+	class MmcssRegistration final {
+	public:
+		MmcssRegistration() noexcept {
+			m_module = LoadLibraryW(L"avrt.dll");
+			if (!m_module) {
+				return;
+			}
+			using SetFn = HANDLE(WINAPI *)(LPCWSTR, LPDWORD);
+			const auto set = reinterpret_cast< SetFn >(GetProcAddress(m_module, "AvSetMmThreadCharacteristicsW"));
+			m_revert = reinterpret_cast< RevertFn >(GetProcAddress(m_module, "AvRevertMmThreadCharacteristics"));
+			DWORD taskIndex = 0;
+			m_handle        = set && m_revert ? set(L"Pro Audio", &taskIndex) : nullptr;
+		}
+		~MmcssRegistration() {
+			revert();
+			if (m_module) {
+				FreeLibrary(m_module);
+			}
+		}
+		MmcssRegistration(const MmcssRegistration &)            = delete;
+		MmcssRegistration &operator=(const MmcssRegistration &) = delete;
+
+		void revert() noexcept {
+			if (m_handle && m_revert) {
+				(void) m_revert(m_handle);
+			}
+			m_handle = nullptr;
+		}
+
+	private:
+		using RevertFn  = BOOL(WINAPI *)(HANDLE);
+		HMODULE m_module  = nullptr;
+		RevertFn m_revert = nullptr;
+		HANDLE m_handle   = nullptr;
+	};
+} // namespace
+#endif
+
 void DeepFilterNetRealtimeWorker::workerLoop() noexcept {
 	std::uint64_t nextSequence = 0;
 #ifdef Q_OS_WIN
 	bool offlineBackgroundMode = false;
+	MmcssRegistration mmcss;
 #endif
 	while (!m_stopRequested.load(std::memory_order_acquire)) {
 		if (m_failureStatus.load(std::memory_order_acquire) != statusOk) {
@@ -249,9 +326,10 @@ void DeepFilterNetRealtimeWorker::workerLoop() noexcept {
 		// frame. Run those workers in Windows background-resource mode so their
 		// CPU, model paging, and memory traffic cannot steal a GUI heartbeat.
 		// Realtime workers never set m_offlineWaitEnabled before inference and
-		// therefore retain the established scheduling priority.
+		// therefore retain their MMCSS scheduling priority.
 #ifdef Q_OS_WIN
 		if (!offlineBackgroundMode && m_offlineWaitEnabled.load(std::memory_order_acquire)) {
+			mmcss.revert();
 			offlineBackgroundMode =
 				SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != 0;
 		}

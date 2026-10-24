@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace Mumble::InputEnhancement;
@@ -231,7 +232,7 @@ private slots:
 	void liveMixOverrideUsesConfiguredProcessorWithoutReconfigure();
 	void balancedUsesFullOnsetRampAfterWeakPreOnset();
 	void neuralOnsetRampRearmsAfterSeparatedTransient();
-	void balancedVoiceActivityMakesPausesFullyWet();
+	void neuralVoiceActivityMakesPausesFullyWet();
 	void balancedVoiceActivityProtectsSpeechAndTail();
 	void deepFilterProfilesProtectDelayedDrySpeechEdges();
 	void preparationFailuresFailClosed();
@@ -246,7 +247,8 @@ private slots:
 	void deepFilterWorkerOfflineDriveWaitsForRequiredFrame();
 	void deepFilterWorkerWakeDoesNotPollAtWindowsTimerGranularity();
 	void deepFilterWorkerOfflineWaitTimeoutLatches();
-	void deepFilterWorkerLateResultFailsClosed();
+	void deepFilterWorkerLateResultFallsBackForOneFrame();
+	void deepFilterWorkerSustainedStallFailsClosed();
 	void deepFilterWorkerBackendFailureLatches();
 };
 
@@ -293,8 +295,8 @@ void TestInputEnhancement::trackedDescriptorExactlyMatchesCompiledCatalog() {
 	QCOMPARE(root.value(QStringLiteral("schemaVersion")).toInt(-1), 2);
 	QCOMPARE(root.value(QStringLiteral("catalogRevision")).toString(), QStringLiteral("input-recipes-v4"));
 	QCOMPARE(RecipeCatalog::currentRevision, 1U);
-	QCOMPARE(recipeExecutionSemanticsVersion, 8U);
-	QCOMPARE(qualifiedMixCurveVersion, 7U);
+	QCOMPARE(recipeExecutionSemanticsVersion, 9U);
+	QCOMPARE(qualifiedMixCurveVersion, 8U);
 	QCOMPARE(adaptationPolicyVersion, 1U);
 	QVERIFY(root.value(QStringLiteral("recipes")).isArray());
 
@@ -495,15 +497,15 @@ void TestInputEnhancement::catalogClampsControlsAndInterpolatesMix() {
 	QCOMPARE(qualityDefault.naturalCrisp, 63);
 	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 0, 0) - 0.70f) < 0.00001f);
 	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 30, 50) - 0.75f) < 0.00001f);
-	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 100, 100) - 0.95f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::Quality, 100, 100) - 0.98f) < 0.00001f);
 	const ValidatedControls focusMinimum = validatedControlsForProfile(Profile::VoiceFocus, 0, 0);
 	QCOMPARE(focusMinimum.noiseReduction, 70);
 	QCOMPARE(focusMinimum.naturalCrisp, 40);
 	const ValidatedControls focusMaximum = validatedControlsForProfile(Profile::VoiceFocus, 100, 100);
 	QCOMPARE(focusMaximum.noiseReduction, 100);
 	QCOMPARE(focusMaximum.naturalCrisp, 100);
-	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 0, 0) - 0.90f) < 0.00001f);
-	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 30, 50) - 0.90f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 0, 0) - 0.95f) < 0.00001f);
+	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 30, 50) - 0.95f) < 0.00001f);
 	QVERIFY(std::abs(mixFactorForControls(Profile::VoiceFocus, 100, 100) - 1.0f) < 0.00001f);
 	QVERIFY(mixFactorForControls(Profile::Quality, 100, 100)
 			< mixFactorForControls(Profile::VoiceFocus, 100, 100));
@@ -572,6 +574,13 @@ void TestInputEnhancement::profileValuesAndReadinessAreStable() {
 	manualMetrics.workerP99Nanoseconds        = 7'500'000;
 	manualMetrics.workerMaximumNanoseconds    = 9'500'000;
 	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::High);
+	// A single scheduler outlier is absorbed by the realtime worker.
+	manualMetrics.workerMaximumNanoseconds = 30'000'000;
+	manualMetrics.workerLateFrames         = 2;
+	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::High);
+	manualMetrics.workerLateFrames = 3;
+	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::Standard);
+	manualMetrics.workerLateFrames     = 0;
 	manualMetrics.workerP99Nanoseconds = 8'000'001;
 	QCOMPARE(manualProfileCpuClassForMetrics(manualMetrics), CpuClass::Standard);
 
@@ -1202,34 +1211,41 @@ void TestInputEnhancement::neuralOnsetRampRearmsAfterSeparatedTransient() {
 	QVERIFY(std::abs(state.observedMixes[speechBegin + onsetMixCaps.size()] - recipe.mixFactor()) < 0.00001f);
 }
 
-void TestInputEnhancement::balancedVoiceActivityMakesPausesFullyWet() {
-	FakeState state;
-	state.latency           = balancedLatencyBudgetSamples;
-	state.speechProbability = 0.0f;
-	Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
-	const Recipe recipe = RecipeCatalog::resolve(requestFor(Profile::Balanced));
-	QVERIFY(recipe.mixFactor() < 1.0f);
-	QVERIFY(pipeline.configure(recipe));
-	state.observedMixes.clear();
+void TestInputEnhancement::neuralVoiceActivityMakesPausesFullyWet() {
+	const std::array< std::pair< Profile, unsigned int >, 3 > profiles = {
+		std::pair{ Profile::Balanced, balancedLatencyBudgetSamples },
+		std::pair{ Profile::Quality, qualityLatencyBudgetSamples },
+		std::pair{ Profile::VoiceFocus, qualityLatencyBudgetSamples },
+	};
+	for (const auto &[profile, latency] : profiles) {
+		FakeState state;
+		state.latency           = latency;
+		state.speechProbability = 0.0f;
+		Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
+		const Recipe recipe = RecipeCatalog::resolve(requestFor(profile));
+		QVERIFY(recipe.mixFactor() < 1.0f);
+		QVERIFY(pipeline.configure(recipe));
+		state.observedMixes.clear();
 
-	std::array< float, frameSamples > frame = {};
-	for (unsigned int index = 0; index < 6; ++index) {
-		frame.fill(0.0f);
+		std::array< float, frameSamples > frame = {};
+		for (unsigned int index = 0; index < 6; ++index) {
+			frame.fill(0.0f);
+			QVERIFY(pipeline.processFrame(frame));
+		}
+		// A keyboard-like transient that the model does not classify as speech
+		// must not open the energy onset ramp and let the dry click through.
+		frame.fill(0.8f);
 		QVERIFY(pipeline.processFrame(frame));
-	}
-	// A keyboard-like transient that the model does not classify as speech must
-	// not open the energy onset ramp and let the dry click through.
-	frame.fill(0.8f);
-	QVERIFY(pipeline.processFrame(frame));
-	const unsigned int latencyFrames = state.latency / frameSamples;
-	for (unsigned int index = 0; index < latencyFrames + 8; ++index) {
-		frame.fill(0.0f);
-		QVERIFY(pipeline.processFrame(frame));
-	}
+		const unsigned int latencyFrames = state.latency / frameSamples;
+		for (unsigned int index = 0; index < latencyFrames + 8; ++index) {
+			frame.fill(0.0f);
+			QVERIFY(pipeline.processFrame(frame));
+		}
 
-	QVERIFY(!state.observedMixes.empty());
-	for (const float mix : state.observedMixes) {
-		QCOMPARE(mix, 1.0f);
+		QVERIFY(!state.observedMixes.empty());
+		for (const float mix : state.observedMixes) {
+			QCOMPARE(mix, 1.0f);
+		}
 	}
 }
 
@@ -1657,7 +1673,7 @@ void TestInputEnhancement::deepFilterWorkerOfflineWaitTimeoutLatches() {
 	QVERIFY(!worker.healthy());
 }
 
-void TestInputEnhancement::deepFilterWorkerLateResultFailsClosed() {
+void TestInputEnhancement::deepFilterWorkerLateResultFallsBackForOneFrame() {
 	RealtimeWorkerState state;
 	state.releaseProcess.store(false, std::memory_order_release);
 	DeepFilterNetRealtimeWorker worker;
@@ -1665,17 +1681,62 @@ void TestInputEnhancement::deepFilterWorkerLateResultFailsClosed() {
 
 	std::array< float, DeepFilterNetRealtimeWorker::frameSamples > input  = {};
 	std::array< float, DeepFilterNetRealtimeWorker::frameSamples > output = {};
-	const bool firstResult    = worker.processFrame(input.data(), output.data());
-	const bool secondResult   = worker.processFrame(input.data(), output.data());
-	const bool deadlineResult = worker.processFrame(input.data(), output.data());
+	bool late                                                             = true;
+	for (unsigned int frame = 0; frame < DeepFilterNetRealtimeWorker::schedulingDelayFrames; ++frame) {
+		input.fill(static_cast< float >(frame + 1) / 100.0f);
+		QVERIFY(worker.processFrame(input.data(), output.data(), DeepFilterNetRealtimeWorker::frameSamples, &late));
+		QVERIFY(!late);
+	}
+
+	// The stalled worker misses frame 0's deadline. The frame is still accepted
+	// and reported late so the caller emits dry audio; the worker stays healthy.
+	input.fill(0.03f);
+	const bool deadlineResult =
+		worker.processFrame(input.data(), output.data(), DeepFilterNetRealtimeWorker::frameSamples, &late);
+	QVERIFY(deadlineResult);
+	QVERIFY(late);
+	QVERIFY(worker.healthy());
+	QCOMPARE(worker.lateFrames(), std::uint64_t{ 1 });
+	QVERIFY(std::all_of(output.cbegin(), output.cend(), [](float sample) { return sample == 0.0f; }));
+
+	// Once the stall ends, the late result is discarded and the next frame
+	// receives its own on-time result.
+	state.releaseProcess.store(true, std::memory_order_release);
+	QTRY_VERIFY_WITH_TIMEOUT(worker.completedFrames() >= 3, 1000);
+	input.fill(0.04f);
+	QVERIFY(worker.processFrame(input.data(), output.data(), DeepFilterNetRealtimeWorker::frameSamples, &late));
+	QVERIFY(!late);
+	const float expected = 0.02f + state.offset;
+	QVERIFY(std::all_of(output.cbegin(), output.cend(),
+						[expected](float sample) { return std::abs(sample - expected) < 0.00001f; }));
+	QCOMPARE(worker.failureStatus(), DeepFilterNetRealtimeWorker::statusOk);
+	worker.stop();
+}
+
+void TestInputEnhancement::deepFilterWorkerSustainedStallFailsClosed() {
+	RealtimeWorkerState state;
+	state.releaseProcess.store(false, std::memory_order_release);
+	DeepFilterNetRealtimeWorker worker;
+	QVERIFY(worker.start(&state, &processRealtimeWorkerFrame));
+
+	std::array< float, DeepFilterNetRealtimeWorker::frameSamples > input  = {};
+	std::array< float, DeepFilterNetRealtimeWorker::frameSamples > output = {};
+	unsigned int acceptedFrames                                           = 0;
+	while (acceptedFrames < 4 * DeepFilterNetRealtimeWorker::slotCount
+		   && worker.processFrame(input.data(), output.data())) {
+		++acceptedFrames;
+	}
 	state.releaseProcess.store(true, std::memory_order_release);
 	worker.stop();
 
-	QVERIFY(firstResult);
-	QVERIFY(secondResult);
-	QVERIFY(!deadlineResult);
-	QCOMPARE(worker.failureStatus(), DeepFilterNetRealtimeWorker::statusOutputNotReady);
-	QVERIFY(std::all_of(output.cbegin(), output.cend(), [](float sample) { return sample == 0.0f; }));
+	// The tolerance absorbs a long hitch, but a worker that never catches up
+	// must still latch a failure instead of emitting dry audio indefinitely.
+	QCOMPARE(acceptedFrames, DeepFilterNetRealtimeWorker::slotCount);
+	QCOMPARE(worker.failureStatus(), DeepFilterNetRealtimeWorker::statusQueueFull);
+	QCOMPARE(worker.lateFrames(),
+			 std::uint64_t{ DeepFilterNetRealtimeWorker::slotCount - DeepFilterNetRealtimeWorker::schedulingDelayFrames
+							+ 1 });
+	QVERIFY(!worker.healthy());
 }
 
 void TestInputEnhancement::deepFilterWorkerBackendFailureLatches() {

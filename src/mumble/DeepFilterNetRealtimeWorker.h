@@ -28,7 +28,15 @@ public:
 	static constexpr unsigned int frameSamples           = 480;
 	static constexpr unsigned int schedulingDelayFrames  = 2;
 	static constexpr unsigned int schedulingDelaySamples = frameSamples * schedulingDelayFrames;
-	static constexpr unsigned int slotCount              = 4;
+	/// Frames the worker may fall behind its deadline (for example during a
+	/// game's frame hitch) before the queue is treated as failed. Late frames
+	/// are emitted as aligned dry audio while the model keeps its state.
+	static constexpr unsigned int lateFrameToleranceFrames = 16;
+	static constexpr unsigned int slotCount = schedulingDelayFrames + 2 + lateFrameToleranceFrames;
+	/// Sustained lateness, rather than a single stall, fails closed. Each late
+	/// frame adds lateFrameDebt and each timely frame repays one unit.
+	static constexpr unsigned int lateFrameDebt      = 10;
+	static constexpr unsigned int lateFrameDebtLimit = 250;
 	static constexpr unsigned int maximumSchedulingDelayFrames = 64;
 	static constexpr std::size_t cacheLineBytes          = 64;
 	static constexpr std::chrono::milliseconds offlineFrameWaitTimeout{ 2000 };
@@ -60,9 +68,13 @@ public:
 
 	/// Enqueues one complete 10 ms frame and emits the result from two calls
 	/// earlier. It never waits for the worker: inference has two callback
-	/// intervals to complete. A late/missing result permanently latches a failure
-	/// so the owning product pipeline can fail closed.
-	bool processFrame(const float *input, float *output, unsigned int sampleCount = frameSamples) noexcept;
+	/// intervals to complete. When that result is not ready yet, the frame is
+	/// still accepted, *outputLate is set and output stays zero so the caller can
+	/// emit its aligned dry signal; the late result is discarded once it
+	/// completes. Sustained lateness or a full queue permanently latches a
+	/// failure so the owning product pipeline can fail closed.
+	bool processFrame(const float *input, float *output, unsigned int sampleCount = frameSamples,
+					  bool *outputLate = nullptr) noexcept;
 	/// Waits until the result required by the next synthetic callback is ready.
 	/// This is bounded and fail-closed, but intentionally blocking: offline only.
 	/// It must be called by the same single producer that calls processFrame(),
@@ -85,6 +97,8 @@ public:
 	unsigned int pendingFrames() const noexcept;
 	unsigned int schedulingSlackFrames() const noexcept;
 	unsigned int configuredDelayFrames() const noexcept { return m_delayFrames; }
+	/// Frames emitted as dry because their result missed the deadline.
+	std::uint64_t lateFrames() const noexcept { return m_lateFrames.load(std::memory_order_acquire); }
 
 private:
 	enum class SlotState : unsigned char { Empty, InputReady, OutputReady };
@@ -117,8 +131,8 @@ private:
 	Slot &slotForSequence(std::uint64_t sequence) noexcept;
 
 	std::array< Slot, slotCount > m_slots = {};
-	// Capture keeps the original four in-object slots. Only receive callbacks
-	// with a larger burst budget allocate extra slots, before the worker starts.
+	// Capture uses the in-object slots. Only receive callbacks with a larger
+	// burst budget allocate extra slots, before the worker starts.
 	std::unique_ptr< Slot[] > m_extraSlots;
 	unsigned int m_activeSlotCount = slotCount;
 	unsigned int m_delayFrames = schedulingDelayFrames;
@@ -126,6 +140,11 @@ private:
 	void *m_context                 = nullptr;
 	ProcessFunction m_process       = nullptr;
 	std::uint64_t m_submittedFrames = 0;
+	/// Producer-only: the oldest output sequence that has not been consumed or
+	/// discarded yet. It trails the deadline sequence only after late frames.
+	std::uint64_t m_releasedFrames = 0;
+	unsigned int m_lateFrameDebt   = 0;
+	std::atomic< std::uint64_t > m_lateFrames{ 0 };
 	std::atomic_uint m_pendingFrames{ 0 };
 	std::atomic_bool m_stopRequested{ false };
 	std::atomic_int m_failureStatus{ statusNotStarted };
@@ -151,5 +170,7 @@ static_assert(std::atomic_bool::is_always_lock_free, "DeepFilterNet callback lif
 static_assert(std::atomic_uint::is_always_lock_free, "DeepFilterNet callback wake generation must be lock-free");
 static_assert(DeepFilterNetRealtimeWorker::slotCount > DeepFilterNetRealtimeWorker::schedulingDelayFrames,
 			  "DeepFilterNet worker needs distinct input and deadline output slots");
+static_assert(std::atomic< std::uint64_t >::is_always_lock_free,
+			  "DeepFilterNet late-frame diagnostics must be lock-free");
 
 #endif // MUMBLE_MUMBLE_DEEPFILTERNETREALTIMEWORKER_H_

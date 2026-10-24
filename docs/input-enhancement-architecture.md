@@ -43,7 +43,15 @@ can use it. The callback processes exactly one preallocated 480-sample frame.
 Model construction, model hashing, recipe verification, thread creation and
 processor reset happen off callback. DeepFilterNet inference runs on its own
 bounded SPSC worker because the tract runtime allocates inference tensors; the
-audio callback only publishes and consumes preallocated frames.
+audio callback only publishes and consumes preallocated frames. On Windows the
+worker registers with MMCSS ("Pro Audio") like the capture thread, so a busy game
+does not preempt inference at normal priority.
+
+A result that misses its two-callback deadline does not end the session's
+cleanup. That frame is emitted as aligned dry audio, the model keeps processing
+it so its state stays continuous, and the late result is discarded once it
+completes. The worker tolerates 16 frames of backlog. A full queue, or late
+frames sustained beyond roughly one in ten, still latches the fallback below.
 
 The pipeline maintains a dry signal on the same causal timeline as neural
 output. Invalid input is sanitized, out-of-range output is clamped, and model
@@ -59,15 +67,18 @@ wet output, so user PCM level and dry timeline do not change. The buffers are
 allocated during preparation, never in the callback. This execution semantic
 is versioned in the recipe manifest. Legacy/Expert input selections and all
 receiver cleanup leave the opt-in flag false and call the historical model API
-directly. Quality preserves its 0.70 minimum and 0.75 normal anchor while high
-controls can reach 0.95. Explicit-only Voice Focus can reach 1.00; it is never
-selected by Auto and the endpoint must still clear clean-speech, WER,
-catastrophe and blind-listening gates. These curves are versioned independently
-of the UI controls.
+directly. Quality preserves its 0.70 minimum and 0.75 moderate anchor while
+high controls, including its 92/80 selection preset, reach up to 0.98.
+Explicit-only Voice Focus spans 0.95 to 1.00; it is never selected by Auto.
+Because pauses are fully wet (see below), these values govern only the noise
+left under speech. These curves are versioned independently of the UI controls.
 
 The product-only DeepFilterNet path raises only weak input towards a -24 dBFS
 model-domain peak, capped at +18.06 dB. It never attenuates or raises an already
-louder input. The exact causal gain is removed from the corresponding model
+louder input. Since execution semantics 9 the gain follows a peak envelope with
+immediate attack and a 1 dB-per-frame recovery instead of each frame's peak:
+the deep filter combines several past frames, so a gain that jumps per frame
+cannot be inverted exactly and would modulate quiet noise at the frame rate. The exact causal gain is removed from the corresponding model
 output before wet/dry mixing, so microphone level and the dry timeline stay
 unchanged. This avoids overdriving normal and noisy input while preserving the
 quiet-microphone protection that motivated model-domain normalization.
@@ -77,13 +88,15 @@ ramp and quiet-room release guard. The release guard follows the learned room
 floor and opens only for weak utterance tails, preserving final consonants and
 room decay without weakening suppression across noisy low-energy speech.
 
-Mix curve version 7 confines Balanced's delayed-dry share to speech. RNNoise
-reports a speech probability for its newest analysed frame, two frames ahead of
-the delayed frame being mixed. While the maximum of the last three estimates is
-at least 0.15, or for 250 ms after it last reached 0.50, Balanced uses the
-unchanged speech-time mix together with the onset ramp and release guard. In
-pauses it is fully wet, so the 20–55 control interval no longer caps
-suppression between words to a few dB. The mix drops to the speech-time value
+The neural profiles confine their delayed-dry share to speech (Balanced since
+mix curve 7, Quality and Voice Focus since 8). RNNoise reports a speech
+probability and DeepFilterNet a local SNR, mapped from -10..+10 dB onto 0..1,
+for the newest analysed frame, which runs ahead of the delayed frame being
+mixed. While the maximum of the last three estimates is at least 0.15, or for
+250 ms after it last reached 0.50, the profile uses its speech-time mix
+together with the onset ramp and release guard. In pauses it is fully wet, so
+the Balanced control interval no longer caps suppression between words to a
+few dB, and DeepFilterNet reaches its 48 dB attenuation limit there. The mix drops to the speech-time value
 immediately and fades back to wet by at most 0.08 per frame. An energy
 transient that the model does not classify as speech does not open the dry
 path. Engines without a voice-activity estimate keep the previous behavior.
@@ -92,6 +105,13 @@ The 5 ms Balanced and 8 ms Quality/Voice Focus values are p99 qualification
 limits. The hard runtime catastrophe threshold is 10 ms; a single scheduler
 preemption below that threshold is recorded but does not unnecessarily change
 the user's profile.
+
+The capability probe that makes Quality and Voice Focus selectable paces
+frames at the 10 ms callback period with the worker at its realtime priority,
+excludes ten warm-up frames of the freshly reset model, and measures 90 frames.
+It requires an 8 ms worker p99 and at most two late frames; a single outlier is
+absorbed by the worker and no longer hides the profiles. A failing attempt is
+retried once.
 
 `Original` does not construct a product pipeline or model. Source-contract and
 E2E tests compare input PCM, pre-Opus PCM, encoded Opus payloads, packet counts

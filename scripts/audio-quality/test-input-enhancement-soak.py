@@ -73,8 +73,8 @@ def _recipe(
 		"naturalCrispRange": character_range,
 		"latencyBudgetMs": latency_ms,
 		"minimumCpuClass": minimum_cpu,
-		"executionSemanticsVersion": 8,
-		"mixCurveVersion": 7,
+		"executionSemanticsVersion": 9,
+		"mixCurveVersion": 8,
 		"adaptationPolicyVersion": 1,
 	}
 

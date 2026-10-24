@@ -27,9 +27,12 @@
 #endif
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <thread>
 #include <utility>
 
 namespace Mumble::InputEnhancement {
@@ -820,39 +823,74 @@ CpuClass InputEnhancementPackageVerifier::manualProfileCpuClass() const {
 
 			const QString authorizedSha256 = modelSha256Hex(recipe.modelId());
 			const QString authorizedPath   = modelPath(recipe.modelId());
-			// Use a relaxed probe deadline to collect the actual distributions, then
-			// classify against the stricter 8 ms p99 / 10 ms catastrophe contract.
-			Pipeline pipeline(Pipeline::ProcessorFactory{}, Pipeline::NanosecondClock{}, 20'000'000);
-			if (!pipeline.configure(recipe, authorizedSha256, authorizedPath)) {
-				return;
-			}
 
-			bool healthy = true;
-			std::array< float, frameSamples > frame = {};
-			for (unsigned int frameIndex = 0; frameIndex < 32; ++frameIndex) {
-				if (!pipeline.prepareOfflineFrame()) {
-					healthy = false;
+			// Measure what the capture callback will experience: frames paced at
+			// the 10 ms callback period, the worker at its realtime (MMCSS)
+			// priority rather than the offline background mode, and the cold
+			// first inferences of the freshly reset model excluded. A noisy
+			// startup moment gets one more attempt before Quality is hidden.
+			constexpr unsigned int warmupFrames   = 10;
+			constexpr unsigned int measuredFrames = 90;
+			constexpr unsigned int attempts       = 2;
+			const ManualProfileCapabilityMetrics baseMetrics = metrics;
+			for (unsigned int attempt = 0; attempt < attempts; ++attempt) {
+				metrics = baseMetrics;
+				Pipeline pipeline(Pipeline::ProcessorFactory{}, Pipeline::NanosecondClock{}, 20'000'000);
+				if (!pipeline.configure(recipe, authorizedSha256, authorizedPath)) {
+					return;
+				}
+#ifdef Q_OS_WIN
+				// Model loading may run in background-resource mode; the paced run
+				// must not inherit its delayed timer wakeups. Ending a mode that was
+				// never begun is a harmless no-op.
+				(void) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
+#endif
+
+				bool healthy = true;
+				std::array< float, frameSamples > frame = {};
+				std::array< std::uint64_t, measuredFrames > callbackNanoseconds = {};
+				std::array< std::uint64_t, measuredFrames > workerNanoseconds   = {};
+				std::uint64_t lateFramesBeforeMeasurement = 0;
+				const auto startedAt = std::chrono::steady_clock::now();
+				for (unsigned int frameIndex = 0; frameIndex < warmupFrames + measuredFrames; ++frameIndex) {
+					std::this_thread::sleep_until(startedAt + std::chrono::milliseconds(10) * frameIndex);
+					for (unsigned int sample = 0; sample < frameSamples; ++sample) {
+						const int phase = static_cast< int >((sample + frameIndex * 37U) % 97U) - 48;
+						frame[sample]   = static_cast< float >(phase) / 192.0f;
+					}
+					if (!pipeline.processFrame(frame)) {
+						healthy = false;
+						break;
+					}
+					if (frameIndex < warmupFrames) {
+						lateFramesBeforeMeasurement = pipeline.workerLateFrames();
+						continue;
+					}
+					callbackNanoseconds[frameIndex - warmupFrames] = pipeline.lastProcessingNanoseconds();
+					workerNanoseconds[frameIndex - warmupFrames]   = pipeline.lastWorkerProcessingNanoseconds();
+				}
+				const Diagnostics diagnostics = pipeline.diagnostics();
+				metrics.qualityPipelineReady  = healthy && !diagnostics.fallbackActive();
+				if (healthy) {
+					auto p99 = [](std::array< std::uint64_t, measuredFrames > values) {
+						std::sort(values.begin(), values.end());
+						return values[(values.size() * 99 + 99) / 100 - 1];
+					};
+					metrics.callbackP99Nanoseconds = p99(callbackNanoseconds);
+					metrics.callbackMaximumNanoseconds =
+						*std::max_element(callbackNanoseconds.cbegin(), callbackNanoseconds.cend());
+					metrics.workerFrames         = diagnostics.workerProcessingFrames();
+					metrics.workerP99Nanoseconds = p99(workerNanoseconds);
+					metrics.workerMaximumNanoseconds =
+						*std::max_element(workerNanoseconds.cbegin(), workerNanoseconds.cend());
+					metrics.workerLateFrames = pipeline.workerLateFrames() - lateFramesBeforeMeasurement;
+				}
+				m_manualProfileCpuClass = manualProfileCpuClassForMetrics(metrics);
+				if (m_manualProfileCpuClass == CpuClass::High || attempt + 1 == attempts) {
 					break;
 				}
-				for (unsigned int sample = 0; sample < frameSamples; ++sample) {
-					const int phase = static_cast< int >((sample + frameIndex * 37U) % 97U) - 48;
-					frame[sample]   = static_cast< float >(phase) / 192.0f;
-				}
-				if (!pipeline.processFrame(frame)) {
-					healthy = false;
-					break;
-				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			}
-			healthy = pipeline.finishOfflineProcessing() && healthy;
-			const Diagnostics diagnostics = pipeline.diagnostics();
-			metrics.qualityPipelineReady =
-				healthy && !diagnostics.fallbackActive() && diagnostics.deadlineMisses() == 0;
-			metrics.callbackP99Nanoseconds     = diagnostics.processingP99Nanoseconds();
-			metrics.callbackMaximumNanoseconds = diagnostics.maximumProcessingNanoseconds();
-			metrics.workerFrames               = diagnostics.workerProcessingFrames();
-			metrics.workerP99Nanoseconds       = diagnostics.workerProcessingP99Nanoseconds();
-			metrics.workerMaximumNanoseconds   = diagnostics.workerMaximumProcessingNanoseconds();
-			m_manualProfileCpuClass            = manualProfileCpuClassForMetrics(metrics);
 		} catch (...) {
 			// The capability probe is advisory and runs before a manual profile is
 			// selected. Any allocation/runtime exception keeps the conservative
