@@ -330,8 +330,7 @@ QString ScreenShareViewBackend::operationStatus() const {
 }
 QString ScreenShareViewBackend::operationError() const {
 	return m_nativeFrameStalled
-		? tr("No new video frames have arrived for 5 seconds. Playback resumes when frames return, and the viewer "
-			 "restarts if they stay away.")
+		? tr("No new video frames have arrived for 5 seconds. Playback will resume automatically when frames return.")
 		: m_operationError;
 }
 bool ScreenShareViewBackend::operationCancellable() const { return m_operationCancellable; }
@@ -372,9 +371,14 @@ void ScreenShareViewBackend::handleNativeFrameTransportActive(const quint64 conf
 		emit nativeFrameActiveChanged();
 	}
 	resetNativeFrameFreshness();
+	// A retry or automatic restart clears the transport while the replacement viewer starts. That is a
+	// reconnect, not a fallback to the external viewer.
+	const QString inactiveStatus = !m_acceptNativeFrames && m_operationStatus == QStringLiteral("loading")
+									   ? tr("Reconnecting to the screen share...")
+									   : tr("The native frame transport is unavailable; using the external viewer fallback.");
 	setStatus(m_paused ? tr("Paused locally. The receiver remains connected on the current frame.")
 		: active ? tr("Connecting to the native Qt Quick video surface...")
-				 : tr("The native frame transport is unavailable; using the external viewer fallback."));
+				 : inactiveStatus);
 }
 
 void ScreenShareViewBackend::resetNativeFrameFreshness() {
@@ -393,20 +397,12 @@ void ScreenShareViewBackend::checkNativeFrameFreshness() {
 		|| m_operationStatus != QStringLiteral("ready") || !m_nativeFrameFreshness.isValid()) return;
 	// FrameTransport increments sequence on every published frame, including
 	// identical pixel content. A static desktop is therefore still live.
-	const qint64 sinceLastFrameMsec = m_nativeFrameFreshness.elapsed();
-	if (sinceLastFrameMsec >= 5000) {
+	if (m_nativeFrameFreshness.elapsed() >= 5000) {
 		setNativeFrameStalled(true);
-	}
-	// A decoder that stays alive without producing frames is invisible to the process watchdog. Ask for
-	// one recovery per stall; a fresh frame or a transport reset re-arms it.
-	if (sinceLastFrameMsec >= 15000 && !m_frameStallRecoveryRequested) {
-		m_frameStallRecoveryRequested = true;
-		emit frameStallPersisted(streamId());
 	}
 }
 
 void ScreenShareViewBackend::setNativeFrameStalled(const bool stalled) {
-	if (!stalled) m_frameStallRecoveryRequested = false;
 	if (m_nativeFrameStalled == stalled) return;
 	m_nativeFrameStalled = stalled;
 	if (stalled) {

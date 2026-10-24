@@ -110,8 +110,6 @@ signals:
 	void audioControlsDispatchedForTest(qint64 processId, bool effectiveMuted, int percent);
 #endif
 	void retryRequested(const QString &streamId);
-	// No frame arrived for long enough that the receiver is presumed hung rather than briefly slow.
-	void frameStallPersisted(const QString &streamId);
 	void stopRequested(const QString &streamId);
 	void closeRequested(const QString &streamId);
 	void detachRequested(const QString &streamId);
@@ -167,7 +165,6 @@ private:
 	quint64 m_nativeFrameSequence = 0;
 	bool m_acceptNativeFrames = false;
 	bool m_nativeFrameStalled = false;
-	bool m_frameStallRecoveryRequested = false;
 	QElapsedTimer m_nativeFrameFreshness;
 	QString m_operationStatus = QStringLiteral("idle");
 	QString m_operationError;

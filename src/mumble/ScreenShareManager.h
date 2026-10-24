@@ -146,7 +146,6 @@ private:
 	bool shouldAutoViewSession(const ScreenShareSession &session) const;
 	bool restartExternalViewSession(const ScreenShareSession &session);
 	void retryExternalViewSession(const QString &streamID);
-	void recoverStalledViewSession(const QString &streamID);
 	void ensureViewBackend(const ScreenShareSession &session, qint64 processID);
 	void updateViewBackendIdentity(ScreenShareViewBackend *backend, const ScreenShareSession &session) const;
 	void startLocalPublishSession(const ScreenShareSession &session);

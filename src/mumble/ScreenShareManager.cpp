@@ -1186,51 +1186,6 @@ void ScreenShareManager::retryExternalViewSession(const QString &streamID) {
 	emit sessionUpdated(streamID);
 }
 
-void ScreenShareManager::recoverStalledViewSession(const QString &streamID) {
-	if (!m_activeViewSessions.contains(streamID) || m_pausedExternalViewSessions.contains(streamID)
-		|| m_pendingViewRestarts.contains(streamID)) {
-		return;
-	}
-
-	// Recovery shares the crash-restart budget, so a source that never delivers frames ends in the
-	// manual Retry state instead of restarting forever.
-	const auto sessionIt     = m_sessions.constFind(streamID);
-	const int restartAttempt = m_externalViewRestartAttempts.value(streamID, 0) + 1;
-	const bool canRestart    = sessionIt != m_sessions.cend() && restartAttempt <= kExternalRuntimeRestartLimit
-							&& canViewSession(sessionIt.value());
-	const QString owner = sessionIt != m_sessions.cend() ? ownerLabel(sessionIt.value().ownerSession) : streamID;
-	if (Global::get().l) {
-		Global::get().l->log(Log::Warning,
-							 canRestart ? tr("%1's screen share stopped delivering video; restarting the viewer "
-											 "(%2/%3).")
-											  .arg(owner.toHtmlEscaped(), QString::number(restartAttempt),
-												   QString::number(kExternalRuntimeRestartLimit))
-										: tr("%1's screen share stopped delivering video. Use Retry to start a "
-											 "fresh viewer.")
-											  .arg(owner.toHtmlEscaped()));
-	}
-	if (!canRestart) {
-		return;
-	}
-
-	m_externalViewRestartAttempts.insert(streamID, restartAttempt);
-	m_activeViewSessions.remove(streamID);
-	m_externalViewProcessIDs.remove(streamID);
-	m_viewRuntimeStarted.remove(streamID);
-	m_pendingViewRestarts.insert(streamID);
-	if (ScreenShareViewBackend *backend = m_viewBackends.value(streamID)) {
-		backend->setProcessId(0);
-		backend->setNativeFrameTransport({}, 0);
-		backend->setOperationState(QStringLiteral("loading"), {}, true);
-	}
-	ScreenShareSession stopSession;
-	stopSession.streamID = streamID;
-	scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
-							nextHelperOperationGeneration(HelperOperationKind::StopView, streamID));
-	updateExternalRuntimeWatchdog();
-	emit sessionUpdated(streamID);
-}
-
 void ScreenShareManager::ensureViewBackend(const ScreenShareSession &session, const qint64 processID) {
 	ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID, nullptr);
 	if (!backend) {
@@ -1264,8 +1219,6 @@ void ScreenShareManager::ensureViewBackend(const ScreenShareSession &session, co
 		});
 		connect(backend, &ScreenShareViewBackend::retryRequested, this,
 				&ScreenShareManager::retryExternalViewSession);
-		connect(backend, &ScreenShareViewBackend::frameStallPersisted, this,
-				&ScreenShareManager::recoverStalledViewSession);
 		connect(backend, &ScreenShareViewBackend::pauseToggled, this,
 				&ScreenShareManager::setExternalViewPaused);
 		connect(backend, &ScreenShareViewBackend::audioMuteToggled, this,
