@@ -13627,6 +13627,7 @@ ApplicationWindow {
 						rightMargin: root.timelineHorizontalMargin
 						topMargin: activeScope.activity ? Theme.space1 : root.timelineVerticalMargin
 						bottomMargin: Math.max(Theme.space2, root.timelineVerticalMargin - jumpToLatestRow.height)
+						scrollBarBottomExtension: jumpToLatestRow.height
 					}
 				}
 

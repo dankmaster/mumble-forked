@@ -546,6 +546,7 @@ ListView {
 		previewHeights = ({})
 		previewHeightCount = 0
 		messageActions.close()
+		thumbSettle.restart()
 	}
 
 	model: rowModel
@@ -737,8 +738,27 @@ ListView {
 		}
 	}
 
+	// The track may continue below the view, through the host's own row there
+	// (Jump to latest), so the thumb reaches the bottom edge at the newest
+	// message. The view clips its children, so such a track lives in its parent.
+	property real scrollBarBottomExtension: 0
+
 	ScrollBar.vertical: ModernScrollBar {
 		id: verticalScrollBar
+		readonly property bool extended: view.scrollBarBottomExtension > 0 && !!view.parent
+		parent: extended ? view.parent : view
+		x: (extended ? view.x : 0) + view.width - width
+		y: extended ? view.y : 0
+		height: view.height + (extended ? view.scrollBarBottomExtension : 0)
+		visible: view.visible
+		animateThumb: thumbSettle.running
+	}
+
+	// After a different conversation loads, the thumb eases into its new place
+	// while the first pages arrive instead of jumping.
+	Timer {
+		id: thumbSettle
+		interval: 900
 	}
 
 	// The shell's wheel and middle-button scrolling: a full step per wheel notch,
