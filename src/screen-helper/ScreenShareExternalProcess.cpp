@@ -1351,69 +1351,74 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 		properties->append(QStringLiteral("max-bitrate=%1").arg(maxBitrateKbps));
 	};
 
-	if ((plannedBackend.contains(QLatin1String("videotoolbox"))
-		 || plannedBackend.contains(QLatin1String("gstreamer")))
-		&& support.gstVideoToolboxH264EncoderAvailable) {
-		selection.valid           = true;
-		selection.encoderElement  = QStringLiteral("vtenc_h264");
-		selection.selectedEncoder = QStringLiteral("gstreamer-vtenc_h264");
-		selection.rawFormat       = QStringLiteral("NV12");
-		selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps));
-		selection.properties.append(QStringLiteral("max-keyframe-interval=%1").arg(gopSize));
-		selection.properties.append(QStringLiteral("allow-frame-reordering=false"));
-		selection.properties.append(QStringLiteral("realtime=true"));
-		return selection;
-	}
+	auto selectEncoder = [&](const QString &backendID) {
+		if (backendID == QLatin1String("gstreamer-videotoolbox") && support.gstVideoToolboxH264EncoderAvailable) {
+			selection.valid           = true;
+			selection.encoderElement  = QStringLiteral("vtenc_h264");
+			selection.selectedEncoder = QStringLiteral("gstreamer-vtenc_h264");
+			selection.rawFormat       = QStringLiteral("NV12");
+			selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps));
+			selection.properties.append(QStringLiteral("max-keyframe-interval=%1").arg(gopSize));
+			selection.properties.append(QStringLiteral("allow-frame-reordering=false"));
+			selection.properties.append(QStringLiteral("realtime=true"));
+		} else if (backendID == QLatin1String("gstreamer-nvd3d11") && support.gstNvD3D11H264EncoderAvailable) {
+			selection.valid               = true;
+			selection.encoderElement      = QStringLiteral("nvd3d11h264enc");
+			selection.selectedEncoder     = QStringLiteral("gstreamer-nvd3d11h264enc");
+			selection.rawFormat           = QStringLiteral("NV12");
+			selection.consumesD3D11Memory = true;
+			appendCommonH264Properties(&selection.properties);
+			selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
+			selection.properties.append(QStringLiteral("bframes=0"));
+			selection.properties.append(QStringLiteral("zerolatency=true"));
+		} else if (backendID == QLatin1String("gstreamer-mf") && support.gstMfH264EncoderAvailable) {
+			selection.valid           = true;
+			selection.encoderElement  = QStringLiteral("mfh264enc");
+			selection.selectedEncoder = QStringLiteral("gstreamer-mfh264enc");
+			selection.rawFormat       = QStringLiteral("NV12");
+			appendCommonH264Properties(&selection.properties);
+			selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
+			selection.properties.append(QStringLiteral("bframes=0"));
+			selection.properties.append(QStringLiteral("low-latency=true"));
+		} else if (backendID == QLatin1String("gstreamer-x264") && support.gstX264EncoderAvailable) {
+			selection.valid           = true;
+			selection.encoderElement  = QStringLiteral("x264enc");
+			selection.selectedEncoder = QStringLiteral("gstreamer-x264enc");
+			selection.rawFormat       = QStringLiteral("I420");
+			selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps));
+			selection.properties.append(QStringLiteral("speed-preset=ultrafast"));
+			selection.properties.append(QStringLiteral("tune=zerolatency"));
+			selection.properties.append(QStringLiteral("key-int-max=%1").arg(gopSize));
+			selection.properties.append(QStringLiteral("bframes=0"));
+			selection.properties.append(QStringLiteral("byte-stream=true"));
+		} else if (backendID == QLatin1String("gstreamer-openh264") && support.gstOpenH264EncoderAvailable) {
+			selection.valid           = true;
+			selection.encoderElement  = QStringLiteral("openh264enc");
+			selection.selectedEncoder = QStringLiteral("gstreamer-openh264enc");
+			selection.rawFormat       = QStringLiteral("I420");
+			selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps * 1000));
+			selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
+		}
+		return selection.valid;
+	};
 
-	if ((plannedBackend.contains(QLatin1String("nvd3d11")) || plannedBackend.contains(QLatin1String("gstreamer")))
-		&& support.gstNvD3D11H264EncoderAvailable) {
-		selection.valid              = true;
-		selection.encoderElement     = QStringLiteral("nvd3d11h264enc");
-		selection.selectedEncoder    = QStringLiteral("gstreamer-nvd3d11h264enc");
-		selection.rawFormat          = QStringLiteral("NV12");
-		selection.consumesD3D11Memory = true;
-		appendCommonH264Properties(&selection.properties);
-		selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
-		selection.properties.append(QStringLiteral("bframes=0"));
-		selection.properties.append(QStringLiteral("zerolatency=true"));
-		return selection;
+	// The planner names one exact backend ("gstreamer-mf-h264", ...). Honour it first, then fall back in
+	// the order the plan's hardware preference asks for, so a software plan never silently runs NVENC/MF.
+	const QStringList hardwareBackends = { QStringLiteral("gstreamer-videotoolbox"), QStringLiteral("gstreamer-nvd3d11"),
+										   QStringLiteral("gstreamer-mf") };
+	const QStringList softwareBackends = { QStringLiteral("gstreamer-x264"), QStringLiteral("gstreamer-openh264") };
+	const bool preferHardware = plan.value(QStringLiteral("prefer_hardware_encoding")).toBool(true);
+	QStringList candidates;
+	for (const QString &backendID : hardwareBackends + softwareBackends) {
+		if (plannedBackend.startsWith(backendID + QLatin1Char('-')) || plannedBackend == backendID) {
+			candidates.append(backendID);
+		}
 	}
-
-	if ((plannedBackend.contains(QLatin1String("mf")) || plannedBackend.contains(QLatin1String("gstreamer")))
-		&& support.gstMfH264EncoderAvailable) {
-		selection.valid           = true;
-		selection.encoderElement  = QStringLiteral("mfh264enc");
-		selection.selectedEncoder = QStringLiteral("gstreamer-mfh264enc");
-		selection.rawFormat       = QStringLiteral("NV12");
-		appendCommonH264Properties(&selection.properties);
-		selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
-		selection.properties.append(QStringLiteral("bframes=0"));
-		selection.properties.append(QStringLiteral("low-latency=true"));
-		return selection;
-	}
-
-	if (support.gstX264EncoderAvailable) {
-		selection.valid           = true;
-		selection.encoderElement  = QStringLiteral("x264enc");
-		selection.selectedEncoder = QStringLiteral("gstreamer-x264enc");
-		selection.rawFormat       = QStringLiteral("I420");
-		selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps));
-		selection.properties.append(QStringLiteral("speed-preset=ultrafast"));
-		selection.properties.append(QStringLiteral("tune=zerolatency"));
-		selection.properties.append(QStringLiteral("key-int-max=%1").arg(gopSize));
-		selection.properties.append(QStringLiteral("bframes=0"));
-		selection.properties.append(QStringLiteral("byte-stream=true"));
-		return selection;
-	}
-
-	if (support.gstOpenH264EncoderAvailable) {
-		selection.valid           = true;
-		selection.encoderElement  = QStringLiteral("openh264enc");
-		selection.selectedEncoder = QStringLiteral("gstreamer-openh264enc");
-		selection.rawFormat       = QStringLiteral("I420");
-		selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps * 1000));
-		selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
-		return selection;
+	candidates.append(preferHardware ? hardwareBackends + softwareBackends : softwareBackends + hardwareBackends);
+	for (const QString &backendID : candidates) {
+		if (selectEncoder(backendID)) {
+			return selection;
+		}
 	}
 
 	if (errorMessage) {
@@ -1939,7 +1944,7 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 		const bool gstSystemMemoryH264Available =
 			support.gstVideoConvertAvailable
 			&& (support.gstX264EncoderAvailable || support.gstOpenH264EncoderAvailable
-				|| support.gstVideoToolboxH264EncoderAvailable)
+				|| support.gstMfH264EncoderAvailable || support.gstVideoToolboxH264EncoderAvailable)
 #ifdef Q_OS_WIN
 			&& support.gstD3D11DownloadAvailable
 #endif
