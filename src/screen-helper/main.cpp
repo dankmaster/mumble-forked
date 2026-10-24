@@ -6,7 +6,7 @@
 #include "ScreenShareHelperServer.h"
 
 #include "ScreenShareIPC.h"
-#include "ScreenShareWindowFollowPipeline.h"
+#include "ScreenShareInProcessPipeline.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -128,29 +128,54 @@ int main(int argc, char **argv) {
 											   QStringLiteral("Print the helper capability payload as JSON and exit."));
 	QCommandLineOption selfTestOption(QStringList{ QStringLiteral("self-test") },
 									  QStringLiteral("Run a local publish/view helper self-test and exit."));
-	// Internal sub-mode: run a capture pipeline in-process and keep its monitor crop following the
-	// given window. Not part of the public interface; spawned by the helper for browser captures.
-	QCommandLineOption windowFollowOption(QStringList{ QStringLiteral("internal-gst-window-follow") },
-										  QStringLiteral("Internal: run a window-following capture pipeline and exit."));
+	// Internal sub-mode: run a publish pipeline in-process, with its encoder bitrate following the
+	// congestion controller and, optionally, its monitor crop following the given window. Not part of
+	// the public interface; spawned by the helper for GStreamer publishing.
+	QCommandLineOption pipelineOption(QStringList{ QStringLiteral("internal-gst-pipeline") },
+									  QStringLiteral("Internal: run a publish pipeline in-process and exit."));
 	QCommandLineOption windowFollowSourceNameOption(QStringList{ QStringLiteral("source-name") },
 													QStringLiteral("Internal: name of the capture element to retarget."),
 													QStringLiteral("name"));
 	QCommandLineOption windowFollowHandleOption(QStringList{ QStringLiteral("window-handle") },
 												QStringLiteral("Internal: native handle of the window to follow."),
 												QStringLiteral("handle"));
-	QCommandLineOption windowFollowGstBinDirOption(QStringList{ QStringLiteral("gst-bin-dir") },
-												   QStringLiteral("Internal: bundled GStreamer bin directory."),
-												   QStringLiteral("dir"));
+	QCommandLineOption pipelineGstBinDirOption(QStringList{ QStringLiteral("gst-bin-dir") },
+											   QStringLiteral("Internal: bundled GStreamer bin directory."),
+											   QStringLiteral("dir"));
+	QCommandLineOption bitrateSinkOption(QStringList{ QStringLiteral("bitrate-sink") },
+										 QStringLiteral("Internal: webrtcsink whose congestion controller to follow."),
+										 QStringLiteral("name"));
+	QCommandLineOption bitrateEncoderOption(QStringList{ QStringLiteral("bitrate-encoder") },
+											QStringLiteral("Internal: encoder whose bitrate follows the estimate."),
+											QStringLiteral("name"));
+	QCommandLineOption bitrateKbpsOption(QStringList{ QStringLiteral("bitrate-kbps") },
+										 QStringLiteral("Internal: highest encoder bitrate in kbit/s."),
+										 QStringLiteral("kbps"));
+	QCommandLineOption maxBitrateKbpsOption(QStringList{ QStringLiteral("max-bitrate-kbps") },
+											QStringLiteral("Internal: highest encoder max-bitrate in kbit/s (0 = leave it)."),
+											QStringLiteral("kbps"));
+	QCommandLineOption bitratePropertyScaleOption(QStringList{ QStringLiteral("bitrate-property-scale") },
+												  QStringLiteral("Internal: encoder bitrate units per kbit/s."),
+												  QStringLiteral("scale"));
+	QCommandLineOption bitrateReconfigureCostlyOption(
+		QStringList{ QStringLiteral("bitrate-reconfigure-costly") },
+		QStringLiteral("Internal: the encoder re-opens on every bitrate change."));
 	parser.addOption(helpOption);
 	parser.addOption(helpAllOption);
 	parser.addOption(diagnosticsLogFileOption);
 	parser.addOption(socketNameOption);
 	parser.addOption(printCapabilitiesOption);
 	parser.addOption(selfTestOption);
-	parser.addOption(windowFollowOption);
+	parser.addOption(pipelineOption);
 	parser.addOption(windowFollowSourceNameOption);
 	parser.addOption(windowFollowHandleOption);
-	parser.addOption(windowFollowGstBinDirOption);
+	parser.addOption(pipelineGstBinDirOption);
+	parser.addOption(bitrateSinkOption);
+	parser.addOption(bitrateEncoderOption);
+	parser.addOption(bitrateKbpsOption);
+	parser.addOption(maxBitrateKbpsOption);
+	parser.addOption(bitratePropertyScaleOption);
+	parser.addOption(bitrateReconfigureCostlyOption);
 	if (!parser.parse(app.arguments())) {
 		QTextStream(stderr) << parser.errorText() << Qt::endl << parser.helpText() << Qt::endl;
 		return 1;
@@ -164,17 +189,23 @@ int main(int argc, char **argv) {
 		installDiagnosticsLogging(parser.value(diagnosticsLogFileOption));
 	}
 
-	if (parser.isSet(windowFollowOption)) {
-		ScreenShareWindowFollow::Options options;
+	if (parser.isSet(pipelineOption)) {
+		ScreenShareInProcessPipeline::Options options;
 		options.pipelineTokens = parser.positionalArguments();
 		options.sourceName     = parser.value(windowFollowSourceNameOption);
-		options.gstBinDir      = parser.value(windowFollowGstBinDirOption);
+		options.gstBinDir      = parser.value(pipelineGstBinDirOption);
 		bool handleOk          = false;
 		options.windowHandle   = parser.value(windowFollowHandleOption).toULongLong(&handleOk);
 		if (!handleOk) {
 			options.windowHandle = 0;
 		}
-		return ScreenShareWindowFollow::run(options);
+		options.sinkName                 = parser.value(bitrateSinkOption);
+		options.encoderName              = parser.value(bitrateEncoderOption);
+		options.bitrateKbps              = qMax(0, parser.value(bitrateKbpsOption).toInt());
+		options.maxBitrateKbps           = qMax(0, parser.value(maxBitrateKbpsOption).toInt());
+		options.bitratePropertyScale     = qMax(1, parser.value(bitratePropertyScaleOption).toInt());
+		options.costlyBitrateReconfigure = parser.isSet(bitrateReconfigureCostlyOption);
+		return ScreenShareInProcessPipeline::run(options);
 	}
 
 	ScreenShareHelperServer helperServer;

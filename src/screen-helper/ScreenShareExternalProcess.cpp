@@ -8,7 +8,7 @@
 #include "ScreenShare.h"
 #include "ScreenShareIPC.h"
 #include "ScreenShareFrameTransport.h"
-#include "ScreenShareWindowFollowPipeline.h"
+#include "ScreenShareInProcessPipeline.h"
 #include "ScreenShareWindowsNativeCapture.h"
 
 #ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
@@ -1086,7 +1086,7 @@ struct GStreamerCaptureSelection {
 	QStringList sourceProperties;
 	QStringList warnings;
 	// When set, the capture is a monitor crop locked onto a Chromium browser window. The crop is
-	// driven live by the --internal-gst-window-follow helper sub-mode so it tracks window moves.
+	// driven live by the --internal-gst-pipeline helper sub-mode so it tracks window moves.
 	bool browserWindowFollow      = false;
 	qulonglong followWindowHandle = 0;
 	QString followSourceName;
@@ -1104,7 +1104,7 @@ bool selectBrowserMonitorCropCapture(HWND window, GStreamerCaptureSelection *sel
 	}
 
 	const qulonglong windowHandle = reinterpret_cast< qulonglong >(window);
-	const ScreenShareWindowFollow::WindowCrop crop = ScreenShareWindowFollow::computeWindowCrop(windowHandle);
+	const ScreenShareInProcessPipeline::WindowCrop crop = ScreenShareInProcessPipeline::computeWindowCrop(windowHandle);
 	if (!crop.valid) {
 		return false;
 	}
@@ -1320,6 +1320,11 @@ QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStrin
 	return properties;
 }
 
+// Name of the encoder element the in-process pipeline adjusts to follow the congestion controller.
+const QString GSTREAMER_PUBLISH_ENCODER_NAME = QStringLiteral("videoenc");
+// webrtcsink's own "max-bitrate" default (bit/s); the plan only raises it.
+constexpr qint64 GSTREAMER_WEBRTCSINK_DEFAULT_MAX_BITRATE = 8192000;
+
 struct GStreamerEncoderSelection {
 	bool valid = false;
 	QString encoderElement;
@@ -1327,6 +1332,12 @@ struct GStreamerEncoderSelection {
 	QString rawFormat;
 	bool consumesD3D11Memory = false;
 	QStringList properties;
+	// Limits the congestion-control follower of the in-process pipeline works within: the
+	// "bitrate" ceiling, and the "max-bitrate" ceiling for encoders configured with one.
+	int bitrateKbps               = 0;
+	int maxBitrateKbps            = 0;
+	int bitratePropertyScale      = 1; // 1000 for encoders that take bit/s
+	bool costlyBitrateReconfigure = false;
 };
 
 GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProcess::RuntimeSupport &support,
@@ -1354,6 +1365,7 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 	};
 
 	auto selectEncoder = [&](const QString &backendID) {
+		selection.bitrateKbps = bitrateKbps;
 		if (backendID == QLatin1String("gstreamer-videotoolbox") && support.gstVideoToolboxH264EncoderAvailable) {
 			selection.valid           = true;
 			selection.encoderElement  = QStringLiteral("vtenc_h264");
@@ -1369,6 +1381,7 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 			selection.selectedEncoder     = QStringLiteral("gstreamer-nvd3d11h264enc");
 			selection.rawFormat           = QStringLiteral("NV12");
 			selection.consumesD3D11Memory = true;
+			selection.maxBitrateKbps      = maxBitrateKbps;
 			appendCommonH264Properties(&selection.properties);
 			// Real-time screen content: a low-latency preset, capped VBR so a still screen costs little,
 			// a VBV of about four frames so keyframes do not burst far above the cap, and spatial AQ to
@@ -1387,6 +1400,9 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 			selection.encoderElement  = QStringLiteral("mfh264enc");
 			selection.selectedEncoder = QStringLiteral("gstreamer-mfh264enc");
 			selection.rawFormat       = QStringLiteral("NV12");
+			selection.maxBitrateKbps  = maxBitrateKbps;
+			// A bitrate change re-creates the Media Foundation transform.
+			selection.costlyBitrateReconfigure = true;
 			appendCommonH264Properties(&selection.properties);
 			selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
 			selection.properties.append(QStringLiteral("bframes=0"));
@@ -1403,10 +1419,11 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 			selection.properties.append(QStringLiteral("bframes=0"));
 			selection.properties.append(QStringLiteral("byte-stream=true"));
 		} else if (backendID == QLatin1String("gstreamer-openh264") && support.gstOpenH264EncoderAvailable) {
-			selection.valid           = true;
-			selection.encoderElement  = QStringLiteral("openh264enc");
-			selection.selectedEncoder = QStringLiteral("gstreamer-openh264enc");
-			selection.rawFormat       = QStringLiteral("I420");
+			selection.valid                = true;
+			selection.encoderElement       = QStringLiteral("openh264enc");
+			selection.selectedEncoder      = QStringLiteral("gstreamer-openh264enc");
+			selection.rawFormat            = QStringLiteral("I420");
+			selection.bitratePropertyScale = 1000;
 			selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps * 1000));
 			selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
 		}
@@ -1506,6 +1523,13 @@ ScreenShareExternalProcess::LaunchResult
 	arguments << QStringLiteral("livekitwebrtcsink") << QStringLiteral("name=sink");
 	appendGStreamerLiveKitSignallerArguments(&arguments, plan, wsUrl, identity, participantName);
 	arguments << QStringLiteral("video-caps=video/x-h264");
+	// Start the congestion controller (which also paces the RTP) at the plan's rate instead of its
+	// 2 Mbit/s default, and let it reach the plan's peak.
+	const qint64 peakBitrate = qint64(qMax(encoder.bitrateKbps, encoder.maxBitrateKbps)) * 1000;
+	arguments << QStringLiteral("start-bitrate=%1").arg(qint64(encoder.bitrateKbps) * 1000);
+	if (peakBitrate > GSTREAMER_WEBRTCSINK_DEFAULT_MAX_BITRATE) {
+		arguments << QStringLiteral("max-bitrate=%1").arg(peakBitrate);
+	}
 	if (captureAudio) {
 		arguments << QStringLiteral("audio-caps=audio/x-opus");
 	}
@@ -1595,7 +1619,7 @@ ScreenShareExternalProcess::LaunchResult
 #endif
 	}
 
-	arguments << encoder.encoderElement;
+	arguments << encoder.encoderElement << QStringLiteral("name=%1").arg(GSTREAMER_PUBLISH_ENCODER_NAME);
 	arguments.append(encoder.properties);
 	arguments << QStringLiteral("!") << QStringLiteral("h264parse") << QStringLiteral("config-interval=-1")
 			  << QStringLiteral("!") << QStringLiteral("queue") << QStringLiteral("max-size-buffers=8")
@@ -1617,37 +1641,54 @@ ScreenShareExternalProcess::LaunchResult
 		}
 	}
 
-	if (!useTestPattern && captureSelection.browserWindowFollow
-		&& plan.value(QStringLiteral("_launch_attempt")).toInt() == 0) {
-		// Run the pipeline in-process (via the helper's --internal-gst-window-follow sub-mode) so the
-		// monitor crop tracks the Chromium window as it moves, instead of staying pinned to its start
-		// position. The pipeline tokens are forwarded verbatim after "--" and fed to gst_parse_launchv.
+#ifdef Q_OS_WIN
+	const bool runInProcess = plan.value(QStringLiteral("_launch_attempt")).toInt() == 0;
+#else
+	const bool runInProcess = false;
+#endif
+	const bool followWindow = !useTestPattern && captureSelection.browserWindowFollow;
+	if (runInProcess) {
+		// Run the pipeline in-process (via the helper's --internal-gst-pipeline sub-mode) so the
+		// encoder bitrate follows webrtcsink's congestion controller and, for browser captures, the
+		// monitor crop tracks the Chromium window as it moves. The pipeline tokens are forwarded
+		// verbatim after "--" and fed to gst_parse_launchv.
 		QStringList pipelineTokens = arguments;
 		pipelineTokens.removeOne(QStringLiteral("-e"));
 
-		QStringList followArguments;
-		followArguments << QStringLiteral("--internal-gst-window-follow")
-						<< QStringLiteral("--source-name=%1").arg(captureSelection.followSourceName)
-						<< QStringLiteral("--window-handle=%1").arg(captureSelection.followWindowHandle)
-						<< QStringLiteral("--gst-bin-dir=%1").arg(QFileInfo(support.gstLaunchPath).absolutePath())
-						<< QStringLiteral("--") << pipelineTokens;
+		QStringList inProcessArguments;
+		inProcessArguments << QStringLiteral("--internal-gst-pipeline")
+						   << QStringLiteral("--gst-bin-dir=%1").arg(QFileInfo(support.gstLaunchPath).absolutePath())
+						   << QStringLiteral("--bitrate-sink=sink")
+						   << QStringLiteral("--bitrate-encoder=%1").arg(GSTREAMER_PUBLISH_ENCODER_NAME)
+						   << QStringLiteral("--bitrate-kbps=%1").arg(encoder.bitrateKbps)
+						   << QStringLiteral("--max-bitrate-kbps=%1").arg(encoder.maxBitrateKbps)
+						   << QStringLiteral("--bitrate-property-scale=%1").arg(encoder.bitratePropertyScale);
+		if (encoder.costlyBitrateReconfigure) {
+			inProcessArguments << QStringLiteral("--bitrate-reconfigure-costly");
+		}
+		if (followWindow) {
+			inProcessArguments << QStringLiteral("--source-name=%1").arg(captureSelection.followSourceName)
+							   << QStringLiteral("--window-handle=%1").arg(captureSelection.followWindowHandle);
+		}
+		inProcessArguments << QStringLiteral("--") << pipelineTokens;
 
-		launch = prepareProcess(QCoreApplication::applicationFilePath(), followArguments, parent,
-							  QStringLiteral("gstreamer-livekit-publish-window-follow"));
+		launch = prepareProcess(QCoreApplication::applicationFilePath(), inProcessArguments, parent,
+								followWindow ? QStringLiteral("gstreamer-livekit-publish-window-follow")
+											 : QStringLiteral("gstreamer-livekit-publish-in-process"));
 		if (!launch.prepared) {
-			// Fall back to the static-crop gst-launch path so browser sharing still works (without
-			// follow) if the in-process pipeline could not start.
-			launchWarnings.append(QStringLiteral("Window-following capture could not start (%1); falling back to a "
-												 "fixed monitor crop that will not track window moves.")
+			// Fall back to gst-launch so sharing still works, at a fixed bitrate (and, for browser
+			// captures, with a fixed monitor crop that will not track window moves).
+			launchWarnings.append(QStringLiteral("The in-process publish pipeline could not start (%1); falling back "
+												 "to gst-launch at a fixed bitrate.")
 									  .arg(launch.errorMessage.trimmed()));
 			launch = prepareProcess(support.gstLaunchPath, arguments, parent,
-								  QStringLiteral("gstreamer-livekit-publish"));
+									QStringLiteral("gstreamer-livekit-publish"));
 		}
 	} else {
 		launch = prepareProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-publish"));
 	}
-	launch.hasNextAttempt = !useTestPattern && captureSelection.browserWindowFollow
-		&& plan.value(QStringLiteral("_launch_attempt")).toInt() == 0;
+	// If the in-process pipeline fails, the next attempt runs the same pipeline through gst-launch.
+	launch.hasNextAttempt = runInProcess;
 	launch.warnings += launchWarnings;
 	if (!launch.prepared) {
 		return launch;

@@ -109,6 +109,17 @@ practical codec; other codecs are advertised only when the packaged helper
 runtime can execute them. Resolution, FPS, and bitrate are clamped by client,
 helper, and server policy.
 
+On Windows the helper runs the GStreamer publish pipeline in-process
+(`--internal-gst-pipeline`) rather than through `gst-launch-1.0`. The helper
+feeds `livekitwebrtcsink` pre-encoded H.264 from its own encoder (NVENC D3D11,
+Media Foundation, x264 or OpenH264), so webrtcsink cannot adapt that encoder
+itself. Instead the helper reads the GCC estimate from `rtpgccbwe`, which runs on
+LiveKit's TWCC feedback, and sets the encoder bitrate from it. The bitrate stays
+between 300 kbit/s and the planned bitrate, and `max-bitrate` scales with it.
+Media Foundation re-creates its encoder on every bitrate change, so it follows
+only larger steps, at most every 5 s. If the in-process pipeline fails, the
+next attempt falls back to `gst-launch-1.0` at a fixed bitrate.
+
 Source/window/process-specific audio capture is enabled only when the required
 Windows/GStreamer elements are available. Missing audio support must surface as
 a capability warning rather than silently changing the requested session.

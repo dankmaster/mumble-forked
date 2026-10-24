@@ -9,6 +9,8 @@ add_executable(mumble-screen-helper
 	"ScreenShareExternalProcess.h"
 	"ScreenShareHelperServer.cpp"
 	"ScreenShareHelperServer.h"
+	"ScreenShareInProcessPipeline.cpp"
+	"ScreenShareInProcessPipeline.h"
 	"ScreenShareProcessJob.cpp"
 	"ScreenShareProcessJob.h"
 	"ScreenShareProcessOwner.cpp"
@@ -19,8 +21,6 @@ add_executable(mumble-screen-helper
 	"ScreenShareRelayClient.h"
 	"ScreenShareSessionPlanner.cpp"
 	"ScreenShareSessionPlanner.h"
-	"ScreenShareWindowFollowPipeline.cpp"
-	"ScreenShareWindowFollowPipeline.h"
 	"ScreenShareWindowsNativeCapture.cpp"
 	"ScreenShareWindowsNativeCapture.h"
 )
