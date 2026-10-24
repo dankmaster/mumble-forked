@@ -196,8 +196,8 @@ TestCase {
 		verify(box.visible)
 		compare(box.height, 152)
 		// Spotify's player shows the cover, title and artist itself.
-		verify(!findChild(card, "embedCardAudio").visible)
-		verify(!findChild(card, "embedCardAudioPlay").visible)
+		verify(!findChild(card, "embedCardSpotify").visible)
+		verify(!findChild(card, "embedCardSpotifyPlay").visible)
 	}
 
 	function test_a_native_player_keeps_the_cards_text() {
@@ -238,7 +238,13 @@ TestCase {
 		compare(card.family, "audio")
 		compare(card.audioKind, "Album")
 		compare(findChild(card, "embedCardHeader").text, "Spotify")
-		verify(findChild(card, "embedCardAudioPlay").visible)
+		// Spotify looks like its own embed: its panel and round play button.
+		verify(card.spotifyStyle)
+		verify(findChild(card, "embedCardSpotify").visible)
+		verify(!findChild(card, "embedCardAudio").visible)
+		const spotifyPlaySpy = createTemporaryObject(spyComponent, testCase, { "target": card, "signalName": "playRequested" })
+		mouseClick(findChild(card, "embedCardSpotifyPlay"))
+		compare(spotifyPlaySpy.count, 1)
 		const track = documentFor("media", "soundcloud", "SoundCloud", {
 			"source": { "url": "https://soundcloud.com/forss/flickermood" },
 			"content": { "type": "audio", "title": "Flickermood", "author": { "name": "Forss" } },
@@ -249,6 +255,8 @@ TestCase {
 		compare(soundCloud.family, "audio")
 		compare(soundCloud.audioKind, "Track")
 		compare(soundCloud.byline, "Forss")
+		verify(!soundCloud.spotifyStyle)
+		verify(findChild(soundCloud, "embedCardAudioPlay").visible)
 	}
 
 	function test_header_falls_back_to_the_providers_own_line() {

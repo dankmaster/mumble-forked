@@ -65,6 +65,7 @@ Rectangle {
 	readonly property string imageSource: stillSource(firstMedia)
 		|| managedImage(preview ? preview.thumbnailUrl : "")
 	readonly property string family: familyFor()
+	readonly property bool spotifyStyle: family === "audio" && providerId === "spotify"
 	// A store's or gallery's lead picture is a picture: only a video in front plays.
 	readonly property bool canPlay: String(playback.mode || "none") !== "none"
 		&& (family === "video" || family === "audio" || family === "post"
@@ -388,11 +389,133 @@ Rectangle {
 			}
 		}
 
+		// Spotify looks like Spotify's own embed until it plays (then it is that
+		// embed): the cover's colours behind it, a large cover, light text and a
+		// round green play button.
+		Rectangle {
+			id: spotifyPanel
+			objectName: "embedCardSpotify"
+			visible: root.spotifyStyle && !root.playerShowsContent
+			width: parent.width
+			height: visible ? 136 : 0
+			radius: Theme.innerRadius - 2
+			color: "#282828"
+			clip: true
+
+			MultiEffect {
+				anchors.fill: parent
+				visible: spotifyCover.status === Image.Ready
+				source: spotifyCover
+				autoPaddingEnabled: false
+				blurEnabled: true
+				blur: 1.0
+				blurMax: 64
+				brightness: -0.38
+				saturation: 0.25
+			}
+			Rectangle {
+				id: spotifyCoverFrame
+				x: 12
+				y: 12
+				width: 112
+				height: 112
+				radius: 6
+				color: "#3e3e3e"
+				clip: true
+
+				ModernIcon {
+					anchors.centerIn: parent
+					visible: spotifyCover.status !== Image.Ready
+					name: "volume"
+					size: 32
+					color: "#b3b3b3"
+				}
+				Image {
+					id: spotifyCover
+					anchors.fill: parent
+					source: root.spotifyStyle ? root.imageSource : ""
+					sourceSize: Qt.size(224, 224)
+					fillMode: Image.PreserveAspectCrop
+					asynchronous: true
+				}
+			}
+			Column {
+				anchors.left: spotifyCoverFrame.right
+				anchors.leftMargin: 14
+				anchors.right: parent.right
+				anchors.rightMargin: 12
+				y: 14
+				spacing: 3
+
+				Text {
+					width: parent.width
+					visible: text.length > 0
+					text: root.audioKind
+					textFormat: Text.PlainText
+					elide: Text.ElideRight
+					color: "#e6ffffff"
+					font.pixelSize: Theme.fontCaption
+					font.weight: Font.DemiBold
+				}
+				Text {
+					width: parent.width
+					text: root.title || root.description
+					textFormat: Text.PlainText
+					wrapMode: Text.Wrap
+					elide: Text.ElideRight
+					maximumLineCount: 2
+					color: "#ffffff"
+					font.pixelSize: Theme.fontTitle + 2
+					font.weight: Font.Bold
+				}
+				Text {
+					width: parent.width
+					visible: text.length > 0
+					text: root.byline
+					textFormat: Text.PlainText
+					elide: Text.ElideRight
+					maximumLineCount: 1
+					color: "#b3ffffff"
+					font.pixelSize: Theme.fontLabel
+				}
+			}
+			Rectangle {
+				objectName: "embedCardSpotifyPlay"
+				visible: root.canPlay && !root.playing
+				anchors.right: parent.right
+				anchors.bottom: parent.bottom
+				anchors.margins: 12
+				width: 44
+				height: 44
+				radius: 22
+				color: spotifyPlayArea.containsMouse ? "#3be477" : "#1ed760"
+				scale: spotifyPlayArea.containsMouse ? 1.05 : 1
+				Accessible.role: Accessible.Button
+				Accessible.name: qsTr("Play")
+				Accessible.onPressAction: root.playRequested(0)
+
+				ModernIcon {
+					anchors.centerIn: parent
+					anchors.horizontalCenterOffset: 1
+					name: "play"
+					size: 18
+					color: "#000000"
+				}
+				MouseArea {
+					id: spotifyPlayArea
+					anchors.fill: parent
+					hoverEnabled: true
+					cursorShape: Qt.PointingHandCursor
+					onClicked: root.playRequested(0)
+				}
+			}
+		}
+
 		// Audio: cover, what it is, title and artist, and a play button; the
 		// player opens below.
 		Row {
 			objectName: "embedCardAudio"
-			visible: root.family === "audio" && !root.playerShowsContent
+			visible: root.family === "audio" && !root.spotifyStyle && !root.playerShowsContent
 			width: parent.width
 			spacing: Theme.space3
 
@@ -458,7 +581,7 @@ Rectangle {
 		}
 		Rectangle {
 			objectName: "embedCardAudioPlay"
-			visible: root.family === "audio" && root.canPlay && !root.playing
+			visible: root.family === "audio" && !root.spotifyStyle && root.canPlay && !root.playing
 			width: audioPlayRow.implicitWidth + Theme.space3 * 2
 			height: 30
 			radius: 15
