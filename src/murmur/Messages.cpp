@@ -10159,8 +10159,6 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 	ZoneScoped;
 
 	MSG_SETUP(ServerUser::Authenticated);
-	// Each create broadcasts state to the whole channel and signs a relay token per member.
-	RATELIMIT(uSource);
 
 	auto deny = [&](const QString &reason) {
 		screenShareDiagnosticLog(QStringLiteral("Denied create from session %1 in channel %2: %3")
@@ -10173,6 +10171,13 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 		denied.set_reason(u8(reason));
 		sendMessage(uSource, denied);
 	};
+
+	// Each create broadcasts state to the whole channel and signs a relay token per member. The bucket
+	// is shared with text messages, so say why instead of dropping the request silently.
+	if (uSource->leakyBucket.ratelimit(1)) {
+		deny(QStringLiteral("Too many requests. Wait a moment and start the screen share again."));
+		return;
+	}
 
 	if (!bScreenShareEnabled) {
 		deny(QStringLiteral("Screen sharing is disabled on this server."));
