@@ -10159,6 +10159,8 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 	ZoneScoped;
 
 	MSG_SETUP(ServerUser::Authenticated);
+	// Each create broadcasts state to the whole channel and signs a relay token per member.
+	RATELIMIT(uSource);
 
 	auto deny = [&](const QString &reason) {
 		screenShareDiagnosticLog(QStringLiteral("Denied create from session %1 in channel %2: %3")
@@ -10216,6 +10218,12 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 	requestedCodecs = Mumble::ScreenShare::sanitizeCodecList(requestedCodecs);
 	const MumbleProto::ScreenShareRelayTransport relayTransport =
 		Mumble::ScreenShare::relayTransportFromUrl(qsScreenShareRelayUrl);
+	if (relayTransport == MumbleProto::ScreenShareRelayTransportWebRTC && !hasLiveKitScreenShareRelayConfig()) {
+		// Without the LiveKit key and secret the relay rejects every join token, so the share would only
+		// look active.
+		deny(QStringLiteral("Screen sharing is unavailable because the relay credentials are not configured."));
+		return;
+	}
 	const QList< int > preferredCodecs = Mumble::ScreenShare::isWebRtcRelayTransport(relayTransport)
 											 ? Mumble::ScreenShare::webRtcRelayCodecPreferenceList()
 											 : qlPreferredScreenShareCodecs;
@@ -10330,177 +10338,16 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 void Server::msgScreenShareState(ServerUser *, MumbleProto::ScreenShareState &) {
 }
 
-void Server::msgScreenShareOffer(ServerUser *uSource, MumbleProto::ScreenShareOffer &msg) {
-	ZoneScoped;
-
-	MSG_SETUP(ServerUser::Authenticated);
-
-	if (!msg.has_stream_id()) {
-		return;
-	}
-
-	const QString streamID = u8(msg.stream_id());
-	if (!qhScreenShareStreams.contains(streamID)) {
-		return;
-	}
-
-	const ScreenShareStream &stream = qhScreenShareStreams.value(streamID);
-	Channel *channel                = screenShareScopeChannel(stream.scope, stream.uiScopeID);
-	if (!channel || uSource->cChannel != channel) {
-		return;
-	}
-
-	const bool isOwner = uSource->uiSession == stream.uiOwnerSession;
-	ServerUser *target = nullptr;
-	if (isOwner) {
-		if (!msg.has_viewer_session()) {
-			return;
-		}
-
-		target = qhUsers.value(msg.viewer_session());
-		if (!target || target->cChannel != channel || !supportsScreenShareView(target)
-			|| !target->qlSupportedScreenShareCodecs.contains(static_cast< int >(stream.codec))) {
-			return;
-		}
-	} else {
-		if (!supportsScreenShareView(uSource)
-			|| !uSource->qlSupportedScreenShareCodecs.contains(static_cast< int >(stream.codec))) {
-			return;
-		}
-
-		target = qhUsers.value(stream.uiOwnerSession);
-		if (!target || target->cChannel != channel || !supportsScreenShareCapture(target)) {
-			return;
-		}
-
-		msg.set_viewer_session(uSource->uiSession);
-	}
-
-	msg.set_stream_id(u8(stream.qsStreamID));
-	msg.set_owner_session(stream.uiOwnerSession);
-	if (!stream.qsRelayRoomID.isEmpty()) {
-		msg.set_relay_room_id(u8(stream.qsRelayRoomID));
-	}
-	screenShareDiagnosticLog(QStringLiteral("Forwarding offer stream=%1 from=%2 to=%3 viewer=%4 sdp_bytes=%5")
-								 .arg(stream.qsStreamID)
-								 .arg(uSource->uiSession)
-								 .arg(target ? target->uiSession : 0)
-								 .arg(msg.has_viewer_session() ? msg.viewer_session() : 0)
-								 .arg(msg.has_sdp() ? msg.sdp().size() : 0));
-	sendMessage(target, msg);
+// Media negotiation happens between the helper runtimes and the LiveKit relay. Offer, answer and ICE
+// messages are kept in the protocol for compatibility but are no longer relayed: no client consumes
+// them, and forwarding unbounded SDP between users only gave them a free side channel.
+void Server::msgScreenShareOffer(ServerUser *, MumbleProto::ScreenShareOffer &) {
 }
 
-void Server::msgScreenShareAnswer(ServerUser *uSource, MumbleProto::ScreenShareAnswer &msg) {
-	ZoneScoped;
-
-	MSG_SETUP(ServerUser::Authenticated);
-
-	if (!msg.has_stream_id()) {
-		return;
-	}
-
-	const QString streamID = u8(msg.stream_id());
-	if (!qhScreenShareStreams.contains(streamID)) {
-		return;
-	}
-
-	const ScreenShareStream &stream = qhScreenShareStreams.value(streamID);
-	Channel *channel                = screenShareScopeChannel(stream.scope, stream.uiScopeID);
-	if (!channel || uSource->cChannel != channel) {
-		return;
-	}
-
-	const bool isOwner = uSource->uiSession == stream.uiOwnerSession;
-	ServerUser *target = nullptr;
-	if (isOwner) {
-		if (!msg.has_viewer_session()) {
-			return;
-		}
-
-		target = qhUsers.value(msg.viewer_session());
-		if (!target || target->cChannel != channel || !supportsScreenShareView(target)) {
-			return;
-		}
-	} else {
-		if (!supportsScreenShareView(uSource)) {
-			return;
-		}
-
-		target = qhUsers.value(stream.uiOwnerSession);
-		if (!target || target->cChannel != channel || !supportsScreenShareCapture(target)) {
-			return;
-		}
-
-		msg.set_viewer_session(uSource->uiSession);
-	}
-
-	msg.set_stream_id(u8(stream.qsStreamID));
-	msg.set_owner_session(stream.uiOwnerSession);
-	if (!stream.qsRelayRoomID.isEmpty()) {
-		msg.set_relay_room_id(u8(stream.qsRelayRoomID));
-	}
-	screenShareDiagnosticLog(QStringLiteral("Forwarding answer stream=%1 from=%2 to=%3 viewer=%4 sdp_bytes=%5")
-								 .arg(stream.qsStreamID)
-								 .arg(uSource->uiSession)
-								 .arg(target ? target->uiSession : 0)
-								 .arg(msg.has_viewer_session() ? msg.viewer_session() : 0)
-								 .arg(msg.has_sdp() ? msg.sdp().size() : 0));
-	sendMessage(target, msg);
+void Server::msgScreenShareAnswer(ServerUser *, MumbleProto::ScreenShareAnswer &) {
 }
 
-void Server::msgScreenShareIceCandidate(ServerUser *uSource, MumbleProto::ScreenShareIceCandidate &msg) {
-	ZoneScoped;
-
-	MSG_SETUP(ServerUser::Authenticated);
-
-	if (!msg.has_stream_id()) {
-		return;
-	}
-
-	const QString streamID = u8(msg.stream_id());
-	if (!qhScreenShareStreams.contains(streamID)) {
-		return;
-	}
-
-	const ScreenShareStream &stream = qhScreenShareStreams.value(streamID);
-	Channel *channel                = screenShareScopeChannel(stream.scope, stream.uiScopeID);
-	if (!channel || uSource->cChannel != channel) {
-		return;
-	}
-
-	const bool isOwner = uSource->uiSession == stream.uiOwnerSession;
-	ServerUser *target = nullptr;
-	if (isOwner) {
-		if (!msg.has_viewer_session()) {
-			return;
-		}
-
-		target = qhUsers.value(msg.viewer_session());
-		if (!target || target->cChannel != channel || !supportsScreenShareView(target)) {
-			return;
-		}
-	} else {
-		if (!supportsScreenShareView(uSource)) {
-			return;
-		}
-
-		target = qhUsers.value(stream.uiOwnerSession);
-		if (!target || target->cChannel != channel || !supportsScreenShareCapture(target)) {
-			return;
-		}
-
-		msg.set_viewer_session(uSource->uiSession);
-	}
-
-	msg.set_stream_id(u8(stream.qsStreamID));
-	msg.set_owner_session(stream.uiOwnerSession);
-	screenShareDiagnosticLog(QStringLiteral("Forwarding ICE stream=%1 from=%2 to=%3 viewer=%4 candidate_bytes=%5")
-								 .arg(stream.qsStreamID)
-								 .arg(uSource->uiSession)
-								 .arg(target ? target->uiSession : 0)
-								 .arg(msg.has_viewer_session() ? msg.viewer_session() : 0)
-								 .arg(msg.has_candidate() ? msg.candidate().size() : 0));
-	sendMessage(target, msg);
+void Server::msgScreenShareIceCandidate(ServerUser *, MumbleProto::ScreenShareIceCandidate &) {
 }
 
 void Server::msgScreenShareStop(ServerUser *uSource, MumbleProto::ScreenShareStop &msg) {
