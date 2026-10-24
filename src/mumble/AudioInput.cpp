@@ -93,7 +93,13 @@ static Mumble::InputEnhancement::CpuClass currentInputEnhancementCpuClass(
 		const AutoV2::CapabilityProbeResult result = AutoV2::cachedCapabilityProbe(key);
 		measured = result.valid ? result.cpuTier : CpuClass::Low;
 	} else if (profile == Profile::Quality || profile == Profile::VoiceFocus) {
-		measured = verifier->manualProfileCpuClass();
+		// Never hold capture start on the capability probe: it loads a second
+		// model and paces a second of realtime frames. A probe completed in this
+		// session is honored. Otherwise the explicit selection is trusted; the
+		// realtime worker absorbs isolated late frames and still fails closed to
+		// Original when inference cannot keep up on this machine.
+		const std::optional< CpuClass > probed = verifier->cachedManualProfileCpuClass();
+		measured = probed ? *probed : verifier->verificationHealthy() ? CpuClass::High : CpuClass::Low;
 	} else if (profile == Profile::Balanced && BackendAvailability::compiled().rnnoise) {
 		measured = CpuClass::Standard;
 	}

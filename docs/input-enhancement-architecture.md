@@ -111,7 +111,10 @@ frames at the 10 ms callback period with the worker at its realtime priority,
 excludes ten warm-up frames of the freshly reset model, and measures 90 frames.
 It requires an 8 ms worker p99 and at most two late frames; a single outlier is
 absorbed by the worker and no longer hides the profiles. A failing attempt is
-retried once.
+retried once. The probe runs in the background when the audio-input settings
+open and never delays capture: until it has completed in the current session,
+an explicitly selected Quality or Voice Focus profile starts immediately and
+relies on the worker's sustained-lateness fallback.
 
 `Original` does not construct a product pipeline or model. Source-contract and
 E2E tests compare input PCM, pre-Opus PCM, encoded Opus payloads, packet counts
