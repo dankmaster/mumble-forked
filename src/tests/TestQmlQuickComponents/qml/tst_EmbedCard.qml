@@ -187,6 +187,9 @@ TestCase {
 		mouseClick(open)
 		compare(openSpy.count, 1)
 		compare(openSpy.signalArguments[0][0], card.sourceUrl)
+		const all = samples()
+		for (const kind in all)
+			verify(findChild(cardFor(all[kind]), "embedCardOpenButton").visible, kind + " opens in the browser")
 	}
 
 	function test_play_asks_the_view_and_the_box_takes_the_players_height() {

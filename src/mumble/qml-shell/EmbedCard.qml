@@ -36,7 +36,10 @@ Rectangle {
 	readonly property var threadItems: document.thread ? (document.thread.items || []) : []
 	readonly property string providerId: String(providerInfo.id || "")
 	readonly property string providerLabel: String(providerInfo.label || providerInfo.host || preview.host || "")
-	readonly property string sourceUrl: safeExternalUrl(document.source ? document.source.url : preview.url)
+	// The link the message carries, for previews that lost their own address.
+	property string fallbackUrl: ""
+	readonly property string sourceUrl: safeExternalUrl((document.source && document.source.url)
+		|| (preview && preview.url) || fallbackUrl)
 	readonly property string title: {
 		const value = String(content.title || "").trim()
 		// Neither the provider's name nor a media file's name says anything new.

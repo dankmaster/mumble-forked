@@ -460,6 +460,7 @@ ChatMessageFrame {
 
 					EmbedCard {
 						preview: row.preview
+						fallbackUrl: (String(row.plainText || "").match(/https?:\/\/[^\s<>"']+/i) || [""])[0]
 						width: previewSlot.width
 						playing: !!row.view && row.view.playingStableId === row.stableId
 						playerHeight: playing && row.view ? row.view.inRowPlayerHeight(mediaBox.width) : 0
