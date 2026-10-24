@@ -28,6 +28,14 @@ For small Windows-heavy groups, this keeps Murmur out of the media path and
 avoids server-side transcoding. LiveKit sessions are executed by the bundled
 GStreamer helper; the old browser/WebRTC relay fallback is no longer shipped.
 
+Run LiveKit server v1.13.3 or newer, and pin the image to an exact tag such as
+`livekit/livekit-server:v1.13.10` instead of `latest`, which keeps whatever
+version was pulled first. The GStreamer LiveKit publisher bundles its data
+channel with the video. Older servers, for example v1.9.12, never start the
+SCTP association for that data channel. After about six minutes the
+publisher's SCTP stack gives up (`SCTP_CANT_STR_ASSOC`), and `webrtcsink` then
+ends the whole WebRTC session, so every share freezes after six minutes.
+
 ### Server Config
 
 Use these settings in `mumble-server.ini`:
