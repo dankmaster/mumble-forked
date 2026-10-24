@@ -1,12 +1,9 @@
 name: CodeQL
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    branches:
-      - master
+  # Weekly rather than per push: this builds the Linux server again on top of CI.
+  schedule:
+    - cron: "30 3 * * 1"
   workflow_dispatch:
 
 permissions:
