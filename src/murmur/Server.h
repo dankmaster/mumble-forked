@@ -577,6 +577,8 @@ public:
 	bool supportsScreenShareView(const ServerUser *user) const;
 	Channel *screenShareScopeChannel(MumbleProto::ScreenShareScope scope, unsigned int scopeID) const;
 	bool hasLiveKitScreenShareRelayConfig() const;
+	bool screenShareRelayCredentialsNeedRefresh(const ScreenShareStream &stream) const;
+	void refreshExpiringScreenShareRelayCredentials();
 	void ensureFreshScreenShareRelayCredentials(ScreenShareStream &stream);
 	QString screenShareRelayTokenForRecipient(const ScreenShareStream &stream, const ServerUser *recipient) const;
 	QString liveKitScreenShareTokenForRecipient(const ScreenShareStream &stream, const ServerUser *recipient,

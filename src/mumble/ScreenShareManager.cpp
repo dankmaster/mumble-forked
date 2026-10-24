@@ -615,12 +615,16 @@ void ScreenShareManager::requestStartViewing(const QString &streamID) {
 	}
 
 	m_manualViewRetryRequired.remove(streamID);
+	m_dismissedViewSessions.remove(streamID);
 	startLocalViewSession(it.value());
 	emit sessionUpdated(streamID);
 }
 
 void ScreenShareManager::requestStopViewing(const QString &streamID) {
 	const bool knownSession = m_sessions.contains(streamID);
+	if (knownSession) {
+		m_dismissedViewSessions.insert(streamID);
+	}
 	stopLocalViewSession(streamID);
 	if (knownSession) {
 		emit sessionUpdated(streamID);
@@ -696,6 +700,7 @@ void ScreenShareManager::resetState() {
 	m_pendingExternalViewAudioPreferenceSaves.clear();
 	m_pausedExternalViewSessions.clear();
 	m_manualViewRetryRequired.clear();
+	m_dismissedViewSessions.clear();
 
 	m_activePublishSessions.clear();
 	m_pendingPublishSessions.clear();
@@ -802,7 +807,7 @@ ScreenShareSession ScreenShareManager::sessionFromState(const MumbleProto::Scree
 	return session;
 }
 
-bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) const {
+bool ScreenShareManager::canPublishSession(const ScreenShareSession &session, const RelayTokenCheck tokenCheck) const {
 	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
 	if (!Global::get().bScreenShareEnabled || !Global::get().serverHandlerSnapshot()) {
 		return false;
@@ -814,7 +819,8 @@ bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) co
 	if (!Mumble::ScreenShare::isValidRelayUrl(session.relayUrl) || session.relayRoomID.trimmed().isEmpty()) {
 		return false;
 	}
-	if (!session.relayToken.isEmpty() && tokenExpired(session.relayTokenExpiresAt)) {
+	if (tokenCheck == RelayTokenCheck::RequireFresh && !session.relayToken.isEmpty()
+		&& tokenExpired(session.relayTokenExpiresAt)) {
 		return false;
 	}
 	if (Mumble::ScreenShare::relayTransportRequiresSignaling(session.relayTransport)
@@ -837,7 +843,7 @@ bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) co
 	return capabilities.supportedCodecs.contains(static_cast< int >(session.codec));
 }
 
-bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const {
+bool ScreenShareManager::canViewSession(const ScreenShareSession &session, const RelayTokenCheck tokenCheck) const {
 	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
 	if (!Global::get().bScreenShareEnabled || session.ownerSession == Global::get().uiSession
 		|| session.state != MumbleProto::ScreenShareLifecycleStateActive) {
@@ -846,7 +852,8 @@ bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const
 	if (!Mumble::ScreenShare::isValidRelayUrl(session.relayUrl) || session.relayRoomID.trimmed().isEmpty()) {
 		return false;
 	}
-	if (!session.relayToken.isEmpty() && tokenExpired(session.relayTokenExpiresAt)) {
+	if (tokenCheck == RelayTokenCheck::RequireFresh && !session.relayToken.isEmpty()
+		&& tokenExpired(session.relayTokenExpiresAt)) {
 		return false;
 	}
 	if (Mumble::ScreenShare::relayTransportRequiresSignaling(session.relayTransport)
@@ -879,8 +886,20 @@ bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const
 		   && self->cChannel->iId == session.scopeID;
 }
 
+bool ScreenShareManager::hasLocalPublishRuntime(const QString &streamID) const {
+	return m_activePublishSessions.contains(streamID) || m_pendingPublishSessions.contains(streamID)
+		   || m_pendingPublishRestarts.contains(streamID);
+}
+
+bool ScreenShareManager::hasLocalViewRuntime(const QString &streamID) const {
+	return m_activeViewSessions.contains(streamID) || m_pendingViewSessions.contains(streamID)
+		   || m_pendingViewRestarts.contains(streamID) || m_pausedExternalViewSessions.contains(streamID);
+}
+
 bool ScreenShareManager::shouldAutoViewSession(const ScreenShareSession &session) const {
-	Q_UNUSED(session);
+	if (m_dismissedViewSessions.contains(session.streamID)) {
+		return false;
+	}
 
 	if (const std::optional< bool > override = envFlagOverride("MUMBLE_SCREENSHARE_AUTOVIEW"); override.has_value()) {
 		return override.value();
@@ -1545,13 +1564,16 @@ void ScreenShareManager::reconcileSession(const ScreenShareSession &session) {
 #if defined(MUMBLE_HAS_MODERN_UI_MOCKUPS) || defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	if (m_visualFixtureStreams.contains(session.streamID)) return;
 #endif
-	if (canPublishSession(session)) {
+	const bool publishRuntime = hasLocalPublishRuntime(session.streamID);
+	if (canPublishSession(session,
+						  publishRuntime ? RelayTokenCheck::AllowExpired : RelayTokenCheck::RequireFresh)) {
 		startLocalPublishSession(session);
 	} else {
 		stopLocalPublishSession(session.streamID);
 	}
 
-	if (canViewSession(session)) {
+	if (canViewSession(session, hasLocalViewRuntime(session.streamID) ? RelayTokenCheck::AllowExpired
+																	   : RelayTokenCheck::RequireFresh)) {
 		if (m_activeViewSessions.contains(session.streamID)
 			|| m_pausedExternalViewSessions.contains(session.streamID)) {
 			m_announcedViewableSessions.remove(session.streamID);
@@ -1599,6 +1621,7 @@ void ScreenShareManager::handleScreenShareStop(const MumbleProto::ScreenShareSto
 	const QString reason   = msg.has_reason() ? u8(msg.reason()) : QString();
 	m_locallyTerminatedPublishSessions.remove(streamID);
 	m_announcedViewableSessions.remove(streamID);
+	m_dismissedViewSessions.remove(streamID);
 	stopLocalHelperSessions(streamID);
 	if (!m_sessions.contains(streamID)) {
 		if (!reason.isEmpty() && Global::get().l) {

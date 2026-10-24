@@ -127,11 +127,19 @@ signals:
 	void sessionStopped(const QString &streamID);
 
 private:
+	// A relay token is only presented when a helper runtime joins the relay, so an expired token must
+	// block new starts but never tear down a runtime that is already publishing or viewing.
+	enum class RelayTokenCheck { RequireFresh, AllowExpired };
+
 	ScreenShareSession sessionFromState(const MumbleProto::ScreenShareState &msg) const;
 	void reconcileSession(const ScreenShareSession &session);
 	void reconcileSessionsAfterCapabilityRefresh();
-	bool canViewSession(const ScreenShareSession &session) const;
-	bool canPublishSession(const ScreenShareSession &session) const;
+	bool canViewSession(const ScreenShareSession &session,
+						RelayTokenCheck tokenCheck = RelayTokenCheck::RequireFresh) const;
+	bool canPublishSession(const ScreenShareSession &session,
+						   RelayTokenCheck tokenCheck = RelayTokenCheck::RequireFresh) const;
+	bool hasLocalPublishRuntime(const QString &streamID) const;
+	bool hasLocalViewRuntime(const QString &streamID) const;
 	bool shouldAutoViewSession(const ScreenShareSession &session) const;
 	bool restartExternalViewSession(const ScreenShareSession &session);
 	void retryExternalViewSession(const QString &streamID);
@@ -178,6 +186,8 @@ private:
 	QTimer m_externalViewAudioPreferenceSaveTimer;
 	QSet< QString > m_pausedExternalViewSessions;
 	QSet< QString > m_manualViewRetryRequired;
+	// Viewers the user closed. Periodic state refreshes must not auto-open them again.
+	QSet< QString > m_dismissedViewSessions;
 	QSet< QString > m_announcedViewableSessions;
 	QTimer m_externalRuntimeWatchdogTimer;
 	mutable QString m_lastLoggedAvailabilityContext;

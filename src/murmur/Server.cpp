@@ -85,7 +85,9 @@ namespace msdb = ::mumble::server::db;
 namespace {
 constexpr quint64 SERVER_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC  = 5ULL * 60ULL * 1000ULL;
 constexpr quint64 LIVEKIT_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC = 5ULL * 60ULL * 1000ULL;
-constexpr quint64 SCREEN_SHARE_RELAY_TOKEN_REFRESH_SKEW_MSEC     = 60ULL * 1000ULL;
+// Refresh well before expiry: active streams are re-sent from the 15.5 s timeout sweep, and a client
+// whose clock runs ahead must still see a valid token when the refreshed state arrives.
+constexpr quint64 SCREEN_SHARE_RELAY_TOKEN_REFRESH_SKEW_MSEC     = 2ULL * 60ULL * 1000ULL;
 constexpr int SERVER_LOG_BACKLOG_MAX_ENTRIES                     = 200;
 constexpr unsigned int SERVER_LOG_ENTRY_MAX_BYTES                = 32U * 1024U;
 constexpr unsigned int SERVER_LOG_BACKLOG_MAX_BYTES              = 512U * 1024U;
@@ -1718,6 +1720,28 @@ Channel *Server::screenShareScopeChannel(const MumbleProto::ScreenShareScope sco
 	return nullptr;
 }
 
+bool Server::screenShareRelayCredentialsNeedRefresh(const ScreenShareStream &stream) const {
+	if (Mumble::ScreenShare::isDirectRelayTransport(stream.relayTransport)) {
+		return false;
+	}
+
+	const quint64 now = static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch());
+	return stream.uiRelayTokenExpiresAt == 0
+		   || now + SCREEN_SHARE_RELAY_TOKEN_REFRESH_SKEW_MSEC >= stream.uiRelayTokenExpiresAt;
+}
+
+void Server::refreshExpiringScreenShareRelayCredentials() {
+	// Relay tokens are short-lived and only minted when a state message is built. Re-send the state of
+	// every stream that is about to expire so viewers already in the channel can still start (or
+	// restart) watching, and a publisher can restart its runtime, long after the share was created.
+	for (auto it = qhScreenShareStreams.begin(); it != qhScreenShareStreams.end(); ++it) {
+		if (it->state == MumbleProto::ScreenShareLifecycleStateActive && it->uiRelayTokenExpiresAt > 0
+			&& screenShareRelayCredentialsNeedRefresh(it.value())) {
+			sendScreenShareStateToAudience(it.value());
+		}
+	}
+}
+
 void Server::ensureFreshScreenShareRelayCredentials(ScreenShareStream &stream) {
 	const quint64 now = static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch());
 	if (Mumble::ScreenShare::isDirectRelayTransport(stream.relayTransport)) {
@@ -1734,8 +1758,7 @@ void Server::ensureFreshScreenShareRelayCredentials(ScreenShareStream &stream) {
 		(stream.relayTransport == MumbleProto::ScreenShareRelayTransportWebRTC && hasLiveKitScreenShareRelayConfig())
 			? LIVEKIT_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC
 			: SERVER_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC;
-	if (stream.uiRelayTokenExpiresAt > 0
-		&& now + SCREEN_SHARE_RELAY_TOKEN_REFRESH_SKEW_MSEC < stream.uiRelayTokenExpiresAt) {
+	if (!screenShareRelayCredentialsNeedRefresh(stream)) {
 		return;
 	}
 
@@ -3341,6 +3364,8 @@ void Server::checkTimeout() {
 	for (ServerUser *u : qlClose) {
 		u->disconnectSocket(true);
 	}
+
+	refreshExpiringScreenShareRelayCredentials();
 }
 
 void Server::tcpTransmitData(QByteArray a, unsigned int id) {

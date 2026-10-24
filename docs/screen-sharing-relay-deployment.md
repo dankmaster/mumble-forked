@@ -141,6 +141,13 @@ Murmur so newly minted screen-share tokens are signed with the new secret. Old
 join tokens are intentionally short-lived and should expire without manual
 cleanup.
 
+Join tokens live for five minutes. LiveKit only checks them when a participant
+joins, so an expired token never interrupts a running publisher or viewer.
+Murmur re-sends the state of every active share to its channel about two
+minutes before the tokens expire. That way a viewer who has been in the
+channel for a while can still start watching, and a runtime that restarts
+always has a valid token.
+
 ### Relay Hardening Checklist
 
 - Serve the LiveKit WebSocket over TLS from the public
