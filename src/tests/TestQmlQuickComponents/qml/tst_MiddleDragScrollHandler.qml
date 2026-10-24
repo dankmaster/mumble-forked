@@ -1144,6 +1144,18 @@ TestCase {
 			flickable.originY + flickable.contentHeight - flickable.height)
 	}
 
+	// A bottom-to-top chat keeps a short conversation against the composer, with
+	// contentY below originY. The wheel must leave it there, not pull it to the top.
+	function test_wheel_leaves_content_that_fits_where_it_rests() {
+		flickable.contentHeight = 120
+		flickable.contentY = flickable.originY - 80
+		const resting = flickable.contentY
+		middleDrag.queueSmoothWheelDelta(120)
+		middleDrag.queueSmoothWheelDelta(-120)
+		wait(200)
+		compare(flickable.contentY, resting)
+	}
+
 	function test_attached_scrollbar_records_pointer_order_supporting_evidence() {
 		recordingScrollBar = true
 		flickable.contentY = 180

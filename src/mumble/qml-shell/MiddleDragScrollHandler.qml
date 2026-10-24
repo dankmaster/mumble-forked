@@ -82,6 +82,10 @@ MouseArea {
 	}
 
 	function clampedContentY(value) {
+		// Content that fits rests where its list put it: a bottom-to-top chat
+		// keeps a short conversation against the composer, not at originY.
+		if (targetFlickable.contentHeight <= targetFlickable.height)
+			return targetFlickable.contentY
 		const minimum = targetFlickable.originY
 		const maximum = minimum + Math.max(0,
 			targetFlickable.contentHeight - targetFlickable.height)
@@ -179,7 +183,7 @@ MouseArea {
 	function wheelPendingRange(currentY, stepMagnitude) {
 		return {
 			"maximumDistance": Math.max(stepMagnitude, maximumWheelBufferedDistance),
-			"minimumPending": targetFlickable.originY - currentY,
+			"minimumPending": clampedContentY(Number.NEGATIVE_INFINITY) - currentY,
 			"maximumPending": clampedContentY(Number.POSITIVE_INFINITY) - currentY
 		}
 	}
