@@ -104,7 +104,33 @@ namespace {
 		if (host == QLatin1String("twitch.tv") || host.endsWith(QLatin1String(".twitch.tv"))) {
 			return QStringLiteral("twitch");
 		}
+		if (host == QLatin1String("hltv.org")) {
+			return QStringLiteral("hltv");
+		}
+		if (host == QLatin1String("liquipedia.net")) {
+			return QStringLiteral("liquipedia");
+		}
+		if (host == QLatin1String("faceit.com")) {
+			return QStringLiteral("faceit");
+		}
+		if (host == QLatin1String("leetify.com")) {
+			return QStringLiteral("leetify");
+		}
+		if (host == QLatin1String("csstats.gg")) {
+			return QStringLiteral("csstats");
+		}
+		if (host == QLatin1String("csst.at")) {
+			return QStringLiteral("csstat");
+		}
 		return {};
+	}
+
+	// Esports and Counter-Strike stats sites (EsportsPreview): players, teams,
+	// matches, events and news.
+	bool isEsportsProvider(const QString &provider) {
+		return provider == QLatin1String("hltv") || provider == QLatin1String("liquipedia")
+			|| provider == QLatin1String("faceit") || provider == QLatin1String("leetify")
+			|| provider == QLatin1String("csstats") || provider == QLatin1String("csstat");
 	}
 
 	QString providerLabel(const QString &provider, const QVariantMap &metadata, const QString &host) {
@@ -136,6 +162,12 @@ namespace {
 			{ QStringLiteral("amazon"), QStringLiteral("Amazon") },
 			{ QStringLiteral("twitch"), QStringLiteral("Twitch") },
 			{ QStringLiteral("multitwitch"), QStringLiteral("Multitwitch") },
+			{ QStringLiteral("hltv"), QStringLiteral("HLTV") },
+			{ QStringLiteral("liquipedia"), QStringLiteral("Liquipedia") },
+			{ QStringLiteral("faceit"), QStringLiteral("FACEIT") },
+			{ QStringLiteral("leetify"), QStringLiteral("Leetify") },
+			{ QStringLiteral("csstats"), QStringLiteral("csstats.gg") },
+			{ QStringLiteral("csstat"), QStringLiteral("csst.at") },
 			{ QStringLiteral("direct"), QStringLiteral("Media") }
 		};
 		return labels.value(provider, host);
@@ -262,6 +294,12 @@ namespace {
 		if (provider == QLatin1String("twitch") || provider == QLatin1String("multitwitch")) {
 			return QStringLiteral("article");
 		}
+		// A news picture or a site's drawn stats card is shown large; a player's
+		// avatar or a team's logo sits beside the text.
+		if (isEsportsProvider(provider)) {
+			return metadata.value(QStringLiteral("esportsLarge")).toBool() ? QStringLiteral("article")
+																		   : QStringLiteral("link");
+		}
 		if (provider == QLatin1String("flashback") || previewKind == QLatin1String("forum")) {
 			// A link to one post shows that post; a thread link is a page to open,
 			// with its title and forum, not a post by nobody.
@@ -321,6 +359,9 @@ namespace {
 		} else if (provider == QLatin1String("facebook")) {
 			result.insert(QStringLiteral("name"),
 						  firstText(metadata, { QStringLiteral("facebookAuthor") }, 256));
+		} else if (isEsportsProvider(provider)) {
+			result.insert(QStringLiteral("name"),
+						  firstText(metadata, { QStringLiteral("esportsAuthor") }, 256));
 		} else if (metadata.contains(QStringLiteral("articleAuthor"))) {
 			result.insert(QStringLiteral("name"),
 						  firstText(metadata, { QStringLiteral("articleAuthor") }, 256));
@@ -505,6 +546,13 @@ namespace {
 					break;
 				}
 			}
+		} else if (isEsportsProvider(provider)) {
+			for (const QVariant &entry : metadata.value(QStringLiteral("esportsFacts")).toList()) {
+				const QVariantMap fact = entry.toMap();
+				const QString label = firstText(fact, { QStringLiteral("label") }, 128);
+				appendFact(result, QString(label).toLower().replace(QLatin1Char(' '), QLatin1Char('-')), label,
+						   firstText(fact, { QStringLiteral("value") }, 256));
+			}
 		} else if (type == QLatin1String("article")) {
 			appendFact(result, QStringLiteral("section"), QStringLiteral("Section"),
 					   metadata.value(QStringLiteral("articleSection")));
@@ -586,7 +634,7 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		|| provider == QLatin1String("spotify") || provider == QLatin1String("soundcloud")
 		|| provider == QLatin1String("amazon")
 		|| provider == QLatin1String("twitch") || provider == QLatin1String("multitwitch")
-		|| provider == QLatin1String("direct")
+		|| provider == QLatin1String("direct") || isEsportsProvider(provider)
 		|| type == QLatin1String("article");
 
 	QString title = firstText(preview, { QStringLiteral("title") }, 512);
@@ -654,6 +702,19 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		description = channels.size() > 1
 			? QStringLiteral("%1 Twitch streams side by side").arg(channels.size())
 			: QStringLiteral("Twitch streams side by side");
+	} else if (isEsportsProvider(provider)) {
+		// The page's own title until (or unless) the card is read, without the
+		// site's suffix: "... | HLTV.org", "... – CS2 Stats and Player Profile".
+		static const QRegularExpression s_siteSuffix(
+			QStringLiteral(R"(\s*(?:[|\x{2013}\x{2014}]|\s-)\s*(?:HLTV\.org|Liquipedia\b.*|Leetify|csst\.at|CS2 Stats\b.*)$)"),
+			QRegularExpression::CaseInsensitiveOption);
+		const QString esportsTitle = firstText(metadata, { QStringLiteral("esportsTitle") }, 512);
+		title = esportsTitle.isEmpty() ? QString(title).remove(s_siteSuffix).trimmed() : esportsTitle;
+		if (metadata.contains(QStringLiteral("esportsMetadataVersion"))) {
+			// Once the card is read, the site's own blurb ("View X's CS2 stats...")
+			// says less than its facts.
+			description = firstText(metadata, { QStringLiteral("esportsDescription") }, 4096);
+		}
 	} else if (type == QLatin1String("article")) {
 		title = firstText(metadata, { QStringLiteral("articleTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("articleDescription") }, 4096);
@@ -671,6 +732,8 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 			? firstText(metadata, { QStringLiteral("tiktokCreatedAt") }, 128)
 		: provider == QLatin1String("flashback")
 			? firstText(metadata, { QStringLiteral("forumPostTime") }, 128)
+		: isEsportsProvider(provider)
+			? firstText(metadata, { QStringLiteral("esportsPublishedAt") }, 128)
 		: type == QLatin1String("article")
 			? firstText(metadata, { QStringLiteral("articlePublishedAt") }, 128) : QString();
 
@@ -687,6 +750,10 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		if (!section.isEmpty()) {
 			subtitle = section;
 		}
+	}
+	// What the card is about: the game, the competition, "Player" or the real name.
+	if (isEsportsProvider(provider) && metadata.contains(QStringLiteral("esportsSection"))) {
+		subtitle = firstText(metadata, { QStringLiteral("esportsSection") }, 256);
 	}
 	if (contentAuthor.isEmpty() && !subtitle.isEmpty()) {
 		const QString prefix = label + QStringLiteral(" by ");
@@ -723,7 +790,9 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		{ QStringLiteral("subtitle"), subtitle },
 		{ QStringLiteral("description"), description },
 		{ QStringLiteral("publishedAt"), publishedAt },
-		{ QStringLiteral("author"), contentAuthor }
+		{ QStringLiteral("author"), contentAuthor },
+		// "contain" for logos, which a square crop would cut.
+		{ QStringLiteral("imageFit"), firstText(metadata, { QStringLiteral("esportsImageFit") }, 16) }
 	};
 	for (auto it = content.begin(); it != content.end();) {
 		if ((it.value().metaType().id() == QMetaType::QString && it.value().toString().isEmpty())

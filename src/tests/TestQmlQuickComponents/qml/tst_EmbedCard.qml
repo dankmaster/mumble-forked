@@ -317,6 +317,34 @@ TestCase {
 		compare(findChild(card, "embedCardFacts").text, "9,69€  ·  Developer Valve  ·  Reviews Overwhelmingly Positive")
 	}
 
+	// Esports: a player or an event beside its picture, its stats in the facts line;
+	// a logo is fitted whole instead of cropped.
+	function test_esports_cards_name_the_player_and_fit_logos() {
+		const player = documentFor("link", "hltv", "HLTV", {
+			"content": { "type": "link", "title": "s1mple", "subtitle": "Oleksandr Kostyliev",
+				"description": "Oleksandr Kostyliev known as s1mple, is a Counter-Strike player." },
+			"facts": [{ "key": "team", "label": "Team", "value": "BC.Game" },
+				{ "key": "rating", "label": "Rating", "value": "1.19" },
+				{ "key": "age", "label": "Age", "value": "29" }]
+		})
+		const playerCard = cardFor(player, { "thumbnailUrl": "image://mumble/s1mple?g=1" })
+		compare(playerCard.family, "link")
+		compare(findChild(playerCard, "embedCardHeader").text, "HLTV  ·  Oleksandr Kostyliev")
+		compare(findChild(playerCard, "embedCardFacts").text, "Team BC.Game  ·  Rating 1.19  ·  Age 29")
+		compare(findChild(playerCard, "embedCardLinkImage").fillMode, Image.PreserveAspectCrop)
+
+		const event = documentFor("link", "liquipedia", "Liquipedia", {
+			"content": { "type": "link", "title": "The International 2026: Group Stage", "subtitle": "Dota 2",
+				"imageFit": "contain" },
+			"facts": [{ "key": "tier", "label": "Tier", "value": "1" },
+				{ "key": "prize-pool", "label": "Prize pool", "value": "$3,906,263" }]
+		})
+		const eventCard = cardFor(event, { "thumbnailUrl": "image://mumble/ti?g=1" })
+		verify(eventCard.imageContained)
+		compare(findChild(eventCard, "embedCardLinkImage").fillMode, Image.PreserveAspectFit)
+		compare(findChild(eventCard, "embedCardHeader").text, "Liquipedia  ·  Dota 2")
+	}
+
 	function test_only_managed_pictures_are_drawn() {
 		const document = samples().link
 		document.media = [{ "id": "media:0", "kind": "image", "url": "https://tracker.example/pixel.png" }]

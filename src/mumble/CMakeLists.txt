@@ -226,6 +226,8 @@ set(MUMBLE_SOURCES
 	"ComposerController.h"
 	"EmbedDocument.cpp"
 	"EmbedDocument.h"
+	"EsportsPreview.cpp"
+	"EsportsPreview.h"
 	"MainWindow.cpp"
 	"MainWindow.h"
 	"Markdown.cpp"

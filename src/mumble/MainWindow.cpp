@@ -12,6 +12,7 @@
 #include "Channel.h"
 #include "Connection.h"
 #include "Database.h"
+#include "EsportsPreview.h"
 #include "FeedbackReport.h"
 #include "FinanceQuote.h"
 #include "ForkFeature.h"
@@ -33724,6 +33725,9 @@ void MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 				|| (isTwitchHost(cachedUrl.host())
 					&& cached.metadata.value(QStringLiteral("twitchMetadataVersion")).toInt()
 						   != TWITCH_PREVIEW_METADATA_VERSION)
+				|| (EsportsPreview::targetFromUrl(cachedUrl)
+					&& cached.metadata.value(QStringLiteral("esportsMetadataVersion")).toInt()
+						   != EsportsPreview::MetadataVersion)
 				|| (isInstagramVideoPreviewUrl(cachedUrl)
 					&& cached.mediaDataUrl.trimmed().isEmpty())
 				|| ((isInstagramPreviewUrl(cachedUrl) || isFacebookPreviewUrl(cachedUrl))
@@ -37396,6 +37400,191 @@ bool MainWindow::requestPersistentChatGitHubPreview(const QString &previewKey, c
 	return true;
 }
 
+bool MainWindow::requestPersistentChatEsportsPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(previewUrl)) {
+		return false;
+	}
+
+	const std::optional< EsportsPreview::Target > target = EsportsPreview::targetFromUrl(previewUrl);
+	if (!target) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	// A page behind a bot check (an HLTV match, Liquipedia, FACEIT) still gets a
+	// card: what its address says, until the fetch says more.
+	// The server's page title, when it read one, says more than the address.
+	QVariantMap addressMetadata = EsportsPreview::metadataFromUrl(*target);
+	if (it->metadataFinished && !it->failed && !it->title.trimmed().isEmpty()) {
+		addressMetadata.remove(QStringLiteral("esportsTitle"));
+	} else if (const QString addressTitle = addressMetadata.value(QStringLiteral("esportsTitle")).toString();
+			   !addressTitle.isEmpty()) {
+		it->title = addressTitle;
+	}
+	for (auto field = addressMetadata.cbegin(); field != addressMetadata.cend(); ++field) {
+		it->metadata.insert(field.key(), field.value());
+	}
+	if (it->failed || previewDescriptionIsPlaceholder(it->description)) {
+		it->description.clear();
+	}
+	it->failed           = false;
+	it->metadataFinished = true;
+	if (target->requestUrl.isEmpty()) {
+		it->metadata.insert(QStringLiteral("esportsMetadataVersion"), EsportsPreview::MetadataVersion);
+		it->remoteMediaFinished = true;
+		return true;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+	const QString expectedPreviewSource = it->canonicalUrl;
+
+	QNetworkRequest request(target->requestUrl);
+	preparePreviewRequest(request);
+	if (target->requestIsJson) {
+		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json"));
+	}
+	if (target->provider == QLatin1String("liquipedia")) {
+		// Liquipedia's API terms ask clients to name themselves and how to reach them.
+		request.setRawHeader(QByteArrayLiteral("User-Agent"),
+							 QByteArrayLiteral("Mumble link preview (+https://www.mumble.info)"));
+	}
+	QNetworkReply *reply = startPersistentChatPreviewGet(request, previewKey);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, target, expectedPreviewSource]() {
+		QByteArray data           = reply->readAll();
+		const bool success        = reply->error() == QNetworkReply::NoError;
+		const QString contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
+		reply->deleteLater();
+
+		const auto previewIt = m_persistentChatPreviews.constFind(previewKey);
+		if (previewIt == m_persistentChatPreviews.cend() || previewIt->canonicalUrl != expectedPreviewSource) {
+			return;
+		}
+		if (!success || data.isEmpty()) {
+			applyPersistentChatEsportsPreview(previewKey, {}, true);
+			return;
+		}
+
+		const auto completion = [this, previewKey, expectedPreviewSource](const QVariantMap &metadata) {
+			const auto completedIt = m_persistentChatPreviews.constFind(previewKey);
+			if (completedIt != m_persistentChatPreviews.cend() && completedIt->canonicalUrl == expectedPreviewSource) {
+				applyPersistentChatEsportsPreview(previewKey, metadata, true);
+			}
+		};
+		if (!target->requestIsJson) {
+			parsePersistentChatPreviewHtmlAsync(
+				this, persistentChatPreviewWorkerGroup(previewKey),
+				persistentChatPreviewWorkerSourceKey(QStringLiteral("html:esports"),
+													 target->requestUrl.toString(QUrl::FullyEncoded)),
+				std::move(data), contentType,
+				[target](PersistentChatPreviewHtmlParseResult &parsed) {
+					parsed.metadata = EsportsPreview::metadataFromHtml(*target, parsed.html, parsed.metaTags);
+				},
+				[completion](PersistentChatPreviewHtmlParseResult parsed) { completion(parsed.metadata); },
+				PersistentChatPreviewHtmlScope::BoundedDocument);
+			return;
+		}
+		const qint64 estimatedBytes = data.size();
+		persistentChatPreviewWorkerQueue().submit< QVariantMap >(
+			this, persistentChatPreviewWorkerGroup(previewKey),
+			persistentChatPreviewWorkerSourceKey(QStringLiteral("json:esports"),
+												 target->requestUrl.toString(QUrl::FullyEncoded)),
+			estimatedBytes, PersistentChatPreviewWorkerPriority::Interactive,
+			[target, data = std::move(data)]() { return EsportsPreview::metadataFromJson(*target, data); },
+			[completion](std::optional< QVariantMap > metadata) { completion(metadata.value_or(QVariantMap())); });
+	});
+
+	return true;
+}
+
+void MainWindow::applyPersistentChatEsportsPreview(const QString &previewKey, const QVariantMap &metadata,
+												   const bool finished) {
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end()) {
+		return;
+	}
+	if (finished) {
+		it->remoteMediaRequested = false;
+		it->remoteMediaFinished  = true;
+	}
+	if (!metadata.isEmpty()) {
+		// The fetched card replaces what the address alone said.
+		for (const QString &key :
+			 { QStringLiteral("esportsTitle"), QStringLiteral("esportsSection"), QStringLiteral("esportsDescription"),
+			   QStringLiteral("esportsAuthor"), QStringLiteral("esportsPublishedAt"), QStringLiteral("esportsImage"),
+			   QStringLiteral("esportsImageFit"), QStringLiteral("esportsLarge"), QStringLiteral("esportsFacts") }) {
+			it->metadata.remove(key);
+		}
+		for (auto field = metadata.cbegin(); field != metadata.cend(); ++field) {
+			it->metadata.insert(field.key(), field.value());
+		}
+		it->metadata.insert(QStringLiteral("esportsMetadataVersion"), EsportsPreview::MetadataVersion);
+		const QString title = metadata.value(QStringLiteral("esportsTitle")).toString().trimmed();
+		if (!title.isEmpty()) {
+			it->title = title;
+		}
+		it->description = metadata.value(QStringLiteral("esportsDescription")).toString().trimmed();
+	}
+	it->metadataFinished = true;
+	it->failed           = false;
+
+	const QUrl imageUrl(metadata.value(QStringLiteral("esportsImage")).toString().trimmed());
+	if (imageUrl.scheme().toLower() != QLatin1String("https") || !isSafePreviewTarget(imageUrl)) {
+		publishPersistentChatPreviewUpdate(previewKey);
+		return;
+	}
+
+	const QString expectedPreviewSource          = it->canonicalUrl;
+	const QString expectedThumbnailRequestSource = imageUrl.toString(QUrl::FullyEncoded);
+	it->thumbnailFinished      = false;
+	it->thumbnailRequestSource = expectedThumbnailRequestSource;
+	QNetworkRequest imageRequest(imageUrl);
+	preparePreviewImageRequest(imageRequest);
+	QNetworkReply *imageReply = startPersistentChatPreviewGet(imageRequest, previewKey);
+	applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
+	connect(imageReply, &QNetworkReply::finished, this,
+			[this, imageReply, previewKey, expectedPreviewSource, expectedThumbnailRequestSource]() {
+		const QByteArray imageData = imageReply->readAll();
+		const bool imageSuccess    = imageReply->error() == QNetworkReply::NoError;
+		imageReply->deleteLater();
+
+		auto imagePreviewIt = m_persistentChatPreviews.find(previewKey);
+		if (imagePreviewIt == m_persistentChatPreviews.end() || imagePreviewIt->canonicalUrl != expectedPreviewSource
+			|| imagePreviewIt->thumbnailRequestSource != expectedThumbnailRequestSource) {
+			return;
+		}
+		if (!imageSuccess) {
+			imagePreviewIt->thumbnailFinished = true;
+			imagePreviewIt->thumbnailRequestSource.clear();
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+		decodePersistentChatThumbnailAsync(
+			this, persistentChatPreviewWorkerGroup(previewKey),
+			persistentChatPreviewWorkerSourceKey(QStringLiteral("thumbnail"), expectedThumbnailRequestSource),
+			imageData, [this, previewKey, expectedPreviewSource, expectedThumbnailRequestSource](QImage image) {
+				auto decodedPreviewIt = m_persistentChatPreviews.find(previewKey);
+				if (decodedPreviewIt == m_persistentChatPreviews.end()
+					|| decodedPreviewIt->canonicalUrl != expectedPreviewSource
+					|| decodedPreviewIt->thumbnailRequestSource != expectedThumbnailRequestSource) {
+					return;
+				}
+				decodedPreviewIt->thumbnailFinished = true;
+				decodedPreviewIt->thumbnailRequestSource.clear();
+				if (!image.isNull()) {
+					decodedPreviewIt->thumbnailImage = image;
+				}
+				publishPersistentChatPreviewUpdate(previewKey);
+			});
+	});
+	publishPersistentChatPreviewUpdate(previewKey);
+}
+
 bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl) {
 	const std::optional< QString > videoId = redditVideoIdFromUrl(previewUrl);
 	if (!videoId) {
@@ -37935,6 +38124,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		if (handledYahooFinanceQuotePreview) {
 			requestPersistentChatFinancePreview(previewKey, previewUrl);
 		}
+		requestPersistentChatEsportsPreview(previewKey, previewUrl);
 		requestPersistentChatRichProviderPreview(previewKey, previewUrl);
 		requestPersistentChatSteamAppPreview(previewKey, previewUrl);
 		const bool handledRedditVideoPreview = requestPersistentChatRedditVideoPreview(previewKey, previewUrl);
@@ -38848,6 +39038,11 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	}
 
 	if (requestPersistentChatGitHubPreview(previewKey, previewUrl)) {
+		renderIfVisible();
+		return;
+	}
+
+	if (requestPersistentChatEsportsPreview(previewKey, previewUrl)) {
 		renderIfVisible();
 		return;
 	}

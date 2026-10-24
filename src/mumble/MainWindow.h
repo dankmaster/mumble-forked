@@ -617,6 +617,8 @@ public:
 	bool requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId, int remaining,
 												QVariantList directChain = QVariantList());
 	bool requestPersistentChatGitHubPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatEsportsPreview(const QString &previewKey, const QUrl &previewUrl);
+	void applyPersistentChatEsportsPreview(const QString &previewKey, const QVariantMap &metadata, bool finished);
 	bool requestPersistentChatWebhallenProductPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRichProviderPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatSteamAppPreview(const QString &previewKey, const QUrl &previewUrl);

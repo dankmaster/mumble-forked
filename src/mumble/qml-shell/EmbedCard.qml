@@ -68,6 +68,8 @@ Rectangle {
 	readonly property string imageSource: stillSource(firstMedia)
 		|| managedImage(preview ? preview.thumbnailUrl : "")
 	readonly property string family: familyFor()
+	// A logo is fitted whole; a crop would cut its name.
+	readonly property bool imageContained: String(content.imageFit || "") === "contain"
 	readonly property bool spotifyStyle: family === "audio" && providerId === "spotify"
 	// A store's or gallery's lead picture is a picture: only a video in front plays.
 	readonly property bool canPlay: String(playback.mode || "none") !== "none"
@@ -499,10 +501,12 @@ Rectangle {
 				clip: true
 
 				Image {
+					objectName: "embedCardLinkImage"
 					anchors.fill: parent
+					anchors.margins: root.imageContained ? 6 : 0
 					source: linkThumb.visible ? root.imageSource : ""
 					sourceSize: Qt.size(160, 160)
-					fillMode: Image.PreserveAspectCrop
+					fillMode: root.imageContained ? Image.PreserveAspectFit : Image.PreserveAspectCrop
 					asynchronous: true
 					onStatusChanged: if (status === Image.Error) root.imageRefreshRequested()
 				}
@@ -785,8 +789,8 @@ Rectangle {
 					&& (root.family !== "post" || root.media.length <= 1)
 					&& !(firstAnimated.active) ? root.imageSource : ""
 				sourceSize: Qt.size(1280, 960)
-				fillMode: root.aspect === "short" || root.family === "image" ? Image.PreserveAspectFit
-					: Image.PreserveAspectCrop
+				fillMode: root.aspect === "short" || root.family === "image" || root.imageContained
+					? Image.PreserveAspectFit : Image.PreserveAspectCrop
 				asynchronous: true
 				onStatusChanged: if (status === Image.Error) root.imageRefreshRequested()
 			}

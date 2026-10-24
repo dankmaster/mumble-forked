@@ -3,6 +3,7 @@
 #include "QmlClientModels.h"
 #include "ChatPerfTrace.h"
 #include "EmbedDocument.h"
+#include "EsportsPreview.h"
 #include "Markdown.h"
 #include "ModernShellPreviewPublicationPolicy.h"
 #include "PersistentChatPreviewUrl.h"
@@ -96,6 +97,7 @@ private slots:
 	void chatTimelinePreservesStreamingManifestsAndManagedArtwork();
 	void chatTimelineNormalizesProviderMetadata();
 	void chatTimelineBuildsTypedEmbedDocuments();
+	void esportsPreviewReadsPublicData();
 	void resolvedEmbedStateHydratesAnimatedProviderMedia();
 	void participantPresenceUpdatesOnlyTypedRoles();
 	void participantUpsertsAndRemovalsStayResetFree();
@@ -5882,6 +5884,132 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	QCOMPARE(multitwitchDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("title")).toString(),
 			 QStringLiteral("alpha  ·  beta"));
 
+	// Esports: a player beside their picture, with the stats that matter.
+	const QVariantMap hltvPlayerDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.hltv.org/player/7998/s1mple") },
+		{ QStringLiteral("host"), QStringLiteral("www.hltv.org") },
+		{ QStringLiteral("title"), QStringLiteral("Oleksandr 's1mple' Kostyliev") },
+		{ QStringLiteral("subtitle"), QStringLiteral("HLTV.org") },
+		{ QStringLiteral("description"), QStringLiteral("Player profile for Oleksandr 's1mple' Kostyliev") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("hltv") },
+			{ QStringLiteral("esportsKind"), QStringLiteral("player") },
+			{ QStringLiteral("esportsMetadataVersion"), 1 },
+			{ QStringLiteral("esportsTitle"), QStringLiteral("s1mple") },
+			{ QStringLiteral("esportsSection"), QStringLiteral("Oleksandr Kostyliev") },
+			{ QStringLiteral("esportsDescription"),
+			  QStringLiteral("Oleksandr Kostyliev known as s1mple, is a 29 year old Counter-Strike player.") },
+			{ QStringLiteral("esportsFacts"), QVariantList {
+				QVariantMap { { QStringLiteral("label"), QStringLiteral("Team") },
+							  { QStringLiteral("value"), QStringLiteral("BC.Game") } },
+				QVariantMap { { QStringLiteral("label"), QStringLiteral("Rating") },
+							  { QStringLiteral("value"), QStringLiteral("1.19") } }
+			} }
+		} }
+	});
+	const QVariantMap hltvPlayerContent = hltvPlayerDocument.value(QStringLiteral("content")).toMap();
+	QVERIFY(hltvPlayerDocument.value(QStringLiteral("commonPresentation")).toBool());
+	QCOMPARE(hltvPlayerDocument.value(QStringLiteral("presentation")).toString(), QStringLiteral("link"));
+	QCOMPARE(hltvPlayerDocument.value(QStringLiteral("provider")).toMap().value(QStringLiteral("label")).toString(),
+			 QStringLiteral("HLTV"));
+	QCOMPARE(hltvPlayerContent.value(QStringLiteral("title")).toString(), QStringLiteral("s1mple"));
+	QCOMPARE(hltvPlayerContent.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Oleksandr Kostyliev"));
+	QVERIFY(hltvPlayerContent.value(QStringLiteral("description")).toString().startsWith(QStringLiteral("Oleksandr")));
+	const QVariantList hltvPlayerFacts = hltvPlayerDocument.value(QStringLiteral("facts")).toList();
+	QCOMPARE(hltvPlayerFacts.size(), 2);
+	QCOMPARE(hltvPlayerFacts.at(1).toMap().value(QStringLiteral("key")).toString(), QStringLiteral("rating"));
+	QCOMPARE(hltvPlayerFacts.at(1).toMap().value(QStringLiteral("value")).toString(), QStringLiteral("1.19"));
+
+	// News is an article with its picture large; the author is the byline.
+	const QVariantMap hltvNewsDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.hltv.org/news/40000/jackz-to-stand-in") },
+		{ QStringLiteral("host"), QStringLiteral("www.hltv.org") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("hltv") },
+			{ QStringLiteral("esportsKind"), QStringLiteral("news") },
+			{ QStringLiteral("esportsMetadataVersion"), 1 },
+			{ QStringLiteral("esportsLarge"), true },
+			{ QStringLiteral("esportsTitle"), QStringLiteral("JACKZ to stand in for mezii") },
+			{ QStringLiteral("esportsAuthor"), QStringLiteral("Striker") },
+			{ QStringLiteral("esportsPublishedAt"), QStringLiteral("2024-10-07T19:55:00+0200") }
+		} }
+	});
+	QCOMPARE(hltvNewsDocument.value(QStringLiteral("presentation")).toString(), QStringLiteral("article"));
+	QCOMPARE(hltvNewsDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("author")).toMap()
+				 .value(QStringLiteral("name")).toString(),
+			 QStringLiteral("Striker"));
+	QCOMPARE(hltvNewsDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("publishedAt")).toString(),
+			 QStringLiteral("2024-10-07T19:55:00+0200"));
+
+	// A Liquipedia stage with its event's facts; a logo is fitted, not cropped.
+	const QVariantMap liquipediaDocument = normalizedDocument({
+		{ QStringLiteral("url"),
+		  QStringLiteral("https://liquipedia.net/dota2/The_International/2026/Group_Stage") },
+		{ QStringLiteral("host"), QStringLiteral("liquipedia.net") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("liquipedia") },
+			{ QStringLiteral("esportsKind"), QStringLiteral("event") },
+			{ QStringLiteral("esportsMetadataVersion"), 1 },
+			{ QStringLiteral("esportsTitle"), QStringLiteral("The International 2026: Group Stage") },
+			{ QStringLiteral("esportsSection"), QStringLiteral("Dota 2") },
+			{ QStringLiteral("esportsImageFit"), QStringLiteral("contain") },
+			{ QStringLiteral("esportsFacts"), QVariantList {
+				QVariantMap { { QStringLiteral("label"), QStringLiteral("Tier") },
+							  { QStringLiteral("value"), QStringLiteral("1") } },
+				QVariantMap { { QStringLiteral("label"), QStringLiteral("Prize pool") },
+							  { QStringLiteral("value"), QStringLiteral("$3,906,263") } }
+			} }
+		} }
+	});
+	const QVariantMap liquipediaContent = liquipediaDocument.value(QStringLiteral("content")).toMap();
+	QCOMPARE(liquipediaDocument.value(QStringLiteral("provider")).toMap().value(QStringLiteral("label")).toString(),
+			 QStringLiteral("Liquipedia"));
+	QCOMPARE(liquipediaContent.value(QStringLiteral("title")).toString(),
+			 QStringLiteral("The International 2026: Group Stage"));
+	QCOMPARE(liquipediaContent.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Dota 2"));
+	QCOMPARE(liquipediaContent.value(QStringLiteral("imageFit")).toString(), QStringLiteral("contain"));
+	QCOMPARE(liquipediaDocument.value(QStringLiteral("facts")).toList().at(1).toMap()
+				 .value(QStringLiteral("key")).toString(),
+			 QStringLiteral("prize-pool"));
+
+	// Before (or without) the site's own data, the page title loses the site's suffix.
+	const QVariantMap leetifyUnreadDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://leetify.com/public/profile/76561198034202275") },
+		{ QStringLiteral("host"), QStringLiteral("leetify.com") },
+		{ QStringLiteral("title"), QStringLiteral("s1mple – CS2 Stats and Player Profile") },
+		{ QStringLiteral("description"), QStringLiteral("Compare your performance to your friends.") }
+	});
+	QCOMPARE(leetifyUnreadDocument.value(QStringLiteral("provider")).toMap().value(QStringLiteral("id")).toString(),
+			 QStringLiteral("leetify"));
+	QCOMPARE(leetifyUnreadDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("title")).toString(),
+			 QStringLiteral("s1mple"));
+	const QVariantMap hltvUnreadDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.hltv.org/team/4608/natus-vincere") },
+		{ QStringLiteral("host"), QStringLiteral("www.hltv.org") },
+		{ QStringLiteral("title"), QStringLiteral("Natus Vincere team overview | HLTV.org") }
+	});
+	QCOMPARE(hltvUnreadDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("title")).toString(),
+			 QStringLiteral("Natus Vincere team overview"));
+
+	// Once read, csst.at's blurb gives way to its drawn stats card, shown large.
+	const QVariantMap csstatDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://csst.at/profile/76561197960287930") },
+		{ QStringLiteral("host"), QStringLiteral("csst.at") },
+		{ QStringLiteral("description"), QStringLiteral("View Rabscuttle's CS2 stats, FACEIT Elo and more.") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("csstat") },
+			{ QStringLiteral("esportsKind"), QStringLiteral("player") },
+			{ QStringLiteral("esportsMetadataVersion"), 1 },
+			{ QStringLiteral("esportsLarge"), true },
+			{ QStringLiteral("esportsTitle"), QStringLiteral("Rabscuttle") },
+			{ QStringLiteral("esportsSection"), QStringLiteral("CS2 player") }
+		} }
+	});
+	QCOMPARE(csstatDocument.value(QStringLiteral("provider")).toMap().value(QStringLiteral("label")).toString(),
+			 QStringLiteral("csst.at"));
+	QCOMPARE(csstatDocument.value(QStringLiteral("presentation")).toString(), QStringLiteral("article"));
+	QVERIFY(!csstatDocument.value(QStringLiteral("content")).toMap().contains(QStringLiteral("description")));
+
 	const QVariantMap articleDocument = normalizedDocument({
 		{ QStringLiteral("url"),
 		  QStringLiteral("https://www.gp.se/politik/uppgifter-regeringen-halverar-priset-i-kollektivtrafiken") },
@@ -6003,6 +6131,200 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 	}).value(QStringLiteral("content")).toMap();
 	QVERIFY2(!siteContent.contains(QStringLiteral("subtitle")), "the site's address is not a subtitle");
 	QCOMPARE(v2DocumentMismatches, 0);
+}
+
+void TestQmlClientModels::esportsPreviewReadsPublicData() {
+	using EsportsPreview::targetFromUrl;
+	const auto factValues = [](const QVariantMap &metadata) {
+		QStringList values;
+		for (const QVariant &entry : metadata.value(QStringLiteral("esportsFacts")).toList()) {
+			values << entry.toMap().value(QStringLiteral("label")).toString() + QLatin1Char('=')
+						  + entry.toMap().value(QStringLiteral("value")).toString();
+		}
+		return values;
+	};
+
+	// Which addresses are read, and how.
+	const std::optional< EsportsPreview::Target > liquipedia =
+		targetFromUrl(QUrl(QStringLiteral("https://liquipedia.net/dota2/The_International/2026/Group_Stage")));
+	QVERIFY(liquipedia.has_value());
+	QCOMPARE(liquipedia->provider, QStringLiteral("liquipedia"));
+	QCOMPARE(liquipedia->wiki, QStringLiteral("dota2"));
+	QCOMPARE(liquipedia->id, QStringLiteral("The International/2026/Group Stage"));
+	QVERIFY(liquipedia->requestIsJson);
+	QCOMPARE(liquipedia->requestUrl.host(), QStringLiteral("liquipedia.net"));
+	QCOMPARE(liquipedia->requestUrl.path(), QStringLiteral("/dota2/api.php"));
+	// One request names the stage and its event.
+	QVERIFY(QUrlQuery(liquipedia->requestUrl).queryItemValue(QStringLiteral("titles"), QUrl::FullyDecoded)
+				.contains(QStringLiteral("The International/2026/Group Stage|The International/2026")));
+	QVERIFY(!targetFromUrl(QUrl(QStringLiteral("https://liquipedia.net/dota2/Special:Search"))));
+
+	const std::optional< EsportsPreview::Target > hltvMatch = targetFromUrl(
+		QUrl(QStringLiteral("https://www.hltv.org/matches/2399816/pain-vs-imperial-circuit-x-curitiba-season-4")));
+	QVERIFY(hltvMatch.has_value());
+	QCOMPARE(hltvMatch->kind, QStringLiteral("match"));
+	// Match pages answer with a bot check: nothing is fetched.
+	QVERIFY(hltvMatch->requestUrl.isEmpty());
+	QCOMPARE(EsportsPreview::metadataFromUrl(*hltvMatch).value(QStringLiteral("esportsTitle")).toString(),
+			 QStringLiteral("Pain vs Imperial Circuit X Curitiba Season 4"));
+	QVERIFY(!targetFromUrl(QUrl(QStringLiteral("https://www.hltv.org/stats"))));
+
+	const std::optional< EsportsPreview::Target > faceitPlayer =
+		targetFromUrl(QUrl(QStringLiteral("https://www.faceit.com/en/players/ZywOo")));
+	QVERIFY(faceitPlayer.has_value());
+	QCOMPARE(faceitPlayer->requestUrl.toString(),
+			 QStringLiteral("https://www.faceit.com/api/users/v1/nicknames/ZywOo"));
+	const std::optional< EsportsPreview::Target > faceitMatch = targetFromUrl(
+		QUrl(QStringLiteral("https://www.faceit.com/en/cs2/room/1-d98dfbef-ffda-40d4-9bce-7d36de789c0b/scoreboard")));
+	QVERIFY(faceitMatch.has_value());
+	QCOMPARE(faceitMatch->kind, QStringLiteral("match"));
+
+	// csstats.gg walls its pages; its player is read from Leetify's public API.
+	const std::optional< EsportsPreview::Target > csstats =
+		targetFromUrl(QUrl(QStringLiteral("https://csstats.gg/player/76561198034202275")));
+	QVERIFY(csstats.has_value());
+	QCOMPARE(csstats->requestUrl.toString(),
+			 QStringLiteral("https://api-public.cs-prod.leetify.com/v3/profile?steam64_id=76561198034202275"));
+	QVERIFY(!targetFromUrl(QUrl(QStringLiteral("https://leetify.com/app/profile/not-a-steam-id"))));
+
+	// Liquipedia: a stage has its event's summary, picture and facts.
+	const QByteArray liquipediaJson = R"({"query":{
+		"normalized":[{"from":"The International/2026/Group Stage","to":"The International/2026/Group Stage"}],
+		"pages":[
+		{"title":"The International/2026","pageprops":{"displaytitle":"The International 2026",
+		 "metadescl":"The International 2026 is an offline Chinese Dota 2 tournament organized by Valve. This Tier 1 tournament took place from Aug 13 to 23 2026 featuring 16 teams competing over a total prize pool of $3906263 USD.",
+		 "metaimageurl":"https://liquipedia.net/commons/images/1/15/The_International_2026_allmode.png"},
+		 "extract":"The International 2026 is the fifteenth annual edition of The International.",
+		 "categories":[{"title":"Category:Finished Tournaments"},{"title":"Category:Tier 1 Tournaments"}]},
+		{"title":"The International/2026/Group Stage","pageprops":{"displaytitle":"The International 2026: Group Stage"},
+		 "extract":""}]}})";
+	const QVariantMap liquipediaMetadata = EsportsPreview::metadataFromJson(*liquipedia, liquipediaJson);
+	QCOMPARE(liquipediaMetadata.value(QStringLiteral("esportsTitle")).toString(),
+			 QStringLiteral("The International 2026: Group Stage"));
+	QCOMPARE(liquipediaMetadata.value(QStringLiteral("esportsKind")).toString(), QStringLiteral("event"));
+	QCOMPARE(liquipediaMetadata.value(QStringLiteral("esportsSection")).toString(), QStringLiteral("Dota 2"));
+	QCOMPARE(liquipediaMetadata.value(QStringLiteral("esportsDescription")).toString(),
+			 QStringLiteral("The International 2026 is the fifteenth annual edition of The International."));
+	QCOMPARE(liquipediaMetadata.value(QStringLiteral("esportsImageFit")).toString(), QStringLiteral("contain"));
+	QCOMPARE(factValues(liquipediaMetadata),
+			 QStringList({ QStringLiteral("Tier=1"), QStringLiteral("Dates=Aug 13 to 23 2026"),
+						   QStringLiteral("Prize pool=$3,906,263"), QStringLiteral("Teams=16"),
+						   QStringLiteral("Status=Finished") }));
+	QVERIFY(EsportsPreview::metadataFromJson(
+				*liquipedia, R"({"query":{"pages":[{"title":"The International/2026/Group Stage","missing":true}]}})")
+				.isEmpty());
+
+	// FACEIT: the player's level and Elo; the match's teams, score and map.
+	const QVariantMap faceitPlayerMetadata = EsportsPreview::metadataFromJson(*faceitPlayer, R"({"payload":{
+		"nickname":"ZywOo","country":"fr","avatar":"https://assets.faceit-cdn.net/avatars/zywoo.png",
+		"games":{"cs2":{"faceit_elo":3392,"skill_level":10,"region":"EU"}}}})");
+	QCOMPARE(faceitPlayerMetadata.value(QStringLiteral("esportsTitle")).toString(), QStringLiteral("ZywOo"));
+	QCOMPARE(faceitPlayerMetadata.value(QStringLiteral("esportsSection")).toString(), QStringLiteral("CS2 player"));
+	QCOMPARE(faceitPlayerMetadata.value(QStringLiteral("esportsImage")).toString(),
+			 QStringLiteral("https://assets.faceit-cdn.net/avatars/zywoo.png"));
+	QCOMPARE(factValues(faceitPlayerMetadata),
+			 QStringList({ QStringLiteral("Level=10"), QStringLiteral("Elo=3,392"), QStringLiteral("Region=EU"),
+						   QStringLiteral("Country=FR") }));
+	const QVariantMap faceitMatchMetadata = EsportsPreview::metadataFromJson(*faceitMatch, R"({"payload":{
+		"status":"FINISHED","entity":{"name":"Europe 5v5 Queue"},
+		"teams":{"faction1":{"name":"team_shox"},"faction2":{"name":"team_Domajzer"}},
+		"summaryResults":{"factions":{"faction1":{"score":13},"faction2":{"score":7}}},
+		"voting":{"map":{"pick":["de_nuke"],"entities":[{"game_map_id":"de_nuke","name":"Nuke",
+		 "image_sm":"https://assets.faceit-cdn.net/maps/nuke.jpeg"}]}}}})");
+	QCOMPARE(faceitMatchMetadata.value(QStringLiteral("esportsTitle")).toString(),
+			 QStringLiteral("team_shox vs team_Domajzer"));
+	QCOMPARE(faceitMatchMetadata.value(QStringLiteral("esportsSection")).toString(), QStringLiteral("Europe 5v5 Queue"));
+	QCOMPARE(factValues(faceitMatchMetadata),
+			 QStringList({ QString::fromUtf8("Score=13 – 7"), QStringLiteral("Map=Nuke"),
+						   QStringLiteral("Status=Finished") }));
+
+	// Leetify: its own rating and picture; csstats.gg borrows only the ranks.
+	const QByteArray leetifyJson = R"({"name":"s1mple","steam64_id":"76561198034202275","winrate":0.5,
+		"total_matches":3622,"ranks":{"leetify":3.16,"premier":24999,"faceit":10,"faceit_elo":3555}})";
+	const std::optional< EsportsPreview::Target > leetify =
+		targetFromUrl(QUrl(QStringLiteral("https://leetify.com/app/profile/76561198034202275")));
+	QVERIFY(leetify.has_value());
+	const QVariantMap leetifyMetadata = EsportsPreview::metadataFromJson(*leetify, leetifyJson);
+	QCOMPARE(leetifyMetadata.value(QStringLiteral("esportsTitle")).toString(), QStringLiteral("s1mple"));
+	QVERIFY(leetifyMetadata.value(QStringLiteral("esportsLarge")).toBool());
+	QCOMPARE(factValues(leetifyMetadata),
+			 QStringList({ QStringLiteral("Premier=24,999"), QStringLiteral("FACEIT level=10"),
+						   QStringLiteral("Rating=+3.16"), QStringLiteral("Win rate=50%"),
+						   QStringLiteral("Matches=3,622") }));
+	const QVariantMap csstatsMetadata = EsportsPreview::metadataFromJson(*csstats, leetifyJson);
+	QVERIFY(!csstatsMetadata.contains(QStringLiteral("esportsImage")));
+	QCOMPARE(factValues(csstatsMetadata),
+			 QStringList({ QStringLiteral("Premier=24,999"), QStringLiteral("FACEIT level=10"),
+						   QStringLiteral("FACEIT Elo=3,555") }));
+
+	// HLTV pages: the player's nickname, team and rating; the team's lineup and rank.
+	const std::optional< EsportsPreview::Target > hltvPlayer =
+		targetFromUrl(QUrl(QStringLiteral("https://www.hltv.org/player/7998/s1mple")));
+	QVERIFY(hltvPlayer.has_value());
+	QCOMPARE(hltvPlayer->requestUrl.toString(), QStringLiteral("https://www.hltv.org/player/7998/s1mple"));
+	const QString playerHtml = QStringLiteral(
+		R"(<div class="playerInfoRow playerTeam" itemscope=""><span class="listLeft">Current team</span>)"
+		R"(<span class="listRight"><img alt="BC.Game"><span><a href="/team/12878/bcgame" itemprop="text">BC.Game</a>)"
+		R"(</span></span></div><div class="playerInfoRow playerAge" itemscope=""><span class="listLeft">Age</span>)"
+		R"(<span class="listRight"><span itemprop="text">29 years</span></span></div>)"
+		R"(<div class="player-stat"><b>Rating 3.0</b><span class="statsVal"><p>1.19</p></span></div>)");
+	const QVariantMap hltvPlayerMetadata = EsportsPreview::metadataFromHtml(
+		*hltvPlayer, playerHtml,
+		{ { QStringLiteral("og:title"), QStringLiteral("Oleksandr 's1mple' Kostyliev") },
+		  { QStringLiteral("og:image"), QStringLiteral("https://img-cdn.hltv.org/playerbodyshot/s1mple.png") },
+		  { QStringLiteral("description"), QStringLiteral("Oleksandr Kostyliev known as s1mple.") } });
+	QCOMPARE(hltvPlayerMetadata.value(QStringLiteral("esportsTitle")).toString(), QStringLiteral("s1mple"));
+	QCOMPARE(hltvPlayerMetadata.value(QStringLiteral("esportsSection")).toString(),
+			 QStringLiteral("Oleksandr Kostyliev"));
+	QCOMPARE(factValues(hltvPlayerMetadata),
+			 QStringList({ QStringLiteral("Team=BC.Game"), QStringLiteral("Rating=1.19"), QStringLiteral("Age=29") }));
+
+	const std::optional< EsportsPreview::Target > hltvTeam =
+		targetFromUrl(QUrl(QStringLiteral("https://www.hltv.org/team/4608/natus-vincere")));
+	QVERIFY(hltvTeam.has_value());
+	const QString teamHtml = QStringLiteral(
+		R"(<script type="application/ld+json">{"@type":"SportsTeam","name":"Natus Vincere","athlete":[)"
+		R"({"@type":"Person","alternateName":"Aleksib"},{"@type":"Person","alternateName":"iM"}]}</script>)"
+		R"(<div class="team-country text-ellipsis"><img alt="Europe" class="flag"> Europe</div>)"
+		R"(<span class="regional-name-full">Valve ranking</span></b></div><span class="right"><a href="/v">#33</a>)"
+		R"(<b>World ranking</b><span class="right"><a href="/ranking">#11</a>)");
+	const QVariantMap hltvTeamMetadata = EsportsPreview::metadataFromHtml(
+		*hltvTeam, teamHtml,
+		{ { QStringLiteral("og:image"), QStringLiteral("https://www.hltv.org/img/static/openGraphHltvLogo.png") } });
+	QCOMPARE(hltvTeamMetadata.value(QStringLiteral("esportsTitle")).toString(), QStringLiteral("Natus Vincere"));
+	QCOMPARE(hltvTeamMetadata.value(QStringLiteral("esportsDescription")).toString(), QStringLiteral("Aleksib, iM"));
+	QCOMPARE(factValues(hltvTeamMetadata),
+			 QStringList({ QStringLiteral("World ranking=#11"), QStringLiteral("VRS=#33"),
+						   QStringLiteral("Region=Europe") }));
+	// HLTV's own logo is not the team's picture.
+	QVERIFY(!hltvTeamMetadata.contains(QStringLiteral("esportsImage")));
+
+	const std::optional< EsportsPreview::Target > hltvEvent =
+		targetFromUrl(QUrl(QStringLiteral("https://www.hltv.org/events/8050/pgl-masters-bucharest-2026")));
+	QVERIFY(hltvEvent.has_value());
+	const QString eventHtml = QStringLiteral(
+		R"(<td class="eventdate"><span data-unix="1">Oct 24th</span><span> - <span data-unix="2">Oct 31st 2026</span>)"
+		R"(</span></td><td class="prizepool text-ellipsis" title="$1,250,000">$1,250,000</td>)"
+		R"(<td class="teamsNumber">16</td><td class="location gtSmartphone-only"><div class="flag-align">)"
+		R"(<img alt="Romania" class="flag"><span class="text-ellipsis">Bucharest, Romania</span></div></td>)");
+	const QVariantMap hltvEventMetadata = EsportsPreview::metadataFromHtml(
+		*hltvEvent, eventHtml, { { QStringLiteral("og:title"), QStringLiteral("PGL Masters Bucharest 2026") } });
+	QCOMPARE(hltvEventMetadata.value(QStringLiteral("esportsTitle")).toString(),
+			 QStringLiteral("PGL Masters Bucharest 2026"));
+	QCOMPARE(factValues(hltvEventMetadata),
+			 QStringList({ QString::fromUtf8("Dates=Oct 24th – Oct 31st 2026"), QStringLiteral("Prize pool=$1,250,000"),
+						   QStringLiteral("Teams=16"), QStringLiteral("Location=Bucharest, Romania") }));
+
+	// csst.at draws its stats into its share picture: the name and that picture.
+	const std::optional< EsportsPreview::Target > csstat =
+		targetFromUrl(QUrl(QStringLiteral("https://csst.at/profile/76561197960287930")));
+	QVERIFY(csstat.has_value());
+	const QVariantMap csstatMetadata = EsportsPreview::metadataFromHtml(
+		*csstat, QString(),
+		{ { QStringLiteral("og:title"), QString::fromUtf8("Rabscuttle — CS2 Stats & FACEIT Elo | csst.at") },
+		  { QStringLiteral("og:image"), QStringLiteral("https://csst.at/og/76561197960287930?v=7") } });
+	QCOMPARE(csstatMetadata.value(QStringLiteral("esportsTitle")).toString(), QStringLiteral("Rabscuttle"));
+	QVERIFY(csstatMetadata.value(QStringLiteral("esportsLarge")).toBool());
 }
 
 void TestQmlClientModels::resolvedEmbedStateHydratesAnimatedProviderMedia() {

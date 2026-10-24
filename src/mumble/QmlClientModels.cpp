@@ -1165,7 +1165,7 @@ namespace {
 			if (!points.isEmpty()) normalized.insert(QStringLiteral("financeSparkline"), points);
 		}
 		for (const QString &key : { QStringLiteral("productSpecs"), QStringLiteral("listingSpecs"),
-				 QStringLiteral("vehicleSpecs") }) appendSpecList(key);
+				 QStringLiteral("vehicleSpecs"), QStringLiteral("esportsFacts") }) appendSpecList(key);
 		for (const QString &key : { QStringLiteral("gameStoreTags"), QStringLiteral("vehicleHighlights"),
 				 QStringLiteral("githubTopics") }) appendStringList(key);
 		if (source.contains(QStringLiteral("xQuotedPost")) && normalized.size() < MaxMetadataFields) {
@@ -1256,7 +1256,11 @@ namespace {
 			QStringLiteral("githubOpenIssues"), QStringLiteral("githubLanguage"),
 			QStringLiteral("githubLicense"), QStringLiteral("githubDefaultBranch"),
 			QStringLiteral("githubPushedAt"), QStringLiteral("githubPrivate"),
-			QStringLiteral("githubArchived"), QStringLiteral("githubFork")
+			QStringLiteral("githubArchived"), QStringLiteral("githubFork"),
+			QStringLiteral("esportsKind"), QStringLiteral("esportsTitle"), QStringLiteral("esportsSection"),
+			QStringLiteral("esportsDescription"), QStringLiteral("esportsAuthor"),
+			QStringLiteral("esportsPublishedAt"), QStringLiteral("esportsImageFit"), QStringLiteral("esportsLarge"),
+			QStringLiteral("esportsMetadataVersion")
 		};
 		for (const QString &key : priorityScalarKeys) {
 			const auto it = source.constFind(key);
