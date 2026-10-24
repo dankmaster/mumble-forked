@@ -87,6 +87,25 @@ jobs:
           install-ffmpeg: 'true'
           install-gstreamer: 'true'
 
+      # DeepFilterNet's Rust crates otherwise take about 11 minutes to compile from scratch.
+      - name: Resolve DeepFilterNet cargo cache key
+        id: deepfilternet-cargo-key
+        shell: powershell
+        run: |
+          $rustc = (& "$env:USERPROFILE\.cargo\bin\rustc.exe" -V) -replace '[^0-9A-Za-z.]+', '-'
+          "rustc=$rustc" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - id: restore-deepfilternet-cargo-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .cache/deepfilternet-cargo-target
+          key: deepfilternet-cargo-${{ runner.os }}-${{ steps.deepfilternet-cargo-key.outputs.rustc }}-${{ hashFiles('3rdparty/deepfilternet-libdf/**', 'src/mumble/deepfilternet/**') }}
+          restore-keys: deepfilternet-cargo-${{ runner.os }}-${{ steps.deepfilternet-cargo-key.outputs.rustc }}-
+
       - name: Install Windows installer tooling
         uses: ./.github/actions/setup-windows-installer-tooling
         with:
@@ -103,7 +122,8 @@ jobs:
               '-Dserver=OFF',
               '-Dmodern-layout-automation=OFF',
               '-Dmodern-layout-mockups=OFF',
-              '-Dunsigned-community-release=ON'
+              '-Dunsigned-community-release=ON',
+              "-DDEEPFILTERNET_CARGO_TARGET_DIR=$($env:GITHUB_WORKSPACE -replace '\\', '/')/.cache/deepfilternet-cargo-target"
             )
             EnablePackaging = $true
             UseBundledCli11 = $true
@@ -113,6 +133,16 @@ jobs:
             $arguments.InstallDependencies = $true
           }
           .\scripts\windows\build-local-windows-client.ps1 @arguments
+
+      - if: ${{ steps.restore-deepfilternet-cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .cache/deepfilternet-cargo-target
+          key: ${{ steps.restore-deepfilternet-cargo-cache.outputs.cache-primary-key }}
 
       - name: Verify packaged GStreamer screen-share runtime
         timeout-minutes: 10

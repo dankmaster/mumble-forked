@@ -60,9 +60,7 @@ if(deepfilternet)
 	set(TEST_DEEPFILTERNET_MODEL_DIR "$<TARGET_FILE_DIR:TestSpeechCleanup>/deepfilternet")
 	set(TEST_DEEPFILTERNET_RUNTIME "")
 	if(TARGET deepfilternet_runtime)
-		set(TEST_DEEPFILTERNET_RUNTIME
-			"${CMAKE_BINARY_DIR}/src/mumble/deepfilternet-libdf/cargo-target/release/deepfilter.dll"
-		)
+		set(TEST_DEEPFILTERNET_RUNTIME "${DEEPFILTERNET_CARGO_TARGET_DIR}/release/deepfilter.dll")
 		add_dependencies(TestSpeechCleanup deepfilternet_runtime)
 	elseif(EXISTS "${PROJECT_SOURCE_DIR}/src/mumble/deepfilternet/deepfilter.dll")
 		set(TEST_DEEPFILTERNET_RUNTIME "${PROJECT_SOURCE_DIR}/src/mumble/deepfilternet/deepfilter.dll")

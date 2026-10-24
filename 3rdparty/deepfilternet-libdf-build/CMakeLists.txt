@@ -15,7 +15,10 @@ find_program(CARGO_EXECUTABLE
 )
 
 if(CARGO_EXECUTABLE)
-	set(DEEPFILTERNET_CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo-target")
+	# CI points this outside the build directory so the compiled crates can be cached between runs.
+	set(DEEPFILTERNET_CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo-target" CACHE PATH
+		"Cargo target directory for the DeepFilterNet runtime")
+	file(TO_CMAKE_PATH "${DEEPFILTERNET_CARGO_TARGET_DIR}" DEEPFILTERNET_CARGO_TARGET_DIR)
 	set(DEEPFILTERNET_RUNTIME_FILE "${DEEPFILTERNET_CARGO_TARGET_DIR}/release/deepfilter.dll")
 	set(DEEPFILTERNET_RUNTIME_ENABLED ON)
 	set(DEEPFILTERNET_CARGO_ENV
