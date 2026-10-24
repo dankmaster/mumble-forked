@@ -1072,7 +1072,9 @@ QString gstCaptureApiToken() {
 	}
 
 #ifdef Q_OS_WIN
-	return QStringLiteral("wgc");
+	// Desktop Duplication re-emits the last frame when nothing on the monitor changes, while Windows
+	// Graphics Capture only delivers frames on change, which stalls viewers on a still screen.
+	return QStringLiteral("dxgi");
 #else
 	return QString();
 #endif
@@ -1534,19 +1536,43 @@ ScreenShareExternalProcess::LaunchResult
 				  << QStringLiteral("capture-api=%1").arg(captureSelection.captureApi)
 				  << captureSelection.sourceProperties
 				  << QStringLiteral("show-cursor=true") << QStringLiteral("!");
-		if (encoder.consumesD3D11Memory) {
+		// Windows Graphics Capture (used for window capture) only delivers a frame when the content
+		// changes, so a still window would stop the stream. Scale to the fixed encode size on the GPU
+		// first, then let d3d11compositor re-emit the last frame at the target rate. Square pixels
+		// make d3d11convert letterbox each window size instead of keeping the first window's aspect.
+		const bool repeatLastFrame =
+			captureSelection.captureApi == QLatin1String("wgc") && support.gstD3D11CompositorAvailable;
+		if (captureSelection.captureApi == QLatin1String("wgc") && !repeatLastFrame) {
+			launchWarnings.append(QStringLiteral("d3d11compositor is unavailable; viewers may report a still "
+												 "window as stopped because no new frames are sent."));
+		}
+		if (encoder.consumesD3D11Memory || repeatLastFrame) {
+			const QString scaledCaps =
+				QStringLiteral("video/x-raw(memory:D3D11Memory),format=%1,width=%2,height=%3,%4framerate=%5/1")
+					.arg(encoder.rawFormat)
+					.arg(width)
+					.arg(height)
+					.arg(repeatLastFrame ? QStringLiteral("pixel-aspect-ratio=1/1,") : QString())
+					.arg(fps);
 			arguments << QStringLiteral("video/x-raw(memory:D3D11Memory),framerate=%1/1").arg(fps)
 					  << QStringLiteral("!") << QStringLiteral("d3d11convert") << QStringLiteral("!");
 			if (support.gstD3D11ScaleAvailable) {
 				arguments << QStringLiteral("d3d11scale") << QStringLiteral("!");
 			}
-			arguments << QStringLiteral(
-							 "video/x-raw(memory:D3D11Memory),format=%1,width=%2,height=%3,framerate=%4/1")
-							 .arg(encoder.rawFormat)
-							 .arg(width)
-							 .arg(height)
-							 .arg(fps)
-					  << QStringLiteral("!");
+			arguments << scaledCaps << QStringLiteral("!");
+			if (repeatLastFrame) {
+				arguments << QStringLiteral("d3d11compositor") << QStringLiteral("background=black")
+						  << QStringLiteral("!") << scaledCaps << QStringLiteral("!");
+				if (!encoder.consumesD3D11Memory) {
+					arguments << QStringLiteral("d3d11download") << QStringLiteral("!");
+					arguments << QStringLiteral("video/x-raw,format=%1,width=%2,height=%3,framerate=%4/1")
+									 .arg(encoder.rawFormat)
+									 .arg(width)
+									 .arg(height)
+									 .arg(fps)
+							  << QStringLiteral("!");
+				}
+			}
 		} else {
 			arguments << QStringLiteral("d3d11download") << QStringLiteral("!") << QStringLiteral("videoconvert")
 					  << QStringLiteral("!") << QStringLiteral("videoscale") << QStringLiteral("!");
@@ -1901,6 +1927,8 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11screencapturesrc"));
 		support.gstD3D11ConvertAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11convert"));
 		support.gstD3D11ScaleAvailable   = gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11scale"));
+		support.gstD3D11CompositorAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11compositor"));
 		support.gstD3D11DownloadAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11download"));
 		support.gstNvD3D11H264EncoderAvailable =
@@ -2042,6 +2070,7 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 				   support.gstD3D11ScreenCaptureAvailable);
 	payload.insert(QStringLiteral("gst_d3d11convert_available"), support.gstD3D11ConvertAvailable);
 	payload.insert(QStringLiteral("gst_d3d11scale_available"), support.gstD3D11ScaleAvailable);
+	payload.insert(QStringLiteral("gst_d3d11compositor_available"), support.gstD3D11CompositorAvailable);
 	payload.insert(QStringLiteral("gst_d3d11download_available"), support.gstD3D11DownloadAvailable);
 	payload.insert(QStringLiteral("gst_nvd3d11h264enc_available"),
 				   support.gstNvD3D11H264EncoderAvailable);

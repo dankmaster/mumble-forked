@@ -34,6 +34,7 @@ public:
 		bool gstD3D11ScreenCaptureAvailable   = false;
 		bool gstD3D11ConvertAvailable         = false;
 		bool gstD3D11ScaleAvailable           = false;
+		bool gstD3D11CompositorAvailable      = false;
 		bool gstD3D11DownloadAvailable        = false;
 		bool gstNvD3D11H264EncoderAvailable  = false;
 		bool gstMfH264EncoderAvailable        = false;
