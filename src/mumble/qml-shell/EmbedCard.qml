@@ -130,7 +130,10 @@ Rectangle {
 		const kind = String(firstMedia.kind || "")
 		if (presentation === "social" || presentation === "thread")
 			return "post"
-		if (presentation === "game" || presentation === "marketplace" || providerId === "amazon")
+		if (presentation === "game" || presentation === "marketplace")
+			return "product"
+		// Amazon walls most fetches; without a picture or a price it is a link.
+		if (providerId === "amazon" && (imageSource.length > 0 || facts.length > 0))
 			return "product"
 		if (kind === "audio" || aspect === "compact-audio" || providerId === "soundcloud")
 			return "audio"
@@ -148,6 +151,34 @@ Rectangle {
 	function factText(fact) {
 		const value = fact.value
 		return typeof value === "number" ? Number(value).toLocaleString(Qt.locale(), "f", 0) : String(value)
+	}
+	// 1.2K, 312K, 1.2M: a post's counts at a glance.
+	function compactCount(value) {
+		const number = Number(value)
+		if (!isFinite(number))
+			return String(value)
+		const scaled = (divisor, suffix) => {
+			const result = number / divisor
+			return (result >= 100 ? Math.round(result) : Math.round(result * 10) / 10) + suffix
+		}
+		return number >= 1e9 ? scaled(1e9, "B") : number >= 1e6 ? scaled(1e6, "M")
+			: number >= 1e3 ? scaled(1e3, "K") : String(Math.round(number))
+	}
+	// "now", "12m", "3h", "4d", then the date.
+	function relativeTime(value) {
+		const time = Date.parse(String(value || ""))
+		if (!isFinite(time))
+			return ""
+		const seconds = Math.max(0, (Date.now() - time) / 1000)
+		if (seconds < 60)
+			return qsTr("now")
+		if (seconds < 3600)
+			return qsTr("%1m").arg(Math.floor(seconds / 60))
+		if (seconds < 86400)
+			return qsTr("%1h").arg(Math.floor(seconds / 3600))
+		if (seconds < 7 * 86400)
+			return qsTr("%1d").arg(Math.floor(seconds / 86400))
+		return new Date(time).toLocaleDateString(Qt.locale(), Locale.ShortFormat)
 	}
 	function initials(name) {
 		const words = String(name || "").replace(/^@/, "").trim().split(/\s+/).filter(word => word.length > 0)
@@ -199,7 +230,7 @@ Rectangle {
 				id: headerText
 				objectName: "embedCardHeader"
 				anchors.left: parent.left
-				anchors.right: menuButton.left
+				anchors.right: openButton.left
 				anchors.rightMargin: Theme.space2
 				anchors.verticalCenter: parent.verticalCenter
 				text: {
@@ -216,6 +247,48 @@ Rectangle {
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontCaption
 				font.weight: Font.DemiBold
+			}
+
+			// The source's name opens it, like the button beside it.
+			MouseArea {
+				anchors.left: headerText.left
+				anchors.verticalCenter: headerText.verticalCenter
+				width: Math.min(headerText.implicitWidth, headerText.width)
+				height: headerText.height
+				enabled: root.sourceUrl.length > 0
+				hoverEnabled: true
+				cursorShape: Qt.PointingHandCursor
+				onClicked: root.openRequested(root.sourceUrl)
+			}
+			// Open in the browser: always there, not only on hover, since a card's
+			// picture or player takes clicks for itself.
+			Item {
+				id: openButton
+				objectName: "embedCardOpenButton"
+				visible: root.sourceUrl.length > 0
+				anchors.right: menuButton.left
+				anchors.rightMargin: 2
+				anchors.verticalCenter: parent.verticalCenter
+				width: visible ? 24 : 0
+				height: 20
+				opacity: hoverArea.containsMouse || openArea.containsMouse || menuArea.containsMouse ? 1 : 0.55
+				Accessible.role: Accessible.Button
+				Accessible.name: qsTr("Open in browser")
+				Accessible.onPressAction: root.openRequested(root.sourceUrl)
+
+				ModernIcon {
+					anchors.centerIn: parent
+					name: "external"
+					size: 15
+					color: openArea.containsMouse ? Theme.textStrong : Theme.textMuted
+				}
+				MouseArea {
+					id: openArea
+					anchors.fill: parent
+					hoverEnabled: true
+					cursorShape: Qt.PointingHandCursor
+					onClicked: root.openRequested(root.sourceUrl)
+				}
 			}
 
 			Item {
@@ -282,20 +355,47 @@ Rectangle {
 				width: parent.width - 36 - Theme.space2
 				anchors.verticalCenter: parent.verticalCenter
 
-				Text {
+				Row {
 					width: parent.width
-					text: String(root.author.name || root.providerLabel)
-					textFormat: Text.PlainText
-					elide: Text.ElideRight
-					maximumLineCount: 1
-					color: Theme.textStrong
-					font.pixelSize: Theme.fontBody
-					font.weight: Font.DemiBold
+					spacing: Theme.space1
+
+					Text {
+						id: authorName
+						width: Math.min(implicitWidth, parent.width - (verifiedMark.visible ? verifiedMark.width + Theme.space1 : 0))
+						text: String(root.author.name || root.providerLabel)
+						textFormat: Text.PlainText
+						elide: Text.ElideRight
+						maximumLineCount: 1
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontBody
+						font.weight: Font.DemiBold
+					}
+					Rectangle {
+						id: verifiedMark
+						objectName: "embedCardVerified"
+						visible: root.author.verified === true
+						anchors.verticalCenter: authorName.verticalCenter
+						width: 14
+						height: 14
+						radius: 7
+						color: "#1d9bf0"
+						Accessible.name: qsTr("Verified")
+
+						Text {
+							anchors.centerIn: parent
+							text: "\u2713"
+							color: "#ffffff"
+							font.pixelSize: 10
+							font.weight: Font.Bold
+						}
+					}
 				}
 				Text {
+					objectName: "embedCardPostHandle"
 					width: parent.width
 					visible: text.length > 0
-					text: String(root.author.handle || "")
+					text: [String(root.author.handle || ""), root.relativeTime(root.content.publishedAt)]
+						.filter(part => part.length > 0).join("  ·  ")
 					textFormat: Text.PlainText
 					elide: Text.ElideRight
 					maximumLineCount: 1
@@ -333,6 +433,21 @@ Rectangle {
 					font.pixelSize: Theme.fontCaption
 				}
 			}
+		}
+
+		// A post's own words, before its pictures.
+		Text {
+			objectName: "embedCardPostText"
+			width: parent.width
+			visible: root.family === "post" && !root.playerShowsContent && text.length > 0
+			text: root.family === "post" ? root.description : ""
+			textFormat: Text.PlainText
+			wrapMode: Text.Wrap
+			elide: Text.ElideRight
+			maximumLineCount: 8
+			color: Theme.textMain
+			font.pixelSize: Theme.fontBody
+			lineHeight: 1.08
 		}
 
 		// Link: the text beside a small picture.
@@ -642,7 +757,9 @@ Rectangle {
 			MultiEffect {
 				id: backdrop
 				anchors.fill: parent
-				visible: still.visible && still.fillMode === Image.PreserveAspectFit && still.status === Image.Ready
+				// A portrait player keeps it at its sides instead of flat black bars.
+				visible: (still.visible || root.playing && root.aspect === "short")
+					&& still.fillMode === Image.PreserveAspectFit && still.status === Image.Ready
 				source: still
 				scale: still.paintedWidth > 0 && still.paintedHeight > 0
 					? Math.max(width / still.paintedWidth, height / still.paintedHeight) : 1
@@ -659,7 +776,8 @@ Rectangle {
 				objectName: "embedCardMediaImage"
 				anchors.fill: parent
 				visible: !root.playing && (root.family !== "post" || root.media.length <= 1)
-				source: mediaBox.shown && !root.playing && (root.family !== "post" || root.media.length <= 1)
+				source: mediaBox.shown && (!root.playing || root.aspect === "short")
+					&& (root.family !== "post" || root.media.length <= 1)
 					&& !(firstAnimated.active) ? root.imageSource : ""
 				sourceSize: Qt.size(1280, 960)
 				fillMode: root.aspect === "short" || root.family === "image" ? Image.PreserveAspectFit
@@ -913,14 +1031,14 @@ Rectangle {
 		Text {
 			width: parent.width
 			visible: root.family !== "link" && root.family !== "audio" && root.family !== "video"
-				&& !root.playerShowsContent && text.length > 0
+				&& root.family !== "post" && !root.playerShowsContent && text.length > 0
 			text: root.description
 			textFormat: Text.PlainText
 			wrapMode: Text.Wrap
 			elide: Text.ElideRight
-			maximumLineCount: root.family === "post" ? 6 : 3
-			color: root.family === "post" ? Theme.textMain : Theme.textMuted
-			font.pixelSize: root.family === "post" ? Theme.fontBody : Theme.fontLabel
+			maximumLineCount: 3
+			color: Theme.textMuted
+			font.pixelSize: Theme.fontLabel
 		}
 
 		// Facts: one quiet line.
@@ -928,8 +1046,10 @@ Rectangle {
 			objectName: "embedCardFacts"
 			width: parent.width
 			visible: text.length > 0 && !root.playerShowsContent
-			text: root.facts.slice(0, 4).map(fact => fact.key === "price"
-				? root.factText(fact) : String(fact.label || "") + " " + root.factText(fact)).join("  ·  ")
+			text: root.facts.slice(0, 4).map(fact => fact.key === "price" ? root.factText(fact)
+				: root.family === "post" && typeof fact.value === "number"
+					? root.compactCount(fact.value) + " " + String(fact.label || "").toLowerCase()
+				: String(fact.label || "") + " " + root.factText(fact)).join("  ·  ")
 			textFormat: Text.PlainText
 			elide: Text.ElideRight
 			maximumLineCount: 1

@@ -5822,10 +5822,65 @@ void TestQmlClientModels::chatTimelineBuildsTypedEmbedDocuments() {
 			  QStringLiteral("https://www.flashback.org/sp95046057") }
 		} }
 	});
+	// A thread link is a page to open, with its title; it is not a post by nobody.
 	QCOMPARE(flashbackDocument.value(QStringLiteral("presentation")).toString(),
-			 QStringLiteral("thread"));
+			 QStringLiteral("link"));
+	QCOMPARE(flashbackDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("title")).toString(),
+			 QStringLiteral("Regeringen halverar priset på månadskort"));
 	QCOMPARE(flashbackDocument.value(QStringLiteral("thread")).toMap()
 				 .value(QStringLiteral("items")).toList().size(), 1);
+
+	// A link to one post shows that post.
+	const QVariantMap flashbackPostDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.flashback.org/p95046057") },
+		{ QStringLiteral("host"), QStringLiteral("www.flashback.org") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("flashback") },
+			{ QStringLiteral("forumLinkKind"), QStringLiteral("post") },
+			{ QStringLiteral("forumThreadTitle"), QStringLiteral("En tråd") }
+		} }
+	});
+	QCOMPARE(flashbackPostDocument.value(QStringLiteral("presentation")).toString(),
+			 QStringLiteral("thread"));
+
+	// Before the thread is read, the page title stands in, without the forum's suffix.
+	const QVariantMap flashbackUnreadDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.flashback.org/t1") },
+		{ QStringLiteral("host"), QStringLiteral("www.flashback.org") },
+		{ QStringLiteral("title"), QStringLiteral("Bästa pizzan i stan - Flashback Forum") },
+		{ QStringLiteral("metadata"), QVariantMap { { QStringLiteral("provider"), QStringLiteral("flashback") } } }
+	});
+	QCOMPARE(flashbackUnreadDocument.value(QStringLiteral("content")).toMap()
+				 .value(QStringLiteral("title")).toString(),
+			 QStringLiteral("Bästa pizzan i stan"));
+
+	// Twitch: a stream card with its facts and no player; multitwitch names its streams.
+	const QVariantMap twitchDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.twitch.tv/ewc_plus_en") },
+		{ QStringLiteral("host"), QStringLiteral("www.twitch.tv") },
+		{ QStringLiteral("title"), QStringLiteral("EWC_Plus_EN - Twitch") },
+		{ QStringLiteral("metadata"), QVariantMap {
+			{ QStringLiteral("provider"), QStringLiteral("twitch") },
+			{ QStringLiteral("twitchDisplayName"), QStringLiteral("EWC_Plus_EN") },
+			{ QStringLiteral("twitchBadge"), QStringLiteral("Live") },
+			{ QStringLiteral("twitchGame"), QStringLiteral("Dota 2") },
+			{ QStringLiteral("twitchViewerCount"), 1234 },
+			{ QStringLiteral("twitchSuggestedEmbedUrl"), QStringLiteral("https://player.twitch.tv/?channel=x") }
+		} }
+	});
+	QCOMPARE(twitchDocument.value(QStringLiteral("provider")).toMap().value(QStringLiteral("label")).toString(),
+			 QStringLiteral("Twitch"));
+	QCOMPARE(twitchDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("title")).toString(),
+			 QStringLiteral("EWC_Plus_EN"));
+	QCOMPARE(twitchDocument.value(QStringLiteral("facts")).toList().size(), 3);
+	QCOMPARE(twitchDocument.value(QStringLiteral("playback")).toMap().value(QStringLiteral("mode")).toString(),
+			 QStringLiteral("none"));
+	const QVariantMap multitwitchDocument = normalizedDocument({
+		{ QStringLiteral("url"), QStringLiteral("https://www.multitwitch.tv/alpha/beta") },
+		{ QStringLiteral("host"), QStringLiteral("www.multitwitch.tv") }
+	});
+	QCOMPARE(multitwitchDocument.value(QStringLiteral("content")).toMap().value(QStringLiteral("title")).toString(),
+			 QStringLiteral("alpha  ·  beta"));
 
 	const QVariantMap articleDocument = normalizedDocument({
 		{ QStringLiteral("url"),

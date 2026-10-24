@@ -170,7 +170,23 @@ TestCase {
 		verify(box.visible)
 		// Three pictures: one large beside two stacked, in a 16:9 box.
 		compare(box.height, Math.round(card.contentWidth * 9 / 16))
-		compare(findChild(card, "embedCardFacts").text, "Replies 18  ·  Likes 624")
+		// A post's counts read compactly, the number first.
+		compare(findChild(card, "embedCardFacts").text, "18 replies  ·  624 likes")
+	}
+
+	function test_counts_read_compactly_and_every_card_opens_in_the_browser() {
+		const card = cardFor(samples().post)
+		compare(card.compactCount(624), "624")
+		compare(card.compactCount(18109), "18.1K")
+		compare(card.compactCount(311533), "312K")
+		compare(card.compactCount(1200000), "1.2M")
+		const openSpy = createTemporaryObject(spyComponent, testCase, { "target": card, "signalName": "openRequested" })
+		const open = findChild(card, "embedCardOpenButton")
+		verify(open.visible)
+		verify(open.opacity > 0, "the button is there without hovering")
+		mouseClick(open)
+		compare(openSpy.count, 1)
+		compare(openSpy.signalArguments[0][0], card.sourceUrl)
 	}
 
 	function test_play_asks_the_view_and_the_box_takes_the_players_height() {

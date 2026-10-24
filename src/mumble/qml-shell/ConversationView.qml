@@ -968,7 +968,7 @@ ListView {
 				}
 				ModernSlider {
 					anchors.verticalCenter: parent.verticalCenter
-					width: Math.max(80, parent.width - 120)
+					width: Math.max(80, parent.width - 160)
 					from: 0
 					to: 100
 					stepSize: 1
@@ -981,6 +981,22 @@ ListView {
 					text: view.session ? Math.round(view.session.volume) + "%" : ""
 					color: Theme.textMuted
 					font.pixelSize: Theme.fontCaption
+				}
+			}
+			// A provider widget (a Facebook clip, SoundCloud) has no close of its
+			// own; without this the only way out was scrolling it away.
+			ModernIconButton {
+				objectName: "conversationPlayerVolumeClose"
+				anchors.right: parent.right
+				anchors.rightMargin: Theme.space1
+				anchors.verticalCenter: parent.verticalCenter
+				dense: true
+				iconName: "close"
+				Accessible.name: qsTr("Close the player")
+				onClicked: {
+					if (view.session)
+						view.session.close()
+					view.ownedSessionId = ""
 				}
 			}
 		}

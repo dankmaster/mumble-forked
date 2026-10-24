@@ -4,6 +4,7 @@
 #include "EmbedDocument.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
@@ -97,6 +98,12 @@ namespace {
 		if (host.endsWith(QLatin1String("amazon.se")) || host.endsWith(QLatin1String("amazon.com"))) {
 			return QStringLiteral("amazon");
 		}
+		if (host == QLatin1String("multitwitch.tv") || host.endsWith(QLatin1String(".multitwitch.tv"))) {
+			return QStringLiteral("multitwitch");
+		}
+		if (host == QLatin1String("twitch.tv") || host.endsWith(QLatin1String(".twitch.tv"))) {
+			return QStringLiteral("twitch");
+		}
 		return {};
 	}
 
@@ -127,6 +134,8 @@ namespace {
 			{ QStringLiteral("spotify"), QStringLiteral("Spotify") },
 			{ QStringLiteral("soundcloud"), QStringLiteral("SoundCloud") },
 			{ QStringLiteral("amazon"), QStringLiteral("Amazon") },
+			{ QStringLiteral("twitch"), QStringLiteral("Twitch") },
+			{ QStringLiteral("multitwitch"), QStringLiteral("Multitwitch") },
 			{ QStringLiteral("direct"), QStringLiteral("Media") }
 		};
 		return labels.value(provider, host);
@@ -250,8 +259,14 @@ namespace {
 			|| provider == QLatin1String("facebook")) {
 			return QStringLiteral("social-post");
 		}
+		if (provider == QLatin1String("twitch") || provider == QLatin1String("multitwitch")) {
+			return QStringLiteral("article");
+		}
 		if (provider == QLatin1String("flashback") || previewKind == QLatin1String("forum")) {
-			return QStringLiteral("forum-post");
+			// A link to one post shows that post; a thread link is a page to open,
+			// with its title and forum, not a post by nobody.
+			const QString linkKind = firstText(metadata, { QStringLiteral("forumLinkKind") }, 32);
+			return linkKind == QLatin1String("post") ? QStringLiteral("forum-post") : QStringLiteral("forum-thread");
 		}
 		if (previewKind == QLatin1String("article") || metadata.contains(QStringLiteral("articleTitle"))
 			|| metadata.contains(QStringLiteral("articlePublisher"))) {
@@ -414,7 +429,14 @@ namespace {
 
 	QVariantList facts(const QString &provider, const QString &type, const QVariantMap &metadata) {
 		QVariantList result;
-		if (provider == QLatin1String("steam")) {
+		if (provider == QLatin1String("twitch")) {
+			appendFact(result, QStringLiteral("state"), QStringLiteral("Status"),
+					   metadata.value(QStringLiteral("twitchBadge")));
+			appendFact(result, QStringLiteral("game"), QStringLiteral("Playing"),
+					   metadata.value(QStringLiteral("twitchGame")));
+			appendFact(result, QStringLiteral("viewers"), QStringLiteral("Viewers"),
+					   metadata.value(QStringLiteral("twitchViewerCount")));
+		} else if (provider == QLatin1String("steam")) {
 			appendFact(result, QStringLiteral("price"), QStringLiteral("Price"),
 					   metadata.value(QStringLiteral("steamPrice")));
 			appendFact(result, QStringLiteral("developer"), QStringLiteral("Developer"),
@@ -563,6 +585,7 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		|| provider == QLatin1String("imgur") || provider == QLatin1String("reddit")
 		|| provider == QLatin1String("spotify") || provider == QLatin1String("soundcloud")
 		|| provider == QLatin1String("amazon")
+		|| provider == QLatin1String("twitch") || provider == QLatin1String("multitwitch")
 		|| provider == QLatin1String("direct")
 		|| type == QLatin1String("article");
 
@@ -596,14 +619,41 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 		}
 		title.clear();
 	} else if (provider == QLatin1String("flashback")) {
-		title = firstText(metadata, { QStringLiteral("forumThreadTitle") }, 512);
-		description = firstText(metadata, { QStringLiteral("forumPostExcerpt") }, 4096);
+		// The page title, without the forum's suffix, until the thread is read.
+		static const QRegularExpression s_forumTitleSuffix(QStringLiteral(R"(\s*-\s*Flashback Forum\s*$)"),
+															  QRegularExpression::CaseInsensitiveOption);
+		const QString threadTitle = firstText(metadata, { QStringLiteral("forumThreadTitle") }, 512);
+		title = threadTitle.isEmpty() ? QString(title).remove(s_forumTitleSuffix).trimmed() : threadTitle;
+		const QString excerpt = firstText(metadata, { QStringLiteral("forumPostExcerpt") }, 4096);
+		if (!excerpt.isEmpty()) {
+			description = excerpt;
+		}
 	} else if (provider == QLatin1String("blocket")) {
 		title = firstText(metadata, { QStringLiteral("listingTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("listingDescription") }, 4096);
 	} else if (provider == QLatin1String("amazon")) {
 		title = firstText(metadata, { QStringLiteral("productTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("productDescription") }, 4096);
+	} else if (provider == QLatin1String("twitch")) {
+		// The facts say live, game and viewers; the old description repeated them.
+		const QString channel =
+			firstText(metadata, { QStringLiteral("twitchDisplayName"), QStringLiteral("twitchChannel") }, 128);
+		if (title.isEmpty() || title.endsWith(QLatin1String(" - Twitch"))) {
+			title = channel;
+		}
+		description.clear();
+	} else if (provider == QLatin1String("multitwitch")) {
+		// multitwitch.tv/<channel>/<channel>/...: the streams it shows side by side.
+		QStringList channels;
+		for (const QString &segment : QUrl(sourceUrl).path().split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+			if (channels.size() < 8 && !segment.isEmpty()) {
+				channels << segment.left(64);
+			}
+		}
+		title       = channels.isEmpty() ? QStringLiteral("Multitwitch") : channels.join(QStringLiteral("  ·  "));
+		description = channels.size() > 1
+			? QStringLiteral("%1 Twitch streams side by side").arg(channels.size())
+			: QStringLiteral("Twitch streams side by side");
 	} else if (type == QLatin1String("article")) {
 		title = firstText(metadata, { QStringLiteral("articleTitle") }, 512);
 		description = firstText(metadata, { QStringLiteral("articleDescription") }, 4096);
@@ -630,6 +680,14 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 	QVariantMap contentAuthor = author(provider, metadata);
 	QString subtitle          = firstText(preview, { QStringLiteral("subtitle") }, 512);
 	const QString label       = providerLabel(provider, metadata, host);
+	// A thread is the forum's, not its first poster's: name its section.
+	if (type == QLatin1String("forum-thread")) {
+		contentAuthor.clear();
+		const QString section = firstText(metadata, { QStringLiteral("forumName"), QStringLiteral("forumCategory") }, 256);
+		if (!section.isEmpty()) {
+			subtitle = section;
+		}
+	}
 	if (contentAuthor.isEmpty() && !subtitle.isEmpty()) {
 		const QString prefix = label + QStringLiteral(" by ");
 		if (subtitle.startsWith(prefix, Qt::CaseInsensitive) && subtitle.size() > prefix.size()) {
@@ -683,11 +741,12 @@ QVariantMap EmbedDocument::fromNormalizedPreview(const QVariantMap &preview) {
 	const QString tiktokKind =
 		firstText(metadata, { QStringLiteral("tiktokMediaKind") }, 32).toLower();
 	const bool providerPlaybackAllowed =
-		type != QLatin1String("social-post")
+		provider != QLatin1String("twitch") && provider != QLatin1String("multitwitch")
+		&& (type != QLatin1String("social-post")
 		|| provider == QLatin1String("facebook")
 		|| (provider == QLatin1String("instagram")
 			&& (instagramKind == QLatin1String("reel") || instagramKind == QLatin1String("tv")))
-		|| (provider == QLatin1String("tiktok") && tiktokKind != QLatin1String("photo"));
+		|| (provider == QLatin1String("tiktok") && tiktokKind != QLatin1String("photo")));
 	// Prefer an already validated, bounded direct stream. Provider players stay
 	// available as a fallback for sources such as YouTube where no honest raw
 	// media URL is available.
