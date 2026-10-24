@@ -15,7 +15,9 @@ ApplicationWindow {
 	property string lastRefreshSource: ""
 	property bool retryingSource: false
 	property bool originalTimedOut: false
-	property int originalLoadTimeout: 15000
+	// A phone photo of several MB comes through the server's asset transfer and
+	// often takes longer than 15 s; it swaps in silently whenever it arrives.
+	property int originalLoadTimeout: 60000
 	property real zoom: 1.0
 	property real panX: 0
 	property real panY: 0
