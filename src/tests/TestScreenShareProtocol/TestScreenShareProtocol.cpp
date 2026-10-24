@@ -61,6 +61,7 @@ QJsonObject fixturePayload(const QString &mode = QStringLiteral("fragmented")) {
 		{ QStringLiteral("native_frame_requested"), true }, { QStringLiteral("fixture_mode"), mode } };
 }
 
+#ifdef Q_OS_WIN
 QJsonObject ownedPayload(qint64 processID, quint64 sequence, const QString &mode = QStringLiteral("fragmented")) {
 	auto payload = fixturePayload(mode);
 	payload.insert(QStringLiteral("owner_process_id"), QString::number(processID));
@@ -68,6 +69,7 @@ QJsonObject ownedPayload(qint64 processID, quint64 sequence, const QString &mode
 	payload.insert(QStringLiteral("owner_operation_sequence"), QString::number(sequence));
 	return payload;
 }
+#endif
 
 void sendFixtureRequest(QLocalSocket &socket, const QString &name, Mumble::ScreenShare::IPC::Command command,
 	const QJsonObject &payload, int version = Mumble::ScreenShare::IPC::PROTOCOL_VERSION) {
