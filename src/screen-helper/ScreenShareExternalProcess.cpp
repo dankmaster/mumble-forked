@@ -1370,7 +1370,16 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 			selection.rawFormat           = QStringLiteral("NV12");
 			selection.consumesD3D11Memory = true;
 			appendCommonH264Properties(&selection.properties);
-			selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize));
+			// Real-time screen content: a low-latency preset, capped VBR so a still screen costs little,
+			// a VBV of about four frames so keyframes do not burst far above the cap, and spatial AQ to
+			// keep text sharp. Keyframe requests (PLI) reach the encoder, so a 2 s GOP is enough.
+			selection.properties.append(QStringLiteral("preset=p4"));
+			selection.properties.append(QStringLiteral("tune=ultra-low-latency"));
+			selection.properties.append(QStringLiteral("rc-mode=vbr"));
+			selection.properties.append(
+				QStringLiteral("vbv-buffer-size=%1").arg(qMax(1, maxBitrateKbps * 4 / fps)));
+			selection.properties.append(QStringLiteral("spatial-aq=true"));
+			selection.properties.append(QStringLiteral("gop-size=%1").arg(gopSize * 2));
 			selection.properties.append(QStringLiteral("bframes=0"));
 			selection.properties.append(QStringLiteral("zerolatency=true"));
 		} else if (backendID == QLatin1String("gstreamer-mf") && support.gstMfH264EncoderAvailable) {
