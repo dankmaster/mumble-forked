@@ -359,6 +359,19 @@ Rectangle {
 		+ "if(typeof window.__mumbleVolume==='number')this.volume=window.__mumbleVolume;"
 		+ "if(typeof window.__mumbleMuted==='boolean')this.muted=window.__mumbleMuted;}catch(e){}"
 		+ "return play.apply(this,arguments);};})();"
+	// YouTube shows its title, logo, "More videos" and a large play/pause sign
+	// over the video for seconds at a time, and whenever the pointer rests on it:
+	// half of a Short. Our controls drive playback, so its overlay is hidden.
+	readonly property string youTubeChromeSource: "(function(){"
+		+ "if(!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname))return;"
+		+ "const css='.ytp-chrome-top,.ytp-chrome-top-buttons,.ytp-gradient-top,.ytp-gradient-bottom,"
+		+ ".ytp-pause-overlay,.ytp-watermark,.ytp-youtube-button,.ytp-large-play-button,.ytp-bezel,"
+		+ ".ytp-show-cards-title,.ytp-ce-element,.ytp-paid-content-overlay,.ytp-impression-link,"
+		+ ".ytp-title,.ytp-copylink-button,.ytp-overflow-button{display:none!important}';"
+		+ "const add=function(){if(document.getElementById('mumble-yt-chrome'))return;"
+		+ "const style=document.createElement('style');style.id='mumble-yt-chrome';style.textContent=css;"
+		+ "(document.head||document.documentElement).appendChild(style);};"
+		+ "if(document.documentElement)add();document.addEventListener('DOMContentLoaded',add);})();"
 	function installMediaTracker(view) {
 		if (!view || !view.userScripts || typeof WebEngine === "undefined" || typeof WebEngine.script !== "function")
 			return
@@ -369,6 +382,13 @@ Rectangle {
 		script.worldId = WebEngineScript.MainWorld
 		script.runsOnSubFrames = true
 		view.userScripts.insert(script)
+		const chrome = WebEngine.script()
+		chrome.name = "mumbleYouTubeChrome"
+		chrome.sourceCode = youTubeChromeSource
+		chrome.injectionPoint = WebEngineScript.DocumentCreation
+		chrome.worldId = WebEngineScript.MainWorld
+		chrome.runsOnSubFrames = true
+		view.userScripts.insert(chrome)
 	}
 
 	function playerScript(command, value) {
