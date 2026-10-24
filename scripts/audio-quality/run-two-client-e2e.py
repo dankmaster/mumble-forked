@@ -46,7 +46,7 @@ HEX64 = re.compile(r"[0-9a-f]{64}")
 SAMPLE_RATE_HZ = 48_000
 FRAME_SAMPLES = 480
 REQUIRED_EXECUTION_SEMANTICS_VERSION = 8
-REQUIRED_MIX_CURVE_VERSION = 6
+REQUIRED_MIX_CURVE_VERSION = 7
 REQUIRED_ADAPTATION_POLICY_VERSION = 1
 # The unchanged local Mumble route has a bounded startup buffer that is not
 # profile latency: four fixed 10 ms route frames plus the selected Opus packet

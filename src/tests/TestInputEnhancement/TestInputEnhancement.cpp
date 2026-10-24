@@ -63,6 +63,7 @@ struct FakeState {
 	unsigned int latency             = 960;
 	unsigned int latencyAfterPrepare = 0;
 	float lastMix                    = -1.0f;
+	float speechProbability          = -1.0f;
 	std::vector< float > observedMixes;
 	QString activeModelId;
 	QString activeModelPath;
@@ -102,6 +103,7 @@ public:
 	QString activeModelId() const override { return m_state.activeModelId; }
 	QString activeModelPath() const override { return m_state.activeModelPath; }
 	bool usedFallback() const override { return m_state.usedFallback; }
+	float lastSpeechProbability() const noexcept override { return m_state.speechProbability; }
 
 	void processInPlace(float *samples, unsigned int sampleCount, float mixFactor) override {
 		++m_state.processCalls;
@@ -229,6 +231,8 @@ private slots:
 	void liveMixOverrideUsesConfiguredProcessorWithoutReconfigure();
 	void balancedUsesFullOnsetRampAfterWeakPreOnset();
 	void neuralOnsetRampRearmsAfterSeparatedTransient();
+	void balancedVoiceActivityMakesPausesFullyWet();
+	void balancedVoiceActivityProtectsSpeechAndTail();
 	void deepFilterProfilesProtectDelayedDrySpeechEdges();
 	void preparationFailuresFailClosed();
 	void runtimeUnhealthyProcessorFailsClosed();
@@ -290,7 +294,7 @@ void TestInputEnhancement::trackedDescriptorExactlyMatchesCompiledCatalog() {
 	QCOMPARE(root.value(QStringLiteral("catalogRevision")).toString(), QStringLiteral("input-recipes-v4"));
 	QCOMPARE(RecipeCatalog::currentRevision, 1U);
 	QCOMPARE(recipeExecutionSemanticsVersion, 8U);
-	QCOMPARE(qualifiedMixCurveVersion, 6U);
+	QCOMPARE(qualifiedMixCurveVersion, 7U);
 	QCOMPARE(adaptationPolicyVersion, 1U);
 	QVERIFY(root.value(QStringLiteral("recipes")).isArray());
 
@@ -1196,6 +1200,96 @@ void TestInputEnhancement::neuralOnsetRampRearmsAfterSeparatedTransient() {
 				< 0.00001f);
 	}
 	QVERIFY(std::abs(state.observedMixes[speechBegin + onsetMixCaps.size()] - recipe.mixFactor()) < 0.00001f);
+}
+
+void TestInputEnhancement::balancedVoiceActivityMakesPausesFullyWet() {
+	FakeState state;
+	state.latency           = balancedLatencyBudgetSamples;
+	state.speechProbability = 0.0f;
+	Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
+	const Recipe recipe = RecipeCatalog::resolve(requestFor(Profile::Balanced));
+	QVERIFY(recipe.mixFactor() < 1.0f);
+	QVERIFY(pipeline.configure(recipe));
+	state.observedMixes.clear();
+
+	std::array< float, frameSamples > frame = {};
+	for (unsigned int index = 0; index < 6; ++index) {
+		frame.fill(0.0f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+	// A keyboard-like transient that the model does not classify as speech must
+	// not open the energy onset ramp and let the dry click through.
+	frame.fill(0.8f);
+	QVERIFY(pipeline.processFrame(frame));
+	const unsigned int latencyFrames = state.latency / frameSamples;
+	for (unsigned int index = 0; index < latencyFrames + 8; ++index) {
+		frame.fill(0.0f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+
+	QVERIFY(!state.observedMixes.empty());
+	for (const float mix : state.observedMixes) {
+		QCOMPARE(mix, 1.0f);
+	}
+}
+
+void TestInputEnhancement::balancedVoiceActivityProtectsSpeechAndTail() {
+	FakeState state;
+	state.latency           = balancedLatencyBudgetSamples;
+	state.speechProbability = 0.0f;
+	Pipeline pipeline(factoryFor(state), [] { return std::uint64_t{ 100 }; });
+	const Recipe recipe = RecipeCatalog::resolve(requestFor(Profile::Balanced));
+	QVERIFY(pipeline.configure(recipe));
+	state.observedMixes.clear();
+
+	std::array< float, frameSamples > frame = {};
+	for (unsigned int index = 0; index < 6; ++index) {
+		frame.fill(0.0f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+	QCOMPARE(state.lastMix, 1.0f);
+
+	// The model's speech estimate runs ahead of the delayed dry frame. The mix
+	// returns to the qualified speech-time value at once, and the unchanged
+	// energy onset ramp follows when the speech reaches the mixed timeline.
+	state.speechProbability = 0.9f;
+	const std::size_t speechBegin = state.observedMixes.size();
+	const unsigned int latencyFrames = state.latency / frameSamples;
+	for (unsigned int index = 0; index < 12; ++index) {
+		frame.fill(0.25f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+	for (unsigned int index = 0; index < latencyFrames; ++index) {
+		QVERIFY(std::abs(state.observedMixes[speechBegin + index] - recipe.mixFactor()) < 0.00001f);
+	}
+	constexpr std::array< float, 8 > onsetMixCaps = { 0.0f, 0.0f, 0.0f, 0.0f, 0.10f, 0.25f, 0.45f, 0.70f };
+	for (std::size_t index = 0; index < onsetMixCaps.size(); ++index) {
+		QVERIFY(std::abs(state.observedMixes[speechBegin + latencyFrames + index]
+						 - std::min(recipe.mixFactor(), onsetMixCaps[index]))
+				< 0.00001f);
+	}
+	QVERIFY(std::abs(state.lastMix - recipe.mixFactor()) < 0.00001f);
+
+	// After the estimate falls, the three-frame look-around window and the
+	// 250 ms tail hold keep the speech-time mix before the pause fades to wet.
+	state.speechProbability = 0.0f;
+	const std::size_t tailBegin = state.observedMixes.size();
+	constexpr unsigned int protectedTailFrames = 26;
+	for (unsigned int index = 0; index < protectedTailFrames + 12; ++index) {
+		frame.fill(0.25f);
+		QVERIFY(pipeline.processFrame(frame));
+	}
+	for (unsigned int index = 0; index < protectedTailFrames; ++index) {
+		QVERIFY(std::abs(state.observedMixes[tailBegin + index] - recipe.mixFactor()) < 0.00001f);
+	}
+	const float firstFadeMix = state.observedMixes[tailBegin + protectedTailFrames];
+	QVERIFY(firstFadeMix > recipe.mixFactor());
+	QVERIFY(firstFadeMix < 1.0f);
+	for (std::size_t index = tailBegin + protectedTailFrames + 1; index < state.observedMixes.size(); ++index) {
+		QVERIFY(state.observedMixes[index] >= state.observedMixes[index - 1]);
+		QVERIFY(state.observedMixes[index] - state.observedMixes[index - 1] <= 0.08f + 0.00001f);
+	}
+	QCOMPARE(state.lastMix, 1.0f);
 }
 
 void TestInputEnhancement::deepFilterProfilesProtectDelayedDrySpeechEdges() {

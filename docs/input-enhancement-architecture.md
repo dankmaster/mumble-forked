@@ -77,6 +77,17 @@ ramp and quiet-room release guard. The release guard follows the learned room
 floor and opens only for weak utterance tails, preserving final consonants and
 room decay without weakening suppression across noisy low-energy speech.
 
+Mix curve version 7 confines Balanced's delayed-dry share to speech. RNNoise
+reports a speech probability for its newest analysed frame, two frames ahead of
+the delayed frame being mixed. While the maximum of the last three estimates is
+at least 0.15, or for 250 ms after it last reached 0.50, Balanced uses the
+unchanged speech-time mix together with the onset ramp and release guard. In
+pauses it is fully wet, so the 20–55 control interval no longer caps
+suppression between words to a few dB. The mix drops to the speech-time value
+immediately and fades back to wet by at most 0.08 per frame. An energy
+transient that the model does not classify as speech does not open the dry
+path. Engines without a voice-activity estimate keep the previous behavior.
+
 The 5 ms Balanced and 8 ms Quality/Voice Focus values are p99 qualification
 limits. The hard runtime catastrophe threshold is 10 ms; a single scheduler
 preemption below that threshold is recorded but does not unnecessarily change

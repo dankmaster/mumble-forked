@@ -74,7 +74,7 @@ def _recipe(
 		"latencyBudgetMs": latency_ms,
 		"minimumCpuClass": minimum_cpu,
 		"executionSemanticsVersion": 8,
-		"mixCurveVersion": 6,
+		"mixCurveVersion": 7,
 		"adaptationPolicyVersion": 1,
 	}
 

@@ -35,7 +35,7 @@ inline constexpr unsigned int crispLatencyBudgetSamples = qualityLatencyBudgetSa
 // qualified mix curve, or callback-safe adaptation policy must increment the
 // corresponding value.
 inline constexpr std::uint32_t recipeExecutionSemanticsVersion = 8;
-inline constexpr std::uint32_t qualifiedMixCurveVersion        = 6;
+inline constexpr std::uint32_t qualifiedMixCurveVersion        = 7;
 inline constexpr std::uint32_t adaptationPolicyVersion         = 1;
 
 inline QString productRecipeCatalogRevision() {
@@ -422,10 +422,13 @@ private:
 	void resetCounters() noexcept;
 	void resetSpeechEdgeProtection() noexcept;
 	float speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept;
+	void resetBalancedVoiceActivity() noexcept;
+	float balancedVoiceActivityMixFactor(float edgeProtectedMixFactor) noexcept;
 	void resetClassicMix() noexcept;
 	static constexpr std::uint64_t processingHistogramBucketNanoseconds = 10'000;
 	static constexpr std::size_t processingHistogramBucketCount         = 2'001;
 	static constexpr unsigned int deepFilterOnsetRampFrames             = 8;
+	static constexpr unsigned int balancedVoiceActivityHistoryFrames    = 3;
 
 	ProcessorFactory m_processorFactory;
 	NanosecondClock m_clock;
@@ -467,6 +470,10 @@ private:
 	unsigned int m_speechEdgeBelowReleaseFrames                                      = 0;
 	unsigned int m_speechEdgeProtectionFrame                                         = deepFilterOnsetRampFrames;
 	bool m_speechEdgeActive                                                          = false;
+	std::array< float, balancedVoiceActivityHistoryFrames > m_balancedSpeechProbabilities = {};
+	unsigned int m_balancedSpeechProbabilityPosition                                 = 0;
+	unsigned int m_balancedSpeechHoldFrames                                          = 0;
+	float m_balancedWetMix                                                           = -1.0f;
 	bool m_fallbackActive                                                             = false;
 };
 

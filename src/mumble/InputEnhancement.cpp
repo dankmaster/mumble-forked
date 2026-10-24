@@ -652,6 +652,7 @@ bool Pipeline::configure(const Recipe &recipe, const QString &authorizedModelSha
 	m_fallbackReason       = FallbackReason::None;
 	resetCounters();
 	resetSpeechEdgeProtection();
+	resetBalancedVoiceActivity();
 	resetClassicMix();
 
 	if (!recipe.usesNeuralProcessor()) {
@@ -882,7 +883,10 @@ bool Pipeline::processFrame(float *samples, unsigned int sampleCount, float mixF
 		++m_neuralFrames;
 		return elapsedNanoseconds;
 	};
-	const float protectedMixFactor = speechEdgeProtectedMixFactor(mixFactor);
+	float protectedMixFactor = speechEdgeProtectedMixFactor(mixFactor);
+	if (m_recipe->effectiveProfile() == Profile::Balanced) {
+		protectedMixFactor = balancedVoiceActivityMixFactor(protectedMixFactor);
+	}
 	try {
 		m_processor->processInPlace(samples, frameSamples, protectedMixFactor);
 	} catch (...) {
@@ -1059,6 +1063,66 @@ float Pipeline::speechEdgeProtectedMixFactor(float requestedMixFactor) noexcept 
 		return 0.0f;
 	}
 	return boundedMixFactor;
+}
+
+void Pipeline::resetBalancedVoiceActivity() noexcept {
+	m_balancedSpeechProbabilities.fill(0.0f);
+	m_balancedSpeechProbabilityPosition = 0;
+	m_balancedSpeechHoldFrames          = 0;
+	m_balancedWetMix                    = -1.0f;
+}
+
+float Pipeline::balancedVoiceActivityMixFactor(float edgeProtectedMixFactor) noexcept {
+	// The recipe's Balanced mix keeps a large delayed-dry share because stronger
+	// RNNoise candidates lost clean utterance ends. Applied to every frame, that
+	// share also keeps most of the room noise between words. RNNoise reports a
+	// speech probability for its newest analysed frame, which is two frames ahead
+	// of the delayed frame mixed here. Use it to confine the dry share to speech
+	// and its tail: the speech-time mix (including the energy onset ramp and the
+	// quiet-room release guard) is unchanged, while pauses become fully wet.
+	const float speechProbability = m_processor ? m_processor->lastSpeechProbability() : -1.0f;
+	if (!(speechProbability >= 0.0f)) {
+		// Engines without voice activity, and the first frame after reset, keep
+		// the speech-time mix and its edge protection.
+		m_balancedWetMix = edgeProtectedMixFactor;
+		return edgeProtectedMixFactor;
+	}
+
+	constexpr float speechProbabilityThreshold     = 0.50f;
+	constexpr float weakSpeechProbabilityThreshold = 0.15f;
+	// 250 ms of protected tail covers final consonants and room decay after the
+	// model's speech estimate has already fallen.
+	constexpr unsigned int tailHoldFrames = 25;
+	// Fade the residual noise floor out over roughly 90 ms instead of stepping
+	// it at a frame boundary.
+	constexpr float wetMixRisePerFrame = 0.08f;
+
+	m_balancedSpeechProbabilities[m_balancedSpeechProbabilityPosition] = std::min(speechProbability, 1.0f);
+	m_balancedSpeechProbabilityPosition =
+		(m_balancedSpeechProbabilityPosition + 1) % balancedVoiceActivityHistoryFrames;
+	const float nearbySpeechProbability =
+		*std::max_element(m_balancedSpeechProbabilities.cbegin(), m_balancedSpeechProbabilities.cend());
+
+	if (nearbySpeechProbability >= speechProbabilityThreshold) {
+		m_balancedSpeechHoldFrames = tailHoldFrames;
+	} else if (m_balancedSpeechHoldFrames > 0) {
+		--m_balancedSpeechHoldFrames;
+	}
+	// A weak estimate is treated as possible speech, so an uncertain consonant
+	// keeps the qualified speech-time protection rather than being removed.
+	const bool speechContext =
+		nearbySpeechProbability >= weakSpeechProbabilityThreshold || m_balancedSpeechHoldFrames > 0;
+	const float targetMix = speechContext ? edgeProtectedMixFactor : 1.0f;
+
+	// Within speech the qualified mix and its edge ramps apply exactly. Moving
+	// towards dry is immediate: the speech estimate runs ahead of this frame, so
+	// speech never arrives during the transition.
+	if (speechContext || m_balancedWetMix < 0.0f || targetMix <= m_balancedWetMix) {
+		m_balancedWetMix = targetMix;
+	} else {
+		m_balancedWetMix = std::min(targetMix, m_balancedWetMix + wetMixRisePerFrame);
+	}
+	return m_balancedWetMix;
 }
 
 bool Pipeline::processFrame(std::array< float, frameSamples > &samples) noexcept {

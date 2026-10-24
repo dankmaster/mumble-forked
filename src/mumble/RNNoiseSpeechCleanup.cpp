@@ -156,6 +156,10 @@ bool RNNoiseSpeechCleanup::usedFallback() const {
 	return m_usedFallback;
 }
 
+float RNNoiseSpeechCleanup::lastSpeechProbability() const noexcept {
+	return m_lastSpeechProbability;
+}
+
 void RNNoiseSpeechCleanup::reset() {
 #ifdef USE_RNNOISE
 	m_inputBuffer.fill(0.0f);
@@ -164,6 +168,7 @@ void RNNoiseSpeechCleanup::reset() {
 	m_outputBufferPosition = FRAME_SIZE;
 	m_dryDelayBuffer.fill(0.0f);
 	m_dryDelayPosition = 0;
+	m_lastSpeechProbability = -1.0f;
 
 	if (m_state) {
 		rnnoise_destroy(m_state);
@@ -292,7 +297,9 @@ void RNNoiseSpeechCleanup::processInPlace(float *samples, unsigned int sampleCou
 		if (m_inputBufferSize == FRAME_SIZE) {
 			// The previous frame has been consumed exactly when the next frame is
 			// ready, so a fixed frame buffer is sufficient and never overwritten.
-			rnnoise_process_frame(m_state, m_outputBuffer.data(), m_inputBuffer.data());
+			const float speechProbability = rnnoise_process_frame(m_state, m_outputBuffer.data(), m_inputBuffer.data());
+			m_lastSpeechProbability = std::isfinite(speechProbability) ? std::clamp(speechProbability, 0.0f, 1.0f)
+																	   : -1.0f;
 			m_inputBufferSize = 0;
 			m_outputBufferPosition = 0;
 		}

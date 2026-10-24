@@ -13,7 +13,7 @@
       "latencyBudgetMs": 0,
       "minimumCpuClass": "Low",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -27,7 +27,7 @@
       "latencyBudgetMs": 10,
       "minimumCpuClass": "Low",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -41,7 +41,7 @@
       "latencyBudgetMs": 30,
       "minimumCpuClass": "Standard",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -55,7 +55,7 @@
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -69,7 +69,7 @@
       "latencyBudgetMs": 10,
       "minimumCpuClass": "Low",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -83,7 +83,7 @@
       "latencyBudgetMs": 30,
       "minimumCpuClass": "Standard",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -97,7 +97,7 @@
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -111,7 +111,7 @@
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1
     },
     {
@@ -125,7 +125,7 @@
       "latencyBudgetMs": 30,
       "minimumCpuClass": "Standard",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -140,7 +140,7 @@
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -155,7 +155,7 @@
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -170,7 +170,7 @@
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     },
@@ -185,7 +185,7 @@
       "latencyBudgetMs": 50,
       "minimumCpuClass": "High",
       "executionSemanticsVersion": 8,
-      "mixCurveVersion": 6,
+      "mixCurveVersion": 7,
       "adaptationPolicyVersion": 1,
       "advancedOnly": true
     }

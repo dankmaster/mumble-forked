@@ -66,6 +66,14 @@ public:
 	virtual bool usedFallback() const {
 		return false;
 	}
+	/// Speech probability in [0, 1] that the model reported for the newest
+	/// input frame it has analysed, or a negative value when the engine has no
+	/// voice-activity output or has not analysed a frame since reset(). Because
+	/// processInPlace() emits a delayed timeline, this value runs ahead of the
+	/// audio that the next call will return.
+	virtual float lastSpeechProbability() const noexcept {
+		return -1.0f;
+	}
 	/// Optional asynchronous-inference diagnostics. Synchronous processors keep
 	/// the default zero values; worker-backed processors expose model execution
 	/// separately from the real-time callback handoff cost.

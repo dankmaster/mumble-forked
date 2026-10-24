@@ -25,6 +25,7 @@ public:
 	QString activeModelId() const override;
 	QString activeModelPath() const override;
 	bool usedFallback() const override;
+	float lastSpeechProbability() const noexcept override;
 
 private:
 	static constexpr unsigned int FRAME_SIZE = 480;
@@ -47,6 +48,7 @@ private:
 	unsigned int m_outputBufferPosition = FRAME_SIZE;
 	std::array< float, LATENCY_SAMPLES > m_dryDelayBuffer = {};
 	unsigned int m_dryDelayPosition = 0;
+	float m_lastSpeechProbability = -1.0f;
 };
 
 #endif // MUMBLE_MUMBLE_RNNOISESPEECHCLEANUP_H_
