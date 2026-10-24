@@ -294,6 +294,22 @@ TestCase {
 		tryCompare(controls, "embeddedNarrow", true)
 		verify(!embeddedTime.visible)
 		verify(embeddedSeek.visible && embeddedSeek.width >= 72)
+
+		// A YouTube Short's portrait player: one row, the slider gives way, and
+		// play, volume and close stay inside it. A card's player has no fullscreen.
+		controls.fullscreenAvailable = false
+		testCase.width = 200
+		tryVerify(() => !embeddedSeek.visible)
+		compare(controls.implicitHeight, Theme.controlHeight + Theme.space2)
+		const close = findChild(controls, "mediaCloseButton")
+		verify(close.visible)
+		const flow = findChild(controls, "mediaTransportActions")
+		const layout = () => "flow=" + flow.width + " " + flow.children.filter(child => child.visible)
+			.map(child => (child.objectName || "?") + "@" + Math.round(child.x) + "," + Math.round(child.y)
+				+ "w" + Math.round(child.width)).join(" ")
+		tryVerify(() => close.y + close.height <= Theme.controlHeight + 0.5
+			&& close.x + close.width <= flow.width + 0.5, 1000, "close stays on the first row: " + layout())
+		controls.fullscreenAvailable = true
 	}
 
 	function test_long_action_labels_wrap_inside_the_minimum_width() {

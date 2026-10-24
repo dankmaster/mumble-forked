@@ -166,9 +166,13 @@ Rectangle {
 		closePromptInitialFocusTimer.stop()
 	}
 
+	// A card's player is one row of controls: in a narrow portrait player an
+	// empty wrapped row made the bar twice as tall as its buttons and pushed the
+	// player out of the card. Anything that would wrap is clipped instead.
 	implicitHeight: embedded
-		? Math.max(Theme.controlHeight, transportActions.childrenRect.height) + Theme.space2
+		? Theme.controlHeight + Theme.space2
 		: controlsLayout.implicitHeight + Theme.space4
+	clip: embedded
 	color: embedded ? Theme.embedSurface : Theme.chatSurface
 	border.color: embedded ? Theme.embedBorder : Theme.surfaceBorder
 	Accessible.role: Accessible.ToolBar
@@ -243,7 +247,9 @@ Rectangle {
 			Layout.fillWidth: true
 			Layout.minimumHeight: Theme.controlHeight
 			Layout.preferredHeight: Math.max(Theme.controlHeight, childrenRect.height)
-			spacing: Theme.space2
+			// A ~200 px portrait player fits play, volume and close only with
+			// tighter gaps.
+			spacing: root.embedded && root.width < 260 ? Theme.space1 : Theme.space2
 
 			ModernIconButton {
 				id: playButton
