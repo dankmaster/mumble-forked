@@ -56,6 +56,7 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(bool canConnect READ canConnect WRITE setCanConnect NOTIFY canConnectChanged)
 	Q_PROPERTY(bool canCancel READ canCancel WRITE setCanCancel NOTIFY canCancelChanged)
 	Q_PROPERTY(QString selfName READ selfName WRITE setSelfName NOTIFY selfNameChanged)
+	Q_PROPERTY(QString selfAvatarUrl READ selfAvatarUrl WRITE setSelfAvatarUrl NOTIFY selfAvatarUrlChanged)
 	Q_PROPERTY(bool connected READ connected WRITE setConnected NOTIFY connectedChanged)
 	Q_PROPERTY(bool selfMuted READ selfMuted WRITE setSelfMuted NOTIFY selfMutedChanged)
 	Q_PROPERTY(bool selfDeafened READ selfDeafened WRITE setSelfDeafened NOTIFY selfDeafenedChanged)
@@ -92,6 +93,7 @@ public:
 	bool canConnect() const;
 	bool canCancel() const;
 	QString selfName() const;
+	QString selfAvatarUrl() const;
 	bool connected() const;
 	bool selfMuted() const;
 	bool selfDeafened() const;
@@ -125,6 +127,7 @@ public:
 	void setCanConnect(bool value);
 	void setCanCancel(bool value);
 	void setSelfName(const QString &value);
+	void setSelfAvatarUrl(const QString &value);
 	void setConnected(bool value);
 	void setSelfMuted(bool value);
 	void setSelfDeafened(bool value);
@@ -156,6 +159,7 @@ signals:
 	void canConnectChanged();
 	void canCancelChanged();
 	void selfNameChanged();
+	void selfAvatarUrlChanged();
 	void connectedChanged();
 	void selfMutedChanged();
 	void selfDeafenedChanged();
@@ -191,6 +195,7 @@ private:
 	bool m_canConnect = true;
 	bool m_canCancel = false;
 	QString m_selfName = QStringLiteral("You");
+	QString m_selfAvatarUrl;
 	bool m_connected = false;
 	bool m_selfMuted = false;
 	bool m_selfDeafened = false;

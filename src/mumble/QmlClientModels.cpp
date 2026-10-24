@@ -1787,6 +1787,7 @@ int ClientSessionController::connectionRetryRemainingMs() const { return m_conne
 bool ClientSessionController::canConnect() const { return m_canConnect; }
 bool ClientSessionController::canCancel() const { return m_canCancel; }
 QString ClientSessionController::selfName() const { return m_selfName; }
+QString ClientSessionController::selfAvatarUrl() const { return m_selfAvatarUrl; }
 bool ClientSessionController::connected() const { return m_connected; }
 bool ClientSessionController::selfMuted() const { return m_selfMuted; }
 bool ClientSessionController::selfDeafened() const { return m_selfDeafened; }
@@ -1866,6 +1867,7 @@ void ClientSessionController::setConnectionRetryRemainingMs(const int value) {
 void ClientSessionController::setCanConnect(const bool value) { SET_VALUE(m_canConnect, canConnectChanged); }
 void ClientSessionController::setCanCancel(const bool value) { SET_VALUE(m_canCancel, canCancelChanged); }
 void ClientSessionController::setSelfName(const QString &value) { SET_VALUE(m_selfName, selfNameChanged); }
+void ClientSessionController::setSelfAvatarUrl(const QString &value) { SET_VALUE(m_selfAvatarUrl, selfAvatarUrlChanged); }
 void ClientSessionController::setConnected(bool value) { SET_VALUE(m_connected, connectedChanged); }
 void ClientSessionController::setSelfMuted(bool value) { SET_VALUE(m_selfMuted, selfMutedChanged); }
 void ClientSessionController::setSelfDeafened(bool value) { SET_VALUE(m_selfDeafened, selfDeafenedChanged); }
@@ -1988,7 +1990,7 @@ QVariantMap ClientSessionController::roomUpdateState(const QVariantMap &state) {
 			 "directMessages", "connected", "connectionLabel", "connectionState",
 			 "connectionTone", "connectionTooltip", "connectionRetryRemainingMs",
 			 "canConnect", "canCancelConnection", "selfStatusLabel", "selfName",
-			 "selfMuted", "selfDeafened", "collapsedNavigationSections",
+			 "selfMuted", "selfDeafened", "selfAvatarUrl", "collapsedNavigationSections",
 			 "motdExpanded", "motdDismissedSignature", "motdLastSeenSignature" }) {
 		const QString field = QString::fromLatin1(key);
 		const auto value = state.constFind(field);
@@ -2044,6 +2046,7 @@ void ClientSessionController::applyState(const QVariantMap &state) {
 		mumble::chatperf::ScopedDuration trace("qml.session.apply.menus");
 		if (state.contains(QStringLiteral("menus"))) setAppMenus(state.value(QStringLiteral("menus")).toList());
 		if (state.contains(QStringLiteral("selfMenu"))) setSelfMenu(state.value(QStringLiteral("selfMenu")).toMap());
+		if (state.contains(QStringLiteral("selfAvatarUrl"))) setSelfAvatarUrl(state.value(QStringLiteral("selfAvatarUrl")).toString());
 	}
 	{
 		mumble::chatperf::ScopedDuration trace("qml.session.apply.global");

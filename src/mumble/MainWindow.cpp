@@ -27180,7 +27180,10 @@ QVariantMap MainWindow::buildQmlRoomState() {
 	selfMenu.insert(QStringLiteral("name"), appState.value(QStringLiteral("selfName")));
 	selfMenu.insert(QStringLiteral("statusLabel"), appState.value(QStringLiteral("selfStatusLabel")));
 	selfMenu.insert(QStringLiteral("statusTone"), appState.value(QStringLiteral("selfStatusTone")));
-	selfMenu.insert(QStringLiteral("avatarUrl"), modernShellAvatarDataUrl(selfUser, 56));
+	const QString selfAvatarUrl = modernShellAvatarDataUrl(selfUser, 56);
+	selfMenu.insert(QStringLiteral("avatarUrl"), selfAvatarUrl);
+	// Room updates carry this, not the menus: the picture often arrives after them.
+	appState.insert(QStringLiteral("selfAvatarUrl"), selfAvatarUrl);
 	QVariantList selfPresenceItems;
 	const auto appendSelfPresenceItem = [&selfPresenceItems, connected, selfPresenceState](
 											const QString &id, ServerNavigatorPresenceState state, const QString &tone,

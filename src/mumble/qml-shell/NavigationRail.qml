@@ -2573,8 +2573,8 @@ Rectangle {
 							objectName: "selfAvatar"
 							Layout.preferredWidth: Theme.avatarMedium
 							Layout.preferredHeight: Theme.avatarMedium
-							source: navigationRail.safeAvatarSource(
-								((clientSession.selfMenu || ({})).avatarUrl) || "")
+							source: navigationRail.safeAvatarSource(clientSession.selfAvatarUrl
+								|| ((clientSession.selfMenu || ({})).avatarUrl) || "")
 							fallbackText: clientSession.selfName.length > 0
 								? clientSession.selfName.slice(0, 1).toUpperCase() : "?"
 							backgroundColor: Theme.accentSubtle
