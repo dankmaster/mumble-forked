@@ -15266,6 +15266,17 @@ void MainWindow::applyShellLayout() {
 							static_cast< unsigned int >(session));
 						if (handleModernShellScopeSelection(token)) openPersistentChatImagePicker();
 					});
+			directMessages->setPasteHandler([this, composer](const QString &sessionID) -> bool {
+				bool validSession = false;
+				const qulonglong session = sessionID.toULongLong(&validSession);
+				if (!validSession || session > std::numeric_limits< unsigned int >::max()) return false;
+				const QString token = modernShellScopeToken(LocalDirectMessageScope,
+					static_cast< unsigned int >(session));
+				if (!handleModernShellScopeSelection(token)) return false;
+				const bool attached = composer && composer->pasteFromClipboard();
+				if (attached) publishQmlDirectMessagesState();
+				return attached;
+			});
 			connect(directMessages, &DirectMessageController::draftAttachmentRemoveRequested, this,
 					[composer](const QString &, const QString &attachmentID) { composer->removeAttachment(attachmentID); });
 			connect(directMessages, &DirectMessageController::draftAttachmentRetryRequested, this,
@@ -30129,6 +30140,7 @@ bool MainWindow::notifyForkUpdateAvailable(const QJsonObject &info, const bool a
 
 bool MainWindow::handleModernVersionCheckResult(const QJsonObject &info, const bool updateAvailable,
 												const bool autocheck) {
+	m_modernVersionCheckRetryPending = false;
 	if (autocheck) {
 		if (updateAvailable && !modernUpdateSnoozed(info)) {
 			notifyForkUpdateAvailable(info, autocheck);
@@ -30148,11 +30160,36 @@ bool MainWindow::handleModernVersionCheckResult(const QJsonObject &info, const b
 
 bool MainWindow::handleModernVersionCheckFailure(const QString &message, const bool autocheck) {
 	if (autocheck) {
+		if (m_modernPeriodicVersionCheckTimer && !m_modernVersionCheckRetryPending
+			&& Global::get().s.bUpdateCheck && !m_modernUpdateDownloadInProgress) {
+			m_modernVersionCheckRetryPending = true;
+			QTimer::singleShot(5 * 60 * 1000, this, [this]() {
+				m_modernVersionCheckRetryPending = false;
+				if (Global::get().s.bUpdateCheck && !m_modernUpdateDownloadInProgress) {
+					new VersionCheck(true, this);
+				}
+			});
+		}
 		return true;
 	}
 
 	openModernVersionCheckFailureDialog(message);
 	return true;
+}
+
+void MainWindow::startAutomaticVersionCheckSchedule() {
+	if (m_modernPeriodicVersionCheckTimer) {
+		return;
+	}
+	m_modernPeriodicVersionCheckTimer = new QTimer(this);
+	m_modernPeriodicVersionCheckTimer->setInterval(6 * 60 * 60 * 1000);
+	connect(m_modernPeriodicVersionCheckTimer, &QTimer::timeout, this, [this]() {
+		m_modernVersionCheckRetryPending = false;
+		if (Global::get().s.bUpdateCheck && !m_modernUpdateDownloadInProgress) {
+			new VersionCheck(true, this);
+		}
+	});
+	m_modernPeriodicVersionCheckTimer->start();
 }
 
 bool MainWindow::startModernForkUpdateDownload() {

@@ -914,6 +914,7 @@ public:
 	bool notifyForkUpdateAvailable(const QJsonObject &info, bool autocheck);
 	bool handleModernVersionCheckResult(const QJsonObject &info, bool updateAvailable, bool autocheck);
 	bool handleModernVersionCheckFailure(const QString &message, bool autocheck);
+	void startAutomaticVersionCheckSchedule();
 	bool startModernForkUpdateDownload();
 	bool startModernForkUpdateDownload(const QJsonObject &info);
 	bool restartForPreparedForkUpdate();
@@ -1292,6 +1293,8 @@ protected:
 	qint64 m_modernUpdateLastProgressPublishMs = 0;
 	int m_modernUpdateLastProgressPercent      = -1;
 	bool m_modernUpdateDownloadInProgress = false;
+	QTimer *m_modernPeriodicVersionCheckTimer = nullptr;
+	bool m_modernVersionCheckRetryPending     = false;
 	QMetaObject::Connection m_modernShortcutCaptureConnection;
 	int m_modernShortcutCaptureRow = -1;
 	bool m_modernShortcutCaptureRestoreEnabled = false;

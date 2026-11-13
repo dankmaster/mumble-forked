@@ -490,9 +490,10 @@ jobs:
               url = $packageUrl
               sha256 = $packageHash.Hash
               size = [int64]$packageSize
-              # Updater-v2 clients reject this package and use the verified MSI
-              # fields above. Current updater-v4 clients select the package.
-              minUpdaterVersion = 3
+              # Older clients (updater-v2/v3 and pre-sparse v4) reject this v4
+              # package and use the verified MSI fields above. Current
+              # base-matched clients in writable installs select the package.
+              minUpdaterVersion = [int]$packageMetadata.minUpdaterVersion
               applyMode = "replace-staged-payload"
               payloadMode = [string]$packageMetadata.payloadMode
               payloadFileCount = [int]$packageMetadata.payloadFileCount

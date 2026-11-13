@@ -1103,6 +1103,7 @@ int main(int argc, char **argv) {
 #	ifndef SNAPSHOT_BUILD
 		// release build
 		new VersionCheck(true, Global::get().mw);
+		Global::get().mw->startAutomaticVersionCheckSchedule();
 #	else
 		// snapshot build
 		new VersionCheck(false, Global::get().mw, true);

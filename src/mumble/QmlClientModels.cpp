@@ -5085,6 +5085,18 @@ void DirectMessageController::chooseAttachment() {
 	}
 }
 
+bool DirectMessageController::pasteFromClipboard() {
+	if (m_activeSessionId.isEmpty() || !canSend() || (!canAttachImages() && !canAttachFiles())) {
+		return false;
+	}
+	emit attachmentPasteRequested(m_activeSessionId);
+	return m_pasteHandler ? m_pasteHandler(m_activeSessionId) : false;
+}
+
+void DirectMessageController::setPasteHandler(std::function< bool(const QString &) > handler) {
+	m_pasteHandler = std::move(handler);
+}
+
 void DirectMessageController::removeDraftAttachment(const QString &attachmentId) {
 	const QString id = attachmentId.trimmed();
 	if (!m_activeSessionId.isEmpty() && !id.isEmpty()) emit draftAttachmentRemoveRequested(m_activeSessionId, id);

@@ -750,6 +750,8 @@ public:
 	Q_INVOKABLE void deleteMessage(const QString &messageId);
 	Q_INVOKABLE void toggleMessageReaction(const QString &messageId, const QString &emoji);
 	Q_INVOKABLE void chooseAttachment();
+	Q_INVOKABLE bool pasteFromClipboard();
+	void setPasteHandler(std::function< bool(const QString &) > handler);
 	Q_INVOKABLE void removeDraftAttachment(const QString &attachmentId);
 	Q_INVOKABLE void retryDraftAttachment(const QString &attachmentId);
 	Q_INVOKABLE void openAttachment(const QString &assetId, const QString &fileName);
@@ -780,6 +782,7 @@ signals:
 	void messageReactionToggleRequested(const QString &sessionId, const QString &messageId,
 								const QString &emoji);
 	void attachmentChooseRequested(const QString &sessionId);
+	void attachmentPasteRequested(const QString &sessionId);
 	void draftAttachmentRemoveRequested(const QString &sessionId, const QString &attachmentId);
 	void draftAttachmentRetryRequested(const QString &sessionId, const QString &attachmentId);
 	void attachmentOpenRequested(const QString &sessionId, unsigned int assetId, const QString &fileName);
@@ -808,6 +811,7 @@ private:
 	bool m_trayOpen = false;
 	bool m_windowDocked = false;
 	bool m_windowMinimized = false;
+	std::function< bool(const QString &) > m_pasteHandler;
 };
 
 class ToastController final : public QObject {

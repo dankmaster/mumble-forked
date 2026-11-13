@@ -486,6 +486,17 @@ Window {
 			}
 			event.accepted = true
 		}
+		Keys.onPressed: event => {
+			if (event.matches(StandardKey.Paste) && !composer.activeFocus && !root.conversationSearchOpen) {
+				const attached = controller
+					&& (controller.canAttachImages || controller.canAttachFiles)
+					&& controller.pasteFromClipboard()
+				if (attached) {
+					root.activateComposer()
+					event.accepted = true
+				}
+			}
+		}
 
 		ColumnLayout {
 			anchors.fill: parent
@@ -1750,7 +1761,21 @@ Window {
 							Accessible.description: qsTr("Press Enter to send. Press Shift+Enter for a new line.")
 							Component.onCompleted: text = controller ? String(controller.draft || "") : ""
 							onTextChanged: if (controller && text !== String(controller.draft || "")) controller.setDraft(text)
+							Keys.priority: Keys.BeforeItem
+							Keys.onShortcutOverride: event => {
+								if (event.matches(StandardKey.Paste))
+									event.accepted = true
+							}
 							Keys.onPressed: event => {
+								if (event.matches(StandardKey.Paste)) {
+									const attached = controller
+										&& (controller.canAttachImages || controller.canAttachFiles)
+										&& controller.pasteFromClipboard()
+									if (!attached)
+										composer.paste()
+									event.accepted = true
+									return
+								}
 								if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
 									&& !(event.modifiers & Qt.ShiftModifier)) {
 									root.sendCurrentDraft()

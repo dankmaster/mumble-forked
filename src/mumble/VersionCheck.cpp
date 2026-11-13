@@ -302,9 +302,33 @@ bool canUsePackageUpdate(const QJsonObject &info) {
 		return false;
 	}
 
-	return isTrustedUpdateAssetUrl(packageDownloadUrl(info)) && !packageExpectedSha256(info).isEmpty()
-		   && packageExpectedSize(info) > 0
-		   && (minUpdaterVersion < 4 || canUseRecoveryInstaller(info));
+	const QString payloadMode = package.value(QStringLiteral("payloadMode")).toString().trimmed().toLower();
+	if (payloadMode == QLatin1String("sparse")) {
+		const int baseBuild    = jsonInt(package, QStringLiteral("baseBuild"), -1);
+		const int currentBuild = Version::getPatch(Version::get());
+		if (baseBuild <= 0 || currentBuild != baseBuild) {
+			return false;
+		}
+	}
+
+	if (!isTrustedUpdateAssetUrl(packageDownloadUrl(info)) || packageExpectedSha256(info).isEmpty()
+		|| packageExpectedSize(info) <= 0) {
+		return false;
+	}
+
+	if (minUpdaterVersion >= 4 && !canUseRecoveryInstaller(info)) {
+#if defined(MUMBLE_UNSIGNED_COMMUNITY_RELEASE)
+		return canUseInstallerUpdate(info);
+#else
+		if (info.contains(QStringLiteral("recoveryInstallers"))
+			|| !Mumble::InputEnhancement::configuredPolicyPublicKey().isEmpty()) {
+			return false;
+		}
+		return canUseInstallerUpdate(info);
+#endif
+	}
+
+	return true;
 #else
 	Q_UNUSED(info);
 	return false;
@@ -1108,9 +1132,13 @@ private:
 	}
 
 	void prepareRecoveryOrFinish() {
+		const bool requiresRecoveryInstaller =
+			m_info.contains(QStringLiteral("recoveryInstallers"))
+			|| !Mumble::InputEnhancement::configuredPolicyPublicKey().isEmpty();
 		const bool protocolPackage =
 			m_updateMode == QLatin1String("package")
-			&& jsonInt(packageObject(m_info), QStringLiteral("minUpdaterVersion"), -1) >= 4;
+			&& jsonInt(packageObject(m_info), QStringLiteral("minUpdaterVersion"), -1) >= 4
+			&& requiresRecoveryInstaller;
 		const bool qualifiedInstaller =
 			m_updateMode == QLatin1String("installer") && canUseRecoveryInstaller(m_info);
 		if (!protocolPackage && !qualifiedInstaller) {
@@ -1499,6 +1527,10 @@ void VersionCheck::performRequest() {
 		request(configuredManifestUrl(), RequestKind::Manifest);
 	} else if (!qEnvironmentVariable("MUMBLE_FORK_UPDATE_URL").trimmed().isEmpty()) {
 		request(configuredReleaseApiUrl(), RequestKind::Release);
+	} else if (!qEnvironmentVariable("MUMBLE_FORK_UPDATE_CHANNEL_POINTER_URL").trimmed().isEmpty()) {
+		const QUrl pointerUrl        = configuredChannelPointerUrl();
+		m_channelPointerSignatureURL = channelPointerSignatureUrl(pointerUrl);
+		request(pointerUrl, RequestKind::ChannelPointer);
 #if defined(MUMBLE_UNSIGNED_COMMUNITY_RELEASE)
 	} else {
 		// The public mumble-forked community lane is intentionally keyless and
@@ -1506,6 +1538,11 @@ void VersionCheck::performRequest() {
 		// compatibility manifest.
 		request(configuredManifestUrl(), RequestKind::Manifest);
 #else
+	} else if (Mumble::InputEnhancement::configuredPolicyPublicKey().isEmpty()) {
+		// Builds compiled without an embedded release public key (such as local or
+		// community builds) fall back to the public compatibility manifest instead
+		// of requesting an unreachable signed channel pointer.
+		request(configuredManifestUrl(), RequestKind::Manifest);
 	} else {
 		const QUrl pointerUrl        = configuredChannelPointerUrl();
 		m_channelPointerSignatureURL = channelPointerSignatureUrl(pointerUrl);

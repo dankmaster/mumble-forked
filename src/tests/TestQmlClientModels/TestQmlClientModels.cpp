@@ -2796,6 +2796,7 @@ void TestQmlClientModels::directMessageControllerRoutesRichMessageIntents() {
 	QSignalSpy deleteSpy(&controller, &DirectMessageController::messageDeleteRequested);
 	QSignalSpy reactionSpy(&controller, &DirectMessageController::messageReactionToggleRequested);
 	QSignalSpy chooseSpy(&controller, &DirectMessageController::attachmentChooseRequested);
+	QSignalSpy pasteSpy(&controller, &DirectMessageController::attachmentPasteRequested);
 	QSignalSpy removeAttachmentSpy(&controller, &DirectMessageController::draftAttachmentRemoveRequested);
 	QSignalSpy retryAttachmentSpy(&controller, &DirectMessageController::draftAttachmentRetryRequested);
 	QSignalSpy openAttachmentSpy(&controller, &DirectMessageController::attachmentOpenRequested);
@@ -2862,6 +2863,15 @@ void TestQmlClientModels::directMessageControllerRoutesRichMessageIntents() {
 	controller.deleteMessage(QStringLiteral("41"));
 	controller.toggleMessageReaction(QStringLiteral("41"), QStringLiteral(" 👍 "));
 	controller.chooseAttachment();
+	int pasteHandlerCalls = 0;
+	controller.setPasteHandler([&pasteHandlerCalls](const QString &sessionId) {
+		++pasteHandlerCalls;
+		return sessionId == QLatin1String("7");
+	});
+	QVERIFY(controller.pasteFromClipboard());
+	QCOMPARE(pasteSpy.count(), 1);
+	QCOMPARE(pasteSpy.first().at(0).toString(), QStringLiteral("7"));
+	QCOMPARE(pasteHandlerCalls, 1);
 	controller.removeDraftAttachment(QStringLiteral("draft:1"));
 	controller.retryDraftAttachment(QStringLiteral("draft:1"));
 	controller.openAttachment(QStringLiteral("52"), QStringLiteral("folder/report.pdf"));
@@ -7114,6 +7124,24 @@ void TestQmlClientModels::updateInstallerFallbackIsLazyAndPackageBound() {
 	const QString preparedFallbackBody =
 		source.mid(preparedFallbackStart, preparedFallbackEnd - preparedFallbackStart);
 	QVERIFY(preparedFallbackBody.contains(QStringLiteral("fileMatchesSha256")));
+
+	const qsizetype canUsePackageStart =
+		source.indexOf(QStringLiteral("bool canUsePackageUpdate(const QJsonObject &info)"));
+	const qsizetype canUsePackageEnd =
+		source.indexOf(QStringLiteral("\nbool installerFallbackWasRequested"), canUsePackageStart);
+	QVERIFY(canUsePackageStart >= 0);
+	QVERIFY(canUsePackageEnd > canUsePackageStart);
+	const QString canUsePackageBody = source.mid(canUsePackageStart, canUsePackageEnd - canUsePackageStart);
+	QVERIFY(canUsePackageBody.contains(QStringLiteral("payloadMode")));
+	QVERIFY(canUsePackageBody.contains(QStringLiteral("baseBuild")));
+
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QFile mainWindowFile(mainWindowPath);
+	QVERIFY(mainWindowFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString mainWindowSource = QString::fromUtf8(mainWindowFile.readAll());
+	QVERIFY(mainWindowSource.contains(QStringLiteral("void MainWindow::startAutomaticVersionCheckSchedule()")));
+	QVERIFY(mainWindowSource.contains(QStringLiteral("m_modernPeriodicVersionCheckTimer->start()")));
 }
 
 void TestQmlClientModels::sessionPublishesTypedStonksState() {

@@ -335,6 +335,27 @@ void TestComposerController::ingestsClipboardImageAndSendsWithoutText() {
 							  .toLocalFile();
 	QVERIFY(!temporaryPath.isEmpty());
 	QVERIFY(QFileInfo::exists(temporaryPath));
+	const QString expectedTempRoot = QDir::cleanPath(QDir::tempPath());
+	QVERIFY2(QDir::cleanPath(temporaryPath).startsWith(expectedTempRoot, Qt::CaseInsensitive),
+			 qPrintable(QStringLiteral("Expected clipboard temp file %1 under %2")
+							.arg(temporaryPath, expectedTempRoot)));
+
+	QMimeData rawPngData;
+	rawPngData.setUrls({ QUrl(QStringLiteral("https://example.com/photo.png")) });
+	rawPngData.setData(QStringLiteral("image/png"), pngBytes());
+	QVERIFY(controller.ingestMimeData(rawPngData));
+	QCOMPARE(controller.attachments()->rowCount(), 2);
+	QTRY_COMPARE_WITH_TIMEOUT(statusAt(controller.attachments(), 1), QStringLiteral("ready"), 5000);
+	const QString secondTempPath = controller.attachments()
+							   ->data(controller.attachments()->index(1), DraftAttachmentModel::LocalUrlRole)
+							   .toUrl()
+							   .toLocalFile();
+	QVERIFY(QFileInfo::exists(secondTempPath));
+	controller.removeAttachment(controller.attachments()
+								  ->data(controller.attachments()->index(1), DraftAttachmentModel::IdRole)
+								  .toString());
+	QVERIFY(!QFileInfo::exists(secondTempPath));
+	QCOMPARE(controller.attachments()->rowCount(), 1);
 
 	int requestCount = 0;
 	QString submittedText;

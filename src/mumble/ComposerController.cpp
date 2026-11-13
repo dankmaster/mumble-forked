@@ -11,6 +11,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QSet>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUuid>
 #include <QtGui/QClipboard>
@@ -20,6 +21,32 @@
 #include <QtGui/QPixmap>
 
 #include <utility>
+
+namespace {
+std::unique_ptr< QTemporaryDir > createClipboardTemporaryDirectory() {
+	const QString tempRoot = QDir::tempPath();
+	if (!tempRoot.isEmpty()) {
+		QDir().mkpath(tempRoot);
+		auto dir = std::make_unique< QTemporaryDir >(
+			QDir(tempRoot).filePath(QStringLiteral("mumble-chat-paste-XXXXXX")));
+		if (dir->isValid()) {
+			return dir;
+		}
+	}
+
+	const QString appDataRoot = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+	if (!appDataRoot.isEmpty()) {
+		QDir().mkpath(appDataRoot);
+		auto dir = std::make_unique< QTemporaryDir >(
+			QDir(appDataRoot).filePath(QStringLiteral("mumble-chat-paste-XXXXXX")));
+		if (dir->isValid()) {
+			return dir;
+		}
+	}
+
+	return std::make_unique< QTemporaryDir >(QStringLiteral("mumble-chat-paste-XXXXXX"));
+}
+} // namespace
 
 DraftAttachmentModel::DraftAttachmentModel(QObject *parent) : QAbstractListModel(parent) {
 }
@@ -151,7 +178,7 @@ ComposerController::ComposerController(std::shared_ptr< QmlImagePipeline > pipel
 	  m_attachments(this) {
 	m_validationPool->setMaxThreadCount(MaxValidationWorkers);
 	m_validationPool->setExpiryTimeout(5000);
-	m_clipboardDirectory = std::make_unique< QTemporaryDir >(QStringLiteral("mumble-chat-paste-XXXXXX"));
+	m_clipboardDirectory = createClipboardTemporaryDirectory();
 }
 
 ComposerController::~ComposerController() {
@@ -275,26 +302,43 @@ bool ComposerController::ingestMimeData(const QMimeData &mimeData) {
 		}
 	}
 	if (!localUrls.isEmpty()) {
-		addUrls(localUrls);
-		return true;
+		if (addUrls(localUrls) > 0) {
+			return true;
+		}
+		if (m_attachments.rowCount() >= m_maximumAttachmentCount) {
+			return false;
+		}
 	}
 
-	if (!mimeData.hasImage()) {
-		return false;
+	QImage image;
+	if (mimeData.hasImage()) {
+		const QVariant imageData = mimeData.imageData();
+		image                    = qvariant_cast< QImage >(imageData);
+		if (image.isNull()) {
+			const QPixmap pixmap = qvariant_cast< QPixmap >(imageData);
+			if (!pixmap.isNull()) {
+				image = pixmap.toImage();
+			}
+		}
 	}
-	const QVariant imageData = mimeData.imageData();
-	QImage image             = qvariant_cast< QImage >(imageData);
 	if (image.isNull()) {
-		const QPixmap pixmap = qvariant_cast< QPixmap >(imageData);
-		if (!pixmap.isNull()) {
-			image = pixmap.toImage();
+		static const char *const kImageMimeFormats[] = {
+			"image/png", "PNG", "image/webp", "image/jpeg", "image/gif", "image/bmp",
+		};
+		for (const char *format : kImageMimeFormats) {
+			if (!mimeData.hasFormat(QLatin1String(format))) {
+				continue;
+			}
+			const QByteArray payload = mimeData.data(QLatin1String(format));
+			if (!payload.isEmpty() && image.loadFromData(payload)) {
+				break;
+			}
 		}
 	}
 	if (image.isNull()) {
 		return false;
 	}
-	addImage(image);
-	return true;
+	return addImage(image);
 }
 
 bool ComposerController::addImage(const QImage &image, const QString &suggestedName) {
@@ -304,6 +348,9 @@ bool ComposerController::addImage(const QImage &image, const QString &suggestedN
 	if (m_attachments.rowCount() >= m_maximumAttachmentCount) {
 		emit attachmentRejected(tr("A message can contain at most %1 attachments.").arg(m_maximumAttachmentCount));
 		return false;
+	}
+	if (!m_clipboardDirectory || !m_clipboardDirectory->isValid()) {
+		m_clipboardDirectory = createClipboardTemporaryDirectory();
 	}
 	if (!m_clipboardDirectory || !m_clipboardDirectory->isValid()) {
 		emit attachmentRejected(tr("Could not create temporary storage for the pasted image."));

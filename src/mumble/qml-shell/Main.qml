@@ -2795,6 +2795,20 @@ ApplicationWindow {
 		onActivated: root.openConversationSearch()
 	}
 
+	Shortcut {
+		sequence: StandardKey.Paste
+		context: Qt.WindowShortcut
+		enabled: !root.modalUiActive && !root.conversationSearchOpen
+			&& !composerInput.activeFocus && composerInput.enabled
+			&& (!root.activeFocusItem || typeof root.activeFocusItem.paste !== "function")
+		onActivated: {
+			const attached = (activeScope.canAttachImages || activeScope.canAttachFiles)
+				&& composer.pasteFromClipboard()
+			if (attached)
+				composerInput.forceActiveFocus()
+		}
+	}
+
     Component {
         id: screenShareViewComponent
         ScreenShareViewWindow { }
@@ -14119,7 +14133,8 @@ ApplicationWindow {
 								}
 								Keys.onPressed: event => {
 									if (event.matches(StandardKey.Paste)) {
-										const attached = activeScope.canAttachImages && composer.pasteFromClipboard()
+										const attached = (activeScope.canAttachImages || activeScope.canAttachFiles)
+											&& composer.pasteFromClipboard()
 										if (!attached)
 											composerInput.paste()
 										event.accepted = true
